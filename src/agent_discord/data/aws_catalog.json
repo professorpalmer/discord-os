@@ -43,18 +43,18 @@
     },
     {
       "aws": "Lambda reserved concurrency",
-      "discord": "JobPool max_live=8; listen write_key is still channel_id",
+      "discord": "JobPool max_live=8 plus per-cwd write lock",
       "module": "src/agent_discord/orchestration/jobs.py",
-      "rank": "now",
-      "note": "realm_write_key(cwd) exists. REST listen and HOST Ask still pass channel_id. Two channels on one tree can implement in parallel.",
+      "rank": "shipped",
+      "note": "Listen and HOST Ask resolve cwd via realm_for_channel. Swarm implement also takes the write lock. Cap 8 is concurrent runners, not a blocked listen loop.",
       "source": "job_d9a1e008889e"
     },
     {
       "aws": "SQS",
       "discord": "REST drain + listen_watermarks snowflake cursor",
       "module": "src/agent_discord/orchestration/listen.py",
-      "rank": "now",
-      "note": "Watermark advances at submit, before claim_inbound_message. Analog: delete the message before the consumer starts. Host death cannot revive it.",
+      "rank": "shipped",
+      "note": "Claim inbound before advancing the watermark, then submit. A crash after claim but before watermark retries as a duplicate skip, not a lost ask.",
       "source": "job_d9a1e008889e"
     },
     {
@@ -173,8 +173,8 @@
       "aws": "Cost Explorer",
       "discord": "HOST Halt / discord-os spend",
       "module": "src/agent_discord/cli.py",
-      "rank": "now",
-      "note": "HOST Halt is panel.py. discord-os spend is this CLI. PuppetmasterCliBackend._SAFE_SUMMARY_KEYS drops cost/tokens even when CLI JSON emits them.",
+      "rank": "shipped",
+      "note": "CLI JSON cost/tokens flow into UsageReceipt metadata. Halt still needs spend_usd_from_usage > 0.",
       "source": "job_25b133796ba5"
     },
     {
@@ -189,8 +189,8 @@
       "aws": "ALB",
       "discord": "listen_channel_ids union of primary + realms + memory",
       "module": "src/agent_discord/host/realms.py",
-      "rank": "now",
-      "note": "REST listen does not poll live job threads, so real Discord steer depends on a path tests cover with FakeDiscord only.",
+      "rank": "shipped",
+      "note": "The host loop also drains live job thread ids. Gateway stays buttons-only.",
       "source": "job_d9a1e008889e"
     },
     {
@@ -277,8 +277,8 @@
       "aws": "Batch / Fargate / App Runner",
       "discord": "Puppetmaster backends on this Mac",
       "module": "src/agent_discord/puppetmaster/backend.py",
-      "rank": "now",
-      "note": "Agentic honors analyze vs implement. PuppetmasterCliBackend argv-locks --implement --allow-dirty. Swarm children remap to implement and skip the write gate.",
+      "rank": "shipped",
+      "note": "Agentic --mode follows compute_mode. Cursor CLI omits --implement on analyze. Swarm still remap-handoffs to implement with a write lock.",
       "source": "job_25b133796ba5"
     },
     {
@@ -317,8 +317,8 @@
       "aws": "ECS Exec / SSM Session",
       "discord": "live-thread steer",
       "module": "src/agent_discord/orchestration/orchestrator.py",
-      "rank": "now",
-      "note": "Listen routes follow-ups to steer and returns True, but PuppetmasterCliBackend.steer only fills _steers which stream() never reads. Card text updates; the worker keeps the original prompt.",
+      "rank": "shipped",
+      "note": "orchestrator.steer fills the backend queue. PuppetmasterCliBackend.stream drains it onto stdin and a state_dir sidecar while the CLI process is live.",
       "source": "job_d9a1e008889e"
     }
   ],
@@ -340,8 +340,8 @@
     {
       "id": "openhands-handle",
       "title": "Durable job handle that survives host restart",
-      "rank": "now",
-      "adapt": "OpenHands asks for job id, spec hash, artifact ids, cancel receipt, idempotency key. Discord is not deleted on submit. The lost-on-crash ack is listen_watermarks. Claim first, then watermark.",
+      "rank": "shipped",
+      "adapt": "Listen claims the Discord message, then watermarks, then submits. run_task skips a second claim when inbound_claimed is set.",
       "source": "https://github.com/OpenHands/OpenHands/issues/14590"
     },
     {
@@ -375,22 +375,22 @@
     {
       "id": "cli-compute-mode",
       "title": "Honor analyze vs implement on the Cursor CLI backend",
-      "rank": "now",
-      "adapt": "PuppetmasterCliBackend always passes --implement --allow-dirty. Agentic already skips implement on questions. Make argv match compute_dispatch_mode.",
+      "rank": "shipped",
+      "adapt": "PuppetmasterCliBackend.cursor_write_argv omits --implement on analyze. Agentic already used --mode.",
       "source": "job_25b133796ba5"
     },
     {
       "id": "thread-poll",
       "title": "REST-poll live job threads so steer is real",
-      "rank": "now",
-      "adapt": "drain_inbound should read_messages on live thread ids with a per-dest watermark. Gateway stays buttons-only. Do not subscribe MESSAGE_CREATE.",
+      "rank": "shipped",
+      "adapt": "The listen loop unions live JobPool/orchestrator thread ids onto REST dests. FakeDiscord treats a thread id as a channel. Gateway stays buttons-only.",
       "source": "job_d9a1e008889e"
     },
     {
       "id": "write-key-cwd",
       "title": "Serialize implement on resolved checkout, not channel id",
-      "rank": "now",
-      "adapt": "Pass realm cwd into JobPool.submit. Treat swarm implement handoff as a write lock.",
+      "rank": "shipped",
+      "adapt": "Listen and HOST Ask pass resolved_write_key(intake, orch). Swarm takes the same write lock as implement.",
       "source": "job_d9a1e008889e"
     }
   ]

@@ -27,6 +27,7 @@ from agent_discord.orchestration.cards import (
     open_card,
     send_card,
 )
+from agent_discord.orchestration.jobs import resolved_write_key
 from agent_discord.orchestration.service import (
     author_may_dispatch,
     is_spend_halted,
@@ -48,6 +49,35 @@ def snowflake_created_ms(message_id: str) -> Optional[int]:
         return (int(message_id) >> 22) + DISCORD_EPOCH_MS
     except (TypeError, ValueError):
         return None
+
+
+def listen_destinations(
+    channel_ids: Sequence[str],
+    *live_sources: Any,
+) -> list[str]:
+    """Primary listen ids plus live job-thread dests. REST polls those too."""
+
+    dests: list[str] = []
+    seen: set[str] = set()
+    for cid in channel_ids:
+        value = str(cid or "").strip()
+        if value and value not in seen:
+            dests.append(value)
+            seen.add(value)
+    for src in live_sources:
+        getter = getattr(src, "live_thread_ids", None)
+        if not callable(getter):
+            continue
+        try:
+            extra = getter()
+        except Exception:
+            extra = ()
+        for tid in extra or ():
+            value = str(tid or "").strip()
+            if value and value not in seen:
+                dests.append(value)
+                seen.add(value)
+    return dests
 
 
 def default_listen_since_ms(*, now_ms: Optional[int] = None) -> int:
@@ -368,6 +398,11 @@ def drain_inbound(
             continue
         follow_thread = _follow_thread_id(message, thread_id, orchestrator, job_pool)
         if follow_thread and _thread_has_running_job(orchestrator, job_pool, follow_thread):
+            if not _claim_inbound(store, discord, message, channel_id):
+                watermark = _advance_listen_watermark(
+                    store, channel_id, created_ms, message.message_id, watermark
+                )
+                continue
             _steer_running_job(
                 orchestrator,
                 discord,
@@ -380,6 +415,13 @@ def drain_inbound(
                 store, channel_id, created_ms, message.message_id, watermark
             )
             continue
+        extra_meta = dict(intake_meta or {})
+        if not _claim_inbound(store, discord, message, channel_id):
+            watermark = _advance_listen_watermark(
+                store, channel_id, created_ms, message.message_id, watermark
+            )
+            continue
+        extra_meta["inbound_claimed"] = True
         intake = TaskIntake(
             text=text,
             channel_id=channel_id,
@@ -388,10 +430,14 @@ def drain_inbound(
             thread_id=follow_thread,
             message_id=message.message_id or None,
             requester_id=message.author_id,
-            metadata=intake_meta,
+            metadata=extra_meta,
         )
         if job_pool is not None:
-            job_pool.submit(orchestrator.run_task, intake, write_key=channel_id)
+            job_pool.submit(
+                orchestrator.run_task,
+                intake,
+                write_key=resolved_write_key(intake, orchestrator),
+            )
         else:
             receipts.append(orchestrator.run_task(intake))
         watermark = _advance_listen_watermark(
@@ -635,17 +681,24 @@ def _channel_is_armed(store: Any, channel_id: str) -> bool:
     return bool(reader(channel_id, default=True))
 
 
-def _claim_inbound(store: Any, discord: Any, message: DiscordMessage, channel_id: str) -> None:
+def _claim_inbound(store: Any, discord: Any, message: DiscordMessage, channel_id: str) -> bool:
+    claimed = True
     if store is not None and message.message_id:
         claim = getattr(store, "claim_inbound_message", None)
         if callable(claim):
-            claim(message.message_id, channel_id)
+            try:
+                claimed = bool(claim(message.message_id, channel_id))
+            except Exception:
+                claimed = True
+    if not claimed:
+        return False
     observe = getattr(discord, "observe_message_id", None)
     if callable(observe) and message.message_id:
         try:
             observe(message.message_id)
         except Exception:
             pass
+    return True
 
 
 def _absorb_power(

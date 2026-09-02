@@ -12,7 +12,11 @@ import time
 from typing import Any, Callable, Optional
 
 from agent_discord.contracts import RunReceipt, TaskIntake, TaskStatus
-from agent_discord.orchestration.routing import MODE_IMPLEMENT, compute_dispatch_mode
+from agent_discord.orchestration.routing import (
+    MODE_IMPLEMENT,
+    MODE_SWARM,
+    compute_dispatch_mode,
+)
 
 
 DEFAULT_MAX_LIVE = 8
@@ -40,6 +44,7 @@ class JobPool:
         self._write_locks: dict[str, threading.Lock] = {}
         self._done: list[RunReceipt] = []
         self._seq = 0
+        self._running = 0
         self._live_threads: dict[str, str] = {}
 
     def submit(
@@ -55,6 +60,7 @@ class JobPool:
         lock_name = write_key if _needs_write_lock(intake) else ""
 
         def run() -> None:
+            self._wait_for_run_slot()
             try:
                 if lock_name:
                     with self._write_lock(lock_name):
@@ -80,6 +86,7 @@ class JobPool:
                     )
             finally:
                 with self._lock:
+                    self._running = max(0, self._running - 1)
                     self._live.pop(job_id, None)
                     self._live_threads.pop(job_id, None)
 
@@ -88,7 +95,6 @@ class JobPool:
             name=f"discord-os-{job_id}",
             daemon=True,
         )
-        self._wait_for_slot()
         with self._lock:
             self._live[job_id] = thread
             tid = str(intake.thread_id or "").strip()
@@ -116,6 +122,10 @@ class JobPool:
                 return True
         return tid in _ORIGIN_THREADS
 
+    def live_thread_ids(self) -> tuple[str, ...]:
+        with self._lock:
+            return tuple(dict.fromkeys(self._live_threads.values()))
+
     def wait(self, timeout: Optional[float] = None) -> list[RunReceipt]:
         deadline = None if timeout is None else time.monotonic() + float(timeout)
         while True:
@@ -133,10 +143,11 @@ class JobPool:
             if deadline is not None and time.monotonic() >= deadline:
                 return self.reap()
 
-    def _wait_for_slot(self) -> None:
+    def _wait_for_run_slot(self) -> None:
         while True:
             with self._lock:
-                if len(self._live) < self.max_live:
+                if self._running < self.max_live:
+                    self._running += 1
                     return
             time.sleep(0.05)
 
@@ -150,7 +161,8 @@ class JobPool:
 
 
 def _needs_write_lock(intake: TaskIntake) -> bool:
-    return compute_dispatch_mode(intake.text) == MODE_IMPLEMENT
+    mode = compute_dispatch_mode(intake.text)
+    return mode in {MODE_IMPLEMENT, MODE_SWARM}
 
 
 def realm_write_key(intake: TaskIntake, cwd: str = "") -> str:
@@ -158,3 +170,21 @@ def realm_write_key(intake: TaskIntake, cwd: str = "") -> str:
     if path:
         return path
     return str(intake.channel_id or "channel")
+
+
+def resolved_write_key(intake: TaskIntake, orchestrator: Any = None) -> str:
+    cwd = ""
+    if orchestrator is not None:
+        from agent_discord.host.realms import realm_for_channel
+
+        repos = getattr(orchestrator, "host_repos", None) or ()
+        store = getattr(orchestrator, "store", None)
+        realm = realm_for_channel(
+            store,
+            intake.channel_id,
+            workspace_id=str(intake.workspace_id or "default"),
+            repos=tuple(repos),
+        )
+        if realm is not None:
+            cwd = str(realm.path)
+    return realm_write_key(intake, cwd)

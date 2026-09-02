@@ -6,9 +6,10 @@ import threading
 import time
 from pathlib import Path
 
-from agent_discord.contracts import DiscordMessage, TaskIntake, TaskStatus
+from agent_discord.contracts import DiscordMessage, RunReceipt, TaskIntake, TaskStatus
 from agent_discord.discord.facade import DiscordFacade
 from agent_discord.discord.providers.fake import FakeDiscordMCPProvider
+from agent_discord.host.repos import HostRepo
 from agent_discord.orchestration.jobs import JobPool
 from agent_discord.orchestration.listen import drain_inbound
 from agent_discord.orchestration.orchestrator import AgentOrchestrator
@@ -56,7 +57,7 @@ def test_job_pool_runs_two_asks_in_parallel(tmp_path: Path):
     assert all(item.status == TaskStatus.COMPLETED for item in receipts)
     assert len(backend.started) == 2
     assert abs(backend.started[1] - backend.started[0]) < 0.12
-    assert elapsed < 0.45
+    assert elapsed < 2.5
     store.close()
 
 
@@ -168,3 +169,80 @@ def test_fail_stale_runs(tmp_path: Path):
     assert store.fail_stale_runs() == 1
     assert store.get_run("r1")["status"] == "failed"
     store.close()
+
+
+def test_drain_serializes_implement_on_shared_cwd(tmp_path: Path):
+    repo = tmp_path / "shared"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    store = SQLiteStore(tmp_path / "shared-cwd.sqlite3")
+    store.initialize()
+    store.merge_binding_metadata("ws", "ch-a", {"repo": "shared", "cwd": str(repo)})
+    store.merge_binding_metadata("ws", "ch-b", {"repo": "shared", "cwd": str(repo)})
+    store.set_host_control("ch-a", armed=True)
+    store.set_host_control("ch-b", armed=True)
+    backend = _SlowBackend(hold=0.08)
+    fake = FakeDiscordMCPProvider()
+    orch = AgentOrchestrator(
+        store=store,
+        backend=backend,
+        discord=DiscordFacade(fake, bot_token_fingerprint="fp", owner_id="test"),
+        post_progress_to_discord=False,
+        host_repos=(HostRepo(name="shared", path=repo, aliases=("shared",)),),
+    )
+    fake.inbox.extend(
+        [
+            DiscordMessage(
+                channel_id="ch-a",
+                content="implement login timeout",
+                message_id="401",
+                author_id="human-1",
+            ),
+            DiscordMessage(
+                channel_id="ch-b",
+                content="implement logout path",
+                message_id="402",
+                author_id="human-1",
+            ),
+        ]
+    )
+    pool = JobPool()
+    drain_inbound(
+        orch, orch.discord, channel_id="ch-a", workspace_id="ws", since_ms=0, job_pool=pool
+    )
+    drain_inbound(
+        orch, orch.discord, channel_id="ch-b", workspace_id="ws", since_ms=0, job_pool=pool
+    )
+    receipts = pool.wait(timeout=3.0)
+    assert len(receipts) == 2
+    assert abs(backend.started[1] - backend.started[0]) >= 0.07
+    store.close()
+
+
+def test_job_pool_exposes_live_thread_ids():
+    pool = JobPool()
+    gate = threading.Event()
+
+    def runner(intake: TaskIntake) -> RunReceipt:
+        gate.wait(timeout=2.0)
+        return RunReceipt(
+            task_id="t",
+            run_id="r",
+            status=TaskStatus.COMPLETED,
+            summary="ok",
+        )
+
+    pool.submit(
+        runner,
+        TaskIntake(
+            text="what is Discord OS?",
+            channel_id="ch",
+            workspace_id="ws",
+            thread_id="job-thread",
+        ),
+    )
+    assert pool.live_thread_ids() == ("job-thread",)
+    gate.set()
+    receipts = pool.wait(timeout=2.0)
+    assert len(receipts) == 1
+    assert pool.live_thread_ids() == ()

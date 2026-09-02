@@ -6,7 +6,14 @@ import io
 from pathlib import Path
 from typing import Any
 
-from agent_discord.contracts import ContextSnapshot, DispatchRequest, EventKind, TaskStatus
+from agent_discord.contracts import (
+    ContextSnapshot,
+    DispatchEvent,
+    DispatchRequest,
+    EventKind,
+    ProgressSummary,
+    TaskStatus,
+)
 from agent_discord.puppetmaster.agentic import AgenticPuppetmasterBackend
 from agent_discord.puppetmaster.backend import (
     PuppetmasterCliBackend,
@@ -16,7 +23,9 @@ from agent_discord.puppetmaster.backend import (
     _parse_safe_cli_completion,
     _parse_token_line,
     _safe_dispatch_prompt,
+    cursor_write_argv,
     usable_worker_text,
+    usage_from_cli_meta,
 )
 from agent_discord.puppetmaster.models import AGENTIC_MODEL_PIN, DEFAULT_MODEL_PIN
 
@@ -237,6 +246,135 @@ def test_dispatch_uses_cursor_subcommand(monkeypatch, tmp_path: Path):
     assert result.usage.model == "cursor/grok-4-5"
     assert result.usage.adapter_name == "grok-4.5"
     assert "chain_of_thought" not in str(result.events[-1].payload)
+
+
+def test_cursor_write_argv_omits_implement_on_analyze():
+    assert cursor_write_argv(_request()) == ["--implement", "--allow-dirty"]
+    analyze = DispatchRequest(
+        task_id="t1",
+        run_id="r1",
+        prompt="hello world",
+        model="cursor/grok-4-5",
+        context=ContextSnapshot(task_id="t1", memories=[], bindings={}),
+        metadata={"channel_id": "99", "compute_mode": "analyze"},
+    )
+    assert cursor_write_argv(analyze) == []
+
+
+def test_analyze_dispatch_omits_implement_flag(monkeypatch, tmp_path: Path):
+    calls: list[dict[str, Any]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append({"cmd": list(cmd)})
+
+        class Proc:
+            returncode = 0
+            stdout = "job_id: j1\nsummary: done via cursor\n"
+            stderr = ""
+
+        return Proc()
+
+    monkeypatch.setattr(
+        "agent_discord.puppetmaster.backend.shutil.which",
+        lambda _: "/usr/bin/puppetmaster",
+    )
+    monkeypatch.setattr("agent_discord.puppetmaster.backend.subprocess.run", fake_run)
+    backend = PuppetmasterCliBackend(
+        cli="puppetmaster",
+        pin=DEFAULT_MODEL_PIN,
+        cwd=tmp_path,
+    )
+    request = DispatchRequest(
+        task_id="t1",
+        run_id="r1",
+        prompt="hello world",
+        model="cursor/grok-4-5",
+        context=ContextSnapshot(task_id="t1", memories=[], bindings={}),
+        metadata={"channel_id": "99", "compute_mode": "analyze"},
+    )
+    result = backend.dispatch(request)
+    assert result.status == TaskStatus.COMPLETED
+    cmd = calls[0]["cmd"]
+    assert "--implement" not in cmd
+    assert "--allow-dirty" not in cmd
+
+
+def test_parse_safe_cli_keeps_cost_and_tokens():
+    meta = _parse_safe_cli_completion(
+        '{"summary":"done","cost":0.12,"input_tokens":10,"output_tokens":4}',
+        "",
+    )
+    assert meta["cost"] == 0.12
+    assert meta["input_tokens"] == 10
+    receipt = usage_from_cli_meta(DEFAULT_MODEL_PIN, "puppetmaster", meta)
+    assert receipt.input_tokens == 10
+    assert receipt.output_tokens == 4
+    assert receipt.metadata["cost"] == 0.12
+
+
+def test_flush_live_steers_writes_sidecar(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("PUPPETMASTER_STATE_DIR", str(tmp_path / "pm"))
+    backend = PuppetmasterCliBackend(
+        cli="puppetmaster",
+        pin=DEFAULT_MODEL_PIN,
+        cwd=tmp_path,
+    )
+    backend.steer("r1", "nudge left")
+    proc = type("Proc", (), {"stdin": io.StringIO()})()
+    backend._flush_live_steers("r1", proc)
+    text = (tmp_path / "pm" / "steers" / "r1.txt").read_text(encoding="utf-8")
+    assert "nudge left" in text
+    assert proc.stdin.getvalue().startswith("nudge left")
+    assert not backend._steers.get("r1")
+
+
+def test_stream_prepends_queued_steers(monkeypatch, tmp_path: Path):
+    seen: dict[str, Any] = {}
+
+    def fake_popen(cmd, **kwargs):
+        seen["cmd"] = list(cmd)
+
+        class Proc:
+            stdin = io.StringIO()
+            stdout = None
+            stderr = None
+            returncode = 0
+
+        return Proc()
+
+    def fake_iter(proc, **kwargs):
+        poll = kwargs.get("steer_poll")
+        if callable(poll):
+            poll()
+        yield DispatchEvent(
+            kind=EventKind.RECEIPT,
+            summary=ProgressSummary(stage="done", message="ok", percent=100.0),
+        )
+
+    monkeypatch.setattr(
+        "agent_discord.puppetmaster.backend.shutil.which",
+        lambda _: "/usr/bin/puppetmaster",
+    )
+    monkeypatch.setattr("agent_discord.puppetmaster.backend.subprocess.Popen", fake_popen)
+    monkeypatch.setattr(
+        "agent_discord.puppetmaster.backend.iter_cli_process_events",
+        fake_iter,
+    )
+    monkeypatch.setattr(
+        "agent_discord.puppetmaster.backend.cli_supports_flag",
+        lambda *args, **kwargs: False,
+    )
+    backend = PuppetmasterCliBackend(
+        cli="puppetmaster",
+        pin=DEFAULT_MODEL_PIN,
+        cwd=tmp_path,
+    )
+    backend.steer("r1", "nudge left")
+    events = list(backend.stream(_request()))
+    prompt = seen["cmd"][-1]
+    assert "Follow-up:" in prompt
+    assert "nudge left" in prompt
+    assert events
 
 
 def test_dispatch_fails_closed_when_cli_missing(monkeypatch):

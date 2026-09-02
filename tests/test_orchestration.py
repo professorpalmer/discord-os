@@ -17,7 +17,7 @@ from agent_discord.contracts import (
 from agent_discord.discord.facade import DiscordFacade
 from agent_discord.discord.providers.fake import FakeDiscordMCPProvider
 from agent_discord.orchestration.jobs import JobPool
-from agent_discord.orchestration.listen import drain_inbound
+from agent_discord.orchestration.listen import drain_inbound, listen_destinations
 from agent_discord.orchestration.orchestrator import (
     TOKEN_CARD_FLUSH_SECONDS,
     AgentOrchestrator,
@@ -1344,4 +1344,99 @@ def test_steer_failure_does_not_spawn_sibling(tmp_path: Path):
     assert orch.jobs == []
     assert pool.live_count() == 0
     assert any("Could not steer" in (m.content or "") for m in fake.sent)
+    store.close()
+
+
+def test_rest_shaped_thread_message_steers(tmp_path: Path):
+    store = _armed_store(tmp_path, channel_id="job-thread")
+    orch = _FakeSteerOrch(store)
+    orch._live["job-thread"] = "run-1"
+    fake = FakeDiscordMCPProvider()
+    facade = DiscordFacade(fake, bot_token_fingerprint="fp", owner_id="test")
+    fake.inbox.append(
+        DiscordMessage(
+            channel_id="job-thread",
+            content="nudge it left",
+            message_id="201",
+            author_id="human-1",
+        )
+    )
+    pool = JobPool()
+    drain_inbound(
+        orch,
+        facade,
+        channel_id="job-thread",
+        workspace_id="ws",
+        since_ms=0,
+        job_pool=pool,
+    )
+    assert orch.steer_calls == [("run-1", "nudge it left")]
+    assert orch.jobs == []
+    store.close()
+
+
+def test_listen_destinations_unions_live_job_threads():
+    class _Live:
+        def live_thread_ids(self):
+            return ("job-thread", "ch")
+
+    dests = listen_destinations(["ch", "realm"], _Live(), _Live())
+    assert dests == ["ch", "realm", "job-thread"]
+
+
+class _OrderStore(SQLiteStore):
+    def __init__(self, path: Path):
+        super().__init__(path)
+        self.order: list[str] = []
+
+    def claim_inbound_message(self, message_id, channel_id=None):
+        self.order.append("claim")
+        return super().claim_inbound_message(message_id, channel_id)
+
+    def set_listen_watermark(self, channel_id, *, created_ms=None, message_id=""):
+        self.order.append("watermark")
+        return super().set_listen_watermark(
+            channel_id, created_ms=created_ms, message_id=message_id
+        )
+
+
+def test_claim_happens_before_watermark_and_duplicate_is_dropped(tmp_path: Path):
+    store = _OrderStore(tmp_path / "order.sqlite3")
+    store.initialize()
+    store.set_host_control("ch", armed=True)
+    store.seed_owner_if_empty("human-1")
+    orch = _FakeSteerOrch(store)
+    fake = FakeDiscordMCPProvider()
+    facade = DiscordFacade(fake, bot_token_fingerprint="fp", owner_id="test")
+    fake.inbox.append(
+        DiscordMessage(
+            channel_id="ch",
+            content="what is Discord OS?",
+            message_id="501",
+            author_id="human-1",
+        )
+    )
+    pool = JobPool()
+    drain_inbound(
+        orch,
+        facade,
+        channel_id="ch",
+        workspace_id="ws",
+        since_ms=0,
+        job_pool=pool,
+    )
+    pool.wait(timeout=2.0)
+    assert store.order.index("claim") < store.order.index("watermark")
+    assert len(orch.jobs) == 1
+    store.set_listen_watermark("ch", created_ms=0, message_id="")
+    drain_inbound(
+        orch,
+        facade,
+        channel_id="ch",
+        workspace_id="ws",
+        since_ms=0,
+        job_pool=pool,
+    )
+    pool.wait(timeout=2.0)
+    assert len(orch.jobs) == 1
     store.close()
