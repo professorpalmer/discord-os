@@ -1,6 +1,6 @@
 # Compute
 
-Not a compute host. Discord OS dispatches Puppetmaster on this Mac.
+Not a compute host. Discord OS dispatches Puppetmaster on this Mac. That is the worker plane: analyze omits `--implement`, implement takes the cwd write lock, live-thread steer flushes into the CLI process.
 
 `AGENT_DISCORD_COMPUTE=auto` (default): agentic `openrouter/auto` when an OpenRouter key is in env or the workspace vault; otherwise the Cursor pin `cursor/grok-4-5` → adapter `grok-4.5`. No silent model fallback. Requests for any other model fail closed.
 

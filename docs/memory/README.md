@@ -1,6 +1,6 @@
 # Think-tank memory
 
-Other Discord channels are durable group-chat memory. Hermes persist-then-settle: the job finishes, then a short note lands in the **other** bank rooms, not the origin.
+Other Discord channels are durable group-chat memory on this host's SQLite plus those rooms. Hermes persist-then-settle: the job finishes, then a short note lands in the **other** bank rooms, not the origin.
 
 ## Bind
 

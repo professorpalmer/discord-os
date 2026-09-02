@@ -1,6 +1,6 @@
 # Host tools
 
-Workers already have a shell. Named binaries and HTTP recipes are the MCP-equivalent. There is **no MCP bus inside Discord**.
+Workers already have a shell on this Mac. Named binaries and HTTP recipes are the MCP-equivalent. There is **no MCP bus inside Discord**.
 
 Custom MCPs become whatever CLI the owner already runs.
 

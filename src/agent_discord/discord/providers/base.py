@@ -29,7 +29,7 @@ class MCPTransport(Protocol):
     def call_tool(self, name: str, arguments: Mapping[str, Any]) -> ToolInvocationResult: ...
 
 
-_MCP_CLIENT_INFO = {"name": "discord-os", "version": "0.5.11"}
+_MCP_CLIENT_INFO = {"name": "discord-os", "version": "0.5.12"}
 _MCP_PROTOCOL_VERSION = "2024-11-05"
 _SESSION_HEADER = "Mcp-Session-Id"
 

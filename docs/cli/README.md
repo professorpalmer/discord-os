@@ -1,5 +1,7 @@
 # CLI
 
+Discord is the screen. These commands are the kernel on this Mac.
+
 ```text
 discord-os bootstrap [--workspace PATH]
 discord-os check [--allow-empty-token] [--live] [--channel-id ID]

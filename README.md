@@ -2,7 +2,9 @@
 
 Discord is the screen. This process is the computer. Your phone is the remote.
 
-Your bot, on your machine. No hosted fleet. Leave the host running; turn work on and off from Discord.
+SQLite is the database (tasks, runs, events, artifacts, execution DAG). Two Discord threads cook at once. Implement writes serialize per checkout. Puppetmaster runs the workers on this Mac. Artifacts are channel / message / attachment plus sha256, never a CDN URL. Intake is REST. Gateway exists so On/Off buttons work. No hosted fleet.
+
+Query the analog map with `discord-os map`. Dump a run with `discord-os lineage`.
 
 Public package is [`discord-os`](https://pypi.org/project/discord-os/). Repo: [`professorpalmer/discord-os`](https://github.com/professorpalmer/discord-os). The `agent-discord` command still works.
 

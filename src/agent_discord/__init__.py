@@ -1,4 +1,4 @@
-"""Discord OS: Discord is the harness UI for local agent work."""
+"""Discord OS: Discord is the screen. This process on one Mac is the computer."""
 
 from __future__ import annotations
 
@@ -9,4 +9,4 @@ REPO_URL = "https://github.com/professorpalmer/discord-os"
 CLI_OWNER_PREFIX = "discord-os-cli-"
 LEGACY_CLI_OWNER_PREFIX = "agent-discord-cli-"
 
-__version__ = "0.5.11"
+__version__ = "0.5.12"

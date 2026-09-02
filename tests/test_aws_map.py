@@ -21,6 +21,7 @@ from agent_discord.contracts import DiscordObjectRef
 def test_catalog_loads_and_ranks_are_closed():
     payload = load_catalog()
     assert "one Mac" in payload["thesis"]
+    assert "SQLite" in payload["thesis"]
     rows = analogs(payload)
     world = lifts(payload)
     assert len(rows) >= 20
