@@ -174,6 +174,73 @@ def test_choose_spoken_answer_skips_host_reach_echo():
     assert choose_spoken_answer(dump, "Open PRs: none.") == "Open PRs: none."
 
 
+_LIVE_AUTH_STITCH = (
+    "Host reach (this Mac; Discord is only the remote):\n"
+    "- Network: yes. Use gh, curl, and git.\n"
+    "- Named git checkouts:\n"
+    "  - puppetmaster: /tmp/Puppetmaster\n"
+    "Do not treat .agent-discord as the subject repository.\n"
+    "Host tools (CLI or HTTP — not MCP inside Discord):\n"
+    "Think-tank (Discord is the durable store):\n"
+    "Context memories:\n"
+    "- Can you check if my Puppetmaster repo has any open PRs or Issues?\n"
+    "## Alerts (action required)\n"
+    "- **auth_failed:401** on `agentic` worker — the worker could not complete.\n"
+    "## Risks\n"
+    "- AUTH FAILURE: provider 'openrouter' rejected the API key (HTTP 401) "
+    "after trying every configured key. This is a dead, revoked, or wrong key. "
+    "The worker never reached the model.\n"
+)
+
+
+def test_choose_spoken_answer_speaks_openrouter_401_from_stitch():
+    from agent_discord.puppetmaster.backend import choose_spoken_answer
+
+    spoken = choose_spoken_answer(_LIVE_AUTH_STITCH)
+    assert spoken
+    assert "401" in spoken
+    assert "OpenRouter" in spoken
+    assert "never reached the model" in spoken.lower()
+
+
+def test_finding_line_keeps_the_body():
+    from agent_discord.puppetmaster.backend import choose_spoken_answer
+
+    spoken = choose_spoken_answer(
+        "FINDING: Steal exchange/verify/preserve, not Spectacle chrome."
+    )
+    assert "Steal exchange/verify/preserve" in spoken
+    assert not spoken.lower().startswith("finding:")
+
+
+def test_safe_dispatch_prompt_drops_scaffolding_memories():
+    request = DispatchRequest(
+        task_id="t1",
+        run_id="r1",
+        prompt="https://5thnode.com/ what can we steal?",
+        model="cursor/grok-4-5",
+        context=ContextSnapshot(
+            task_id="t1",
+            memories=[
+                {
+                    "content": (
+                        "The first turn must include a tool call. "
+                        "Let me quickly verify then submit_findings."
+                    )
+                },
+                {"content": "Prior note: two cooks at once."},
+            ],
+            bindings={},
+        ),
+        metadata={"channel_id": "99"},
+    )
+    text = _safe_dispatch_prompt(request)
+    assert "https://5thnode.com/" in text
+    assert "two cooks at once" in text
+    assert "submit_findings" not in text
+    assert "first turn must include" not in text.lower()
+
+
 def test_prose_cli_line_becomes_token_stream():
     buffer = TokenStreamBuffer()
     event = _event_from_cli_line(
