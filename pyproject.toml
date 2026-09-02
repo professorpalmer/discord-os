@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "discord-os"
-version = "0.5.11"
-description = "Discord OS: Discord is the harness UI for local agent work. Artifacts are Discord objects (snowflake IDs)."
+version = "0.5.12"
+description = "Discord is the screen. This Mac is the computer: SQLite lineage, two jobs at once, Puppetmaster workers. Artifacts are Discord snowflakes plus sha256."
 readme = "README.pypi.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
 authors = [{ name = "Discord OS contributors" }]
-keywords = ["discord", "discord-os", "mcp", "puppetmaster", "agent", "cli"]
+keywords = ["discord", "discord-os", "puppetmaster", "agent", "cli", "sqlite"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",

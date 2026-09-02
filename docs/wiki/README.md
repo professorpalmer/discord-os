@@ -1,6 +1,6 @@
 # Wiki
 
-Portable LLM wiki over HTTP. Same results as wiki MCP. No MCP session inside the Discord worker.
+Portable LLM wiki over HTTP from this host. Same results as wiki MCP. No MCP session inside the Discord worker.
 
 ```bash
 discord-os add wiki --url https://portablellm.wiki/you --token …

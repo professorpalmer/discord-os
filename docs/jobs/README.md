@@ -1,6 +1,6 @@
 # Jobs
 
-Each ask is an OS thread **and** a Discord thread on the user message. Two cooks at once. Same machine. Not a cloud VM. Follow-ups in that Discord thread stay there (steer) with thread history.
+Each ask is an OS thread **and** a Discord thread on the user message. Two cooks at once. SQLite holds the DAG. Puppetmaster is the worker. Same machine. Not a cloud VM. Follow-ups in that Discord thread stay there (steer) with thread history.
 
 Analyze work overlaps. Implement and swarm writes serialize per resolved realm cwd so two channels do not fight one working tree.
 

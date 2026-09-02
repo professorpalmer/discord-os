@@ -16,6 +16,7 @@ Do not crawl the tree first. Each `docs/<feature>/README.md` lists the modules t
 - Host tools are **CLI or HTTP**. There is no MCP bus inside Discord. Wiki MCP results come from `discord-os wiki query`.
 - `bind puppetmaster` / `discord-os add realm` pins a channel to a checkout. Naming a repo in the prompt still overrides.
 - Two Discord threads cook at once (`JobPool`). Implement writes serialize per realm.
+- SQLite holds tasks, runs, events, artifacts, and the execution DAG. Query with `discord-os lineage`.
 - One live card per job. Edit in place. Do not flood the thread.
 - Artifacts are Discord objects (channel / message / attachment / sha256). Never persist a CDN URL as the key.
 - Default I/O is Discord REST. Gateway exists only so On/Off buttons work.

@@ -2,11 +2,13 @@
 
 Discord is the screen. This process is the computer. Your phone is the remote.
 
+SQLite is the database. Two threads cook at once. Puppetmaster runs on this Mac. Artifacts are Discord snowflakes plus sha256. Intake is REST. No hosted fleet.
+
 ```bash
 pip install discord-os
 ```
 
-Your bot, on your machine. No hosted fleet. Leave the host running; turn work on and off from Discord.
+Leave the host running. Turn work on and off from Discord.
 
 Workers need [Puppetmaster](https://pypi.org/project/puppetmaster-ai/) too:
 

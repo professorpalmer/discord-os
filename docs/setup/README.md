@@ -1,6 +1,6 @@
 # Setup
 
-First run is three facts: bot token, application id, one staff channel. Then `discord-os setup`.
+First run is three facts: bot token, application id, one staff channel. Then `discord-os setup`. After that the host is the computer: SQLite, JobPool, Puppetmaster, Discord as the screen.
 
 There is no setup wizard. A 20-prompt walk fights the product (Discord is the screen). `setup` does invite + login helper + HOST card once. Everything else is `discord-os add` or an in-channel `bind`.
 

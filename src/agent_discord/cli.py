@@ -79,9 +79,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=CLI_NAME,
         description=(
-            f"{PRODUCT_NAME}: Discord is the harness UI. This process is the "
-            "kernel. Artifacts are Discord objects addressed by snowflake IDs — "
-            "not a hosted multi-tenant service."
+            f"{PRODUCT_NAME}: Discord is the screen. This process is the "
+            "computer: SQLite lineage, two jobs at once, Puppetmaster on this "
+            "Mac. Artifacts are Discord snowflakes plus sha256."
         ),
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")

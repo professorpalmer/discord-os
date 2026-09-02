@@ -1,6 +1,6 @@
 # AWS = Discord
 
-Discord is the screen, identity, ACL, notification bus, and object plane. This process on one Mac is the computer. AWS names here are **analogs**, not a second cloud.
+Discord is the screen, identity, ACL, notification bus, and object plane. This process on one Mac is the computer: SQLite, JobPool, Puppetmaster. AWS names here are **analogs**, not a second cloud.
 
 The catalog is packaged JSON. Query it without Discord:
 

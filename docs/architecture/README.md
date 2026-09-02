@@ -1,5 +1,7 @@
 # Architecture
 
+Discord is the screen, identity, ACL, notification bus, and object plane. This process on one Mac is the computer.
+
 ```text
 CLI / Discord
   → listen + JobPool
@@ -8,6 +10,8 @@ CLI / Discord
        → SQLite (bindings, tasks, runs, events, memory, artifacts, lineage, watermarks, gateway lock)
        → Discord facade → object store → REST (default) | optional SaseQ/BrainDAO | fake
 ```
+
+JobPool runs two Discord threads at once. Implement writes serialize per checkout. Each run writes a lineage DAG (`node_key = sha256(step, input, parents)`). The live Components v2 card is the console. Puppetmaster is compute on this host, not a fleet.
 
 Intake is REST. Host opens a Gateway only for buttons. The SQLite gateway row is a one-process lock; a dead pid is stolen.
 

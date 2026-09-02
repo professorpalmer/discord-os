@@ -1,5 +1,5 @@
 {
-  "thesis": "Discord is the screen, identity, ACL, notification, and object plane. This process on one Mac is the computer. AWS names are analogs, not a second cloud.",
+  "thesis": "Discord is the screen, identity, ACL, notification, and object plane. This process on one Mac is the computer: SQLite, JobPool, Puppetmaster. AWS names are analogs, not a second cloud.",
   "constraints": [
     "REST default; Gateway only for On/Off buttons",
     "Artifacts are Discord objects (channel/message/attachment/sha256); never persist a CDN URL as the key",
