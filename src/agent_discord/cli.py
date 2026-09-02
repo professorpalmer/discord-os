@@ -422,7 +422,66 @@ def build_parser() -> argparse.ArgumentParser:
     p_add_list.add_argument("--workspace-id", default="default")
     p_add_list.add_argument("--json", action="store_true")
 
+    p_map = sub.add_parser(
+        "map",
+        help="Show AWS names as Discord OS analogs (local catalog; no Discord)",
+    )
+    p_map.add_argument(
+        "query",
+        nargs="?",
+        default="",
+        help="Filter by AWS name or Discord primitive (default: all)",
+    )
+    p_map.add_argument(
+        "--rank",
+        default="",
+        help="shipped, now, next, or never",
+    )
+    p_map.add_argument("--json", action="store_true")
+
     return parser
+
+
+def cmd_map(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
+    out = out or sys.stdout
+    from agent_discord.aws_map import (
+        analog_payload,
+        filter_rank,
+        format_table,
+        lift_payload,
+        lifts,
+        load_catalog,
+        lookup,
+    )
+
+    query = str(getattr(args, "query", "") or "").strip()
+    rank = str(getattr(args, "rank", "") or "").strip()
+    try:
+        rows = lookup(query)
+        if rank:
+            filter_rank(rank)
+            rows = tuple(row for row in rows if row.rank == rank)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    if args.json:
+        payload: dict[str, Any] = {
+            "thesis": str(load_catalog().get("thesis") or ""),
+            "analogs": [analog_payload(row) for row in rows],
+        }
+        if not query:
+            payload["lifts"] = [lift_payload(item) for item in lifts()]
+            if rank:
+                payload["lifts"] = [
+                    item for item in payload["lifts"] if item["rank"] == rank
+                ]
+        print(json.dumps(payload, indent=2), file=out)
+        return 0
+    if not rows:
+        print("no analogs matched", file=out)
+        return 1
+    print(format_table(rows), file=out)
+    return 0
 
 
 def cmd_bootstrap(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
@@ -1994,6 +2053,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return cmd_spend(args)
     if args.command == "add":
         return cmd_add(args)
+    if args.command == "map":
+        return cmd_map(args)
     parser.error(f"unknown command {args.command}")
     return 2
 
