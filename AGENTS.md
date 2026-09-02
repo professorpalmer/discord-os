@@ -27,6 +27,7 @@ Do not crawl the tree first. Each `docs/<feature>/README.md` lists the modules t
 discord-os setup --channel-id ID
 discord-os add realm|memory|repo|wiki|tool|github|list
 discord-os map [QUERY]
+discord-os lineage [RUN_ID]
 discord-os check
 discord-os wiki query "…"
 ```

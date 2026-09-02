@@ -440,6 +440,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_map.add_argument("--json", action="store_true")
 
+    p_lineage = sub.add_parser(
+        "lineage",
+        help="Show the SQLite execution DAG for a run (local; no Temporal)",
+    )
+    p_lineage.add_argument(
+        "run_id",
+        nargs="?",
+        default="",
+        help="Run id (default: latest lineage run)",
+    )
+    p_lineage.add_argument("--json", action="store_true")
+
     return parser
 
 
@@ -486,6 +498,45 @@ def cmd_map(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         chunks.append(format_lifts(world))
     print("\n\n".join(chunks), file=out)
     return 0
+
+
+def cmd_lineage(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
+    out = out or sys.stdout
+    from agent_discord.orchestration.lineage import (
+        format_nodes,
+        latest_run_id,
+        list_nodes,
+        node_payload,
+    )
+
+    config = apply_runtime_secrets(load_config())
+    store = SQLiteStore(config.database_path)
+    store.initialize()
+    try:
+        run_id = str(getattr(args, "run_id", "") or "").strip()
+        if not run_id:
+            run_id = latest_run_id(store) or ""
+        nodes = list_nodes(store, run_id) if run_id else ()
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "run_id": run_id,
+                        "nodes": [node_payload(node) for node in nodes],
+                    },
+                    indent=2,
+                ),
+                file=out,
+            )
+            return 0 if nodes else 1
+        if not run_id:
+            print("lineage: no runs", file=sys.stderr)
+            return 1
+        print(f"run_id: {run_id}", file=out)
+        print(format_nodes(nodes), file=out)
+        return 0 if nodes else 1
+    finally:
+        store.close()
 
 
 def cmd_bootstrap(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
@@ -1301,7 +1352,7 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     exit_code = 0
     panel_stop = threading.Event()
     discord_down = threading.Event()
-    asks: Queue[tuple[str, str]] = Queue()
+    asks: Queue[tuple[str, str, str]] = Queue()
     ignore_history_before_ms = int(time.time() * 1000) - LISTEN_HISTORY_SLACK_MS
     from agent_discord.host.memory import seed_memory_channels
     from agent_discord.host.realms import listen_channel_ids, seed_channel_realms
@@ -1400,7 +1451,7 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                 )
             while True:
                 try:
-                    ask_channel, prompt = asks.get_nowait()
+                    ask_channel, prompt, replay_of = asks.get_nowait()
                 except Empty:
                     break
                 if not store.host_is_armed(ask_channel or args.channel_id):
@@ -1409,12 +1460,16 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
 
                 if is_spend_halted(store, args.workspace_id):
                     continue
+                ask_meta: dict[str, Any] = {}
+                if replay_of:
+                    ask_meta["replay_of"] = replay_of
                 ask_intake = TaskIntake(
                     text=prompt,
                     channel_id=ask_channel or args.channel_id,
                     workspace_id=args.workspace_id,
                     guild_id=args.guild_id,
                     thread_id=args.thread_id if ask_channel == args.channel_id else None,
+                    metadata=ask_meta,
                 )
                 job_pool.submit(
                     orch.run_task,
@@ -1475,7 +1530,7 @@ def _start_panel_gateway(
     channel_id: str,
     stop: threading.Event,
     discord_down: threading.Event,
-    asks: Optional[Queue[tuple[str, str]]] = None,
+    asks: Optional[Queue[tuple[str, str, str]]] = None,
     orch: Any = None,
     host_roots: tuple[Any, ...] = (),
 ) -> None:
@@ -1492,7 +1547,7 @@ def _start_panel_gateway(
 
     def on_ask(text: str) -> None:
         if asks is not None and text.strip():
-            asks.put((channel_id, text.strip()))
+            asks.put((channel_id, text.strip(), ""))
 
     def on_connected(sender: Any) -> None:
         presence.clear()
@@ -1518,7 +1573,7 @@ def _start_panel_gateway(
 
         def on_ask_here(text: str) -> None:
             if asks is not None and text.strip():
-                asks.put((ask_channel, text.strip()))
+                asks.put((ask_channel, text.strip(), ""))
 
         def on_job(action: str, run_id: str) -> None:
             if orch is not None:
@@ -1529,10 +1584,10 @@ def _start_panel_gateway(
                 if action == "retry" and asks is not None:
                     text = str((result or {}).get("intake_text") or "")
                     if text:
-                        asks.put((ask_channel, text))
+                        asks.put((ask_channel, text, str((result or {}).get("replay_of") or "")))
                 return
             if action == "retry" and asks is not None:
-                asks.put((ask_channel, f"retry run {run_id}"))
+                asks.put((ask_channel, f"retry run {run_id}", run_id))
                 return
             if action != "cancel":
                 return
@@ -2060,6 +2115,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return cmd_add(args)
     if args.command == "map":
         return cmd_map(args)
+    if args.command == "lineage":
+        return cmd_lineage(args)
     parser.error(f"unknown command {args.command}")
     return 2
 
