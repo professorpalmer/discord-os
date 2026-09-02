@@ -295,14 +295,17 @@ class _LiveCard:
         card_body = public_card_text(getattr(card, "description", "") or "")
         if first and card_body == spoken:
             card = replace(card, description=first)
-        dest = self.thread_id or self.channel_id
-        if self.message_id:
-            try:
-                edit_card(self.orch.discord, dest, self.message_id, card)
-            except Exception:
+        try:
+            dest = self.thread_id or self.channel_id
+            if self.message_id:
+                try:
+                    edit_card(self.orch.discord, dest, self.message_id, card)
+                except Exception:
+                    send_card(self.orch.discord, self.channel_id, card, thread_id=self.thread_id)
+            else:
                 send_card(self.orch.discord, self.channel_id, card, thread_id=self.thread_id)
-        else:
-            send_card(self.orch.discord, self.channel_id, card, thread_id=self.thread_id)
+        except Exception:
+            pass
         if extras and self.thread_id:
             self.orch._post_settle_messages(self.channel_id, self.thread_id, extras)
 
@@ -1738,7 +1741,10 @@ class AgentOrchestrator:
                 return edited.message_id or message_id
             except Exception:
                 return message_id
-        posted = send_card(self.discord, channel_id, card, thread_id=thread_id)
+        try:
+            posted = send_card(self.discord, channel_id, card, thread_id=thread_id)
+        except Exception:
+            return message_id
         if isinstance(posted, list) and posted:
             return posted[-1].message_id or message_id
         if posted is not None:
