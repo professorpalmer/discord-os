@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.15
+
+Approve write and Done stay in the job thread.
+
+- Write-gate park edits the live thread card. It does not post Approve write in the parent channel.
+- Approve resumes the same thread and the same card.
+- HOST stays in the channel.
+
 ## 0.5.14
 
 The job stays in the thread. The parent channel does not get a leftover line.
