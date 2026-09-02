@@ -15,6 +15,7 @@ from agent_discord.contracts import (
     TaskIntake,
     TaskStatus,
 )
+from agent_discord.discord.errors import ToolInvocationError
 from agent_discord.discord.facade import DiscordFacade
 from agent_discord.discord.providers.fake import FakeDiscordMCPProvider
 from agent_discord.orchestration.jobs import JobPool
@@ -1189,6 +1190,47 @@ def _thread_card_blobs(fake_discord, thread_id: str) -> str:
         parts.append(message.content or "")
         parts.append(json.dumps(message.metadata or {}, default=str))
     return " ".join(parts)
+
+
+class _FirstSend503Provider(FakeDiscordMCPProvider):
+    def __init__(self) -> None:
+        super().__init__()
+        self.send_attempts = 0
+
+    def send_message(self, channel_id, content, **kwargs):
+        self.send_attempts += 1
+        if self.send_attempts == 1:
+            raise ToolInvocationError("Discord REST HTTP 503")
+        return super().send_message(channel_id, content, **kwargs)
+
+
+def test_first_thread_card_503_does_not_kill_job(tmp_path: Path):
+    store = SQLiteStore(tmp_path / "o.sqlite3")
+    store.initialize()
+    fake_discord = _FirstSend503Provider()
+    facade = DiscordFacade(fake_discord, bot_token_fingerprint="fp", owner_id="test")
+    backend = FakePuppetmasterBackend()
+    orch = AgentOrchestrator(
+        store=store,
+        backend=backend,
+        discord=facade,
+        post_progress_to_discord=True,
+    )
+    receipt = orch.run_task(
+        TaskIntake(
+            text="look at this site",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="ask-503",
+        )
+    )
+    assert receipt.status == TaskStatus.COMPLETED
+    assert backend.dispatch_count == 1
+    assert fake_discord.threads
+    thread_id = next(iter(fake_discord.threads))
+    blob = _thread_card_blobs(fake_discord, thread_id)
+    assert "Done" in blob or "look at this site" in blob.lower()
+    store.close()
 
 
 def test_write_gate_approve_and_done_stay_in_job_thread(tmp_path: Path):

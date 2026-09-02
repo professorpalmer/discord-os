@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 from pathlib import Path
+from urllib.error import HTTPError
 
 import pytest
 
@@ -223,6 +225,50 @@ def test_list_and_send_channel_messages_use_rest(tmp_path):
     )
     assert posted.message_id == "1540090000000000003"
     assert captured["method"] == "POST"
+
+
+def test_send_channel_message_retries_503_then_succeeds(monkeypatch):
+    monkeypatch.setattr("agent_discord.discord.rest._retry_sleep", lambda _seconds: None)
+    calls = {"n": 0}
+
+    def opener(request, timeout=60):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise HTTPError(
+                request.full_url,
+                503,
+                "Service Unavailable",
+                None,
+                BytesIO(b""),
+            )
+        return _FakeResponse(
+            json.dumps(
+                {
+                    "id": "m-ok",
+                    "channel_id": "ch",
+                    "content": "On it.",
+                }
+            ).encode("utf-8")
+        )
+
+    posted = send_channel_message(
+        token="tok", channel_id="thread-1", content="On it.", opener=opener
+    )
+    assert posted.message_id == "m-ok"
+    assert calls["n"] == 2
+
+
+def test_send_channel_message_does_not_retry_401(monkeypatch):
+    monkeypatch.setattr("agent_discord.discord.rest._retry_sleep", lambda _seconds: None)
+    calls = {"n": 0}
+
+    def opener(request, timeout=60):
+        calls["n"] += 1
+        raise HTTPError(request.full_url, 401, "Unauthorized", None, BytesIO(b""))
+
+    with pytest.raises(ToolInvocationError, match="401"):
+        send_channel_message(token="tok", channel_id="ch", content="x", opener=opener)
+    assert calls["n"] == 1
 
 
 def test_start_message_thread_posts_name():
