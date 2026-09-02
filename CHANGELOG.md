@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.16
+
+A Discord 503 after the thread opens no longer leaves an empty thread.
+
+- REST retries 502 / 503 / 504. Auth failures stay fail-closed.
+- A failed first card does not kill the job. The worker still runs.
+
 ## 0.5.15
 
 Approve write and Done stay in the job thread.

@@ -8,6 +8,7 @@ Token is sent as Authorization and never returned.
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from typing import Any, Callable, Mapping, Optional
 from urllib.error import HTTPError, URLError
@@ -27,6 +28,12 @@ VOICE_FETCH_MAX_BYTES = 25 * 1024 * 1024
 
 
 UrlOpener = Callable[..., Any]
+_TRANSIENT_HTTP = frozenset({502, 503, 504})
+_TRANSIENT_RETRY_SLEEPS = (0.25, 0.75)
+
+
+def _retry_sleep(seconds: float) -> None:
+    time.sleep(float(seconds))
 
 
 def call_discord_json(
@@ -731,13 +738,25 @@ def _discord_request_bytes(
     }
     if body is not None:
         headers["Content-Type"] = content_type
-    request = Request(url, data=body, headers=headers, method=method)
     do_open = opener or urlopen
-    try:
-        with do_open(request, timeout=60) as resp:
-            return resp.read()
-    except HTTPError as exc:
-        exc.read()
-        raise ToolInvocationError(f"Discord REST HTTP {exc.code}") from None
-    except URLError as exc:
-        raise ToolInvocationError("Discord REST unreachable") from exc
+    last_error: Optional[ToolInvocationError] = None
+    attempts = 1 + len(_TRANSIENT_RETRY_SLEEPS)
+    for attempt in range(attempts):
+        if attempt:
+            _retry_sleep(_TRANSIENT_RETRY_SLEEPS[attempt - 1])
+        request = Request(url, data=body, headers=headers, method=method)
+        try:
+            with do_open(request, timeout=60) as resp:
+                return resp.read()
+        except HTTPError as exc:
+            try:
+                exc.read()
+            except Exception:
+                pass
+            code = int(getattr(exc, "code", 0) or 0)
+            last_error = ToolInvocationError(f"Discord REST HTTP {code}")
+            if code not in _TRANSIENT_HTTP:
+                raise last_error from None
+        except URLError:
+            last_error = ToolInvocationError("Discord REST unreachable")
+    raise last_error or ToolInvocationError("Discord REST unreachable")
