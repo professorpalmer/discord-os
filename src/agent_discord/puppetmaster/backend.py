@@ -75,12 +75,7 @@ _SUMMARY_SKIP_PREFIXES = (
     "other bound channels",
     "dispatched via",
     "[swarm.",
-    "decision:",
-    "finding:",
-    "gist:",
-    "verification:",
     "confidence=",
-    "outcome:",
     "full report:",
     "report:",
     "let me write the discord answer",
@@ -118,12 +113,18 @@ _MONOLOGUE_PREFIXES = (
     "here's the straight answer for discord",
     "here's the answer for discord",
     "let me analyze this task",
+    "finding:",
+    "decision:",
+    "gist:",
+    "verification:",
+    "outcome:",
     "report:",
 )
 
 # Mid-sentence worker scaffolding. Match anywhere, not only line prefixes.
 _SCAFFOLDING_MARKERS = (
     "first turn requirement",
+    "first turn must include",
     "make a tool call first",
     "submit_findings",
     "let me quickly verify",
@@ -483,7 +484,12 @@ def _safe_dispatch_prompt(request: DispatchRequest) -> str:
     for item in list(request.context.memories)[:8]:
         if isinstance(item, dict):
             content = str(item.get("content") or "").strip()
-            if content and not is_prompt_echo(content) and "[failures]" not in content.lower():
+            if (
+                content
+                and not is_prompt_echo(content)
+                and "[failures]" not in content.lower()
+                and not _is_scaffolding_memory(content)
+            ):
                 memory_bits.append(content[:400])
     lines = [
         request.prompt.strip(),
@@ -724,9 +730,39 @@ def public_card_text(text: str, *, fallback: str = "") -> str:
     return body
 
 
+def provider_failure_spoken(text: str) -> str:
+    """Named provider death. Empty when the stitch has no auth failure."""
+
+    lower = (text or "").lower()
+    if (
+        "auth failure:" in lower
+        or "auth_failed:401" in lower
+        or "rejected the api key" in lower
+    ):
+        if "openrouter" in lower or "401" in lower:
+            return (
+                "OpenRouter rejected the API key (HTTP 401). "
+                "The worker never reached the model."
+            )
+        return (
+            "The model provider rejected the API key. "
+            "The worker never reached the model."
+        )
+    if "not_authenticated" in lower and "agentic" in lower:
+        return "The agentic adapter is not authenticated."
+    return ""
+
+
 def choose_spoken_answer(*candidates: str) -> str:
     """First human answer that is not CLI metadata or a prompt echo."""
 
+    for raw in candidates:
+        failure = provider_failure_spoken(raw or "")
+        if failure:
+            return failure
+    joined = provider_failure_spoken("\n".join(candidates))
+    if joined:
+        return joined
     for raw in candidates:
         spoken = usable_worker_text(redact_text_markers(raw or ""))
         if not spoken or _is_placeholder_summary(spoken) or is_prompt_echo(spoken):
@@ -768,6 +804,13 @@ def _is_scaffolding_sentence(sentence: str) -> bool:
     if _is_skipped_worker_line(raw):
         return True
     lower = raw.lower()
+    return any(marker in lower for marker in _SCAFFOLDING_MARKERS)
+
+
+def _is_scaffolding_memory(content: str) -> bool:
+    lower = (content or "").lower()
+    if "submit_findings" in lower:
+        return True
     return any(marker in lower for marker in _SCAFFOLDING_MARKERS)
 
 

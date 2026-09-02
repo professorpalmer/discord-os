@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.13
+
+The job thread is the cowork space. Done is a deliverable or a named failure.
+
+- OpenRouter 401 no longer settles as OK plus "Worker finished without a written answer." The card speaks the dead key and the run is FAILED.
+- FINDING lines keep the body. Scaffolding memories do not poison the next prompt.
+- The live 3:21 AM 5thnode ask was this bug: provider died, Discord painted green.
+
 ## 0.5.12
 
 Public copy names the host computer, not a harness UI.

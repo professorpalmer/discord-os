@@ -914,6 +914,7 @@ class AgentOrchestrator:
             self._record_usage_spend(intake.workspace_id, run_id, result.usage)
 
         from agent_discord.puppetmaster.backend import choose_spoken_answer
+        from agent_discord.puppetmaster.backend import provider_failure_spoken
         from agent_discord.puppetmaster.backend import public_card_text
 
         progress_bits = tuple(
@@ -937,6 +938,27 @@ class AgentOrchestrator:
                     and is_github_unauthed_report(host_github)
                 ):
                     spoken = host_github
+        failure = provider_failure_spoken(
+            "\n".join(
+                bit
+                for bit in (
+                    spoken,
+                    token_text,
+                    result.final_summary,
+                    result.error,
+                    *progress_bits,
+                )
+                if bit
+            )
+        )
+        if failure:
+            spoken = failure
+            result = replace(
+                result,
+                status=TaskStatus.FAILED,
+                error=result.error or failure,
+                final_summary=failure,
+            )
         safe_final_summary = spoken or "Worker finished without a written answer."
         safe_error = redact_text_markers(result.error) if result.error else None
         self.store.update_run(
