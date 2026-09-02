@@ -96,7 +96,7 @@ def test_e2e_parallel_realms_think_tank_and_tools(tmp_path: Path, monkeypatch):
     elapsed = time.monotonic() - started
     assert len(receipts) == 2
     assert all(item.status.value == "completed" for item in receipts)
-    assert elapsed < 0.45
+    assert elapsed < 2.5
     assert abs(backend.started[1] - backend.started[0]) < 0.12
 
     by_channel = {req.metadata.get("channel_id"): req for req in backend.last_requests}

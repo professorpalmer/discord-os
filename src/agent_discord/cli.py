@@ -62,6 +62,7 @@ from agent_discord.host.service import (
 from agent_discord.orchestration.listen import (
     LISTEN_HISTORY_SLACK_MS,
     drain_inbound,
+    listen_destinations,
     publish_host_card,
 )
 from agent_discord.orchestration.orchestrator import AgentOrchestrator
@@ -1305,7 +1306,7 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     from agent_discord.host.memory import seed_memory_channels
     from agent_discord.host.realms import listen_channel_ids, seed_channel_realms
     from agent_discord.host.repos import load_host_repos
-    from agent_discord.orchestration.jobs import JobPool, realm_write_key
+    from agent_discord.orchestration.jobs import JobPool, resolved_write_key
 
     host_repos = load_host_repos()
     orch.host_repos = host_repos
@@ -1374,8 +1375,9 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                 workspace_id=args.workspace_id,
                 repos=host_repos,
             )
+            dests = listen_destinations(listen_ids, job_pool, orch)
             receipts: list[Any] = []
-            for listen_id in listen_ids:
+            for listen_id in dests:
                 receipts.extend(
                     drain_inbound(
                         orch,
@@ -1417,7 +1419,7 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                 job_pool.submit(
                     orch.run_task,
                     ask_intake,
-                    write_key=realm_write_key(ask_intake),
+                    write_key=resolved_write_key(ask_intake, orch),
                 )
             receipts.extend(job_pool.reap())
             if args.once:

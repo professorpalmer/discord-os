@@ -65,11 +65,11 @@ def test_never_rejects_second_cloud_and_activities():
 
 
 def test_now_lifts_include_steer_and_write_key():
-    ids = {item.id for item in lifts()}
-    assert "write-key-cwd" in ids
-    assert "thread-poll" in ids
-    assert "cli-compute-mode" in ids
-    assert "execution-lineage" in ids
+    world = {item.id: item.rank for item in lifts()}
+    assert world["write-key-cwd"] == "shipped"
+    assert world["thread-poll"] == "shipped"
+    assert world["cli-compute-mode"] == "shipped"
+    assert "execution-lineage" in world
 
 
 def test_lookup_miss_is_empty():
@@ -84,10 +84,10 @@ def test_lookup_lifts_finds_write_key():
     assert any(item.id == "write-key-cwd" for item in hits)
 
 
-def test_lambda_analog_does_not_claim_cwd_lock():
+def test_lambda_analog_names_cwd_lock():
     row = lookup("Lambda reserved concurrency")[0]
-    assert "channel_id" in row.discord
-    assert "per-cwd write lock" not in row.discord
+    assert "cwd" in row.discord.lower()
+    assert row.rank == "shipped"
 
 
 def test_lift_payload_is_json_safe():

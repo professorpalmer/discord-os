@@ -365,11 +365,13 @@ class AgentOrchestrator:
     def run_task(self, intake: TaskIntake) -> RunReceipt:
         pin = self.backend.resolve_model(self.model)
         if intake.message_id:
-            claimed = self.store.claim_inbound_message(
-                intake.message_id, intake.channel_id
-            )
-            if not claimed:
-                return self._duplicate_receipt(intake.message_id)
+            already = bool((intake.metadata or {}).get("inbound_claimed"))
+            if not already:
+                claimed = self.store.claim_inbound_message(
+                    intake.message_id, intake.channel_id
+                )
+                if not claimed:
+                    return self._duplicate_receipt(intake.message_id)
 
         from agent_discord.orchestration.service import is_spend_halted
 
@@ -718,6 +720,7 @@ class AgentOrchestrator:
             if visible:
                 painted_live = True
 
+        receipt_payload: dict[str, Any] = {}
         for event in events_iter:
             incoming = self._take_steers(run_id)
             if incoming:
@@ -752,6 +755,8 @@ class AgentOrchestrator:
             )
             if event.kind == EventKind.ERROR:
                 stream_error = summary.message
+            if event.kind == EventKind.RECEIPT:
+                receipt_payload = dict(safe_payload)
             if (
                 self.post_progress_to_discord
                 and self.discord is not None
@@ -824,12 +829,18 @@ class AgentOrchestrator:
                 streamed_status = (
                     TaskStatus.FAILED if stream_error else TaskStatus.COMPLETED
                 )
+            usage = None
+            if receipt_payload:
+                from agent_discord.puppetmaster.backend import usage_from_cli_meta
+
+                usage = usage_from_cli_meta(pin, "", receipt_payload)
             result = DispatchResult(
                 run_id=run_id,
                 status=streamed_status,
                 events=tuple(progress_items),
                 final_summary=progress_items[-1].message if progress_items else "completed",
                 error=stream_error,
+                usage=usage,
             )
             self._run_status[run_id] = streamed_status
 
@@ -1657,6 +1668,10 @@ class AgentOrchestrator:
             return None
         with self._steer_lock:
             return self._live_threads.get(tid)
+
+    def live_thread_ids(self) -> tuple[str, ...]:
+        with self._steer_lock:
+            return tuple(self._live_threads.keys())
 
     def steer(self, run_id: str, text: str) -> bool:
         """Append user text to a running worker. No sibling job, no second card."""
