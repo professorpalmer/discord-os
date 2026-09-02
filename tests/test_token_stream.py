@@ -47,12 +47,17 @@ def test_parse_token_and_reasoning_lines_redact_cot():
     assert progress.summary.percent == 40.0
 
 
-def test_token_buffer_bounds_and_phase():
+def test_token_buffer_keeps_phase_start_and_resets_on_phase_change():
     buf = TokenStreamBuffer()
-    buf.extend("x" * 5000)
-    assert len(buf.text) <= 1500
+    buf.extend("Checking realms first.")
+    buf.extend("x" * 2000)
+    assert buf.text.startswith("Checking realms first.")
     assert buf.set_phase("CODE") == "code"
+    assert buf.text == ""
+    buf.extend("print(1)")
+    assert buf.text == "print(1)"
     assert buf.set_phase("nope") == "code"
+    assert buf.text == "print(1)"
 
 
 def test_flush_interval_is_between_200_and_500ms():

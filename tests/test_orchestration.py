@@ -1009,9 +1009,7 @@ def test_long_public_answer_settles_as_two_or_three_thread_messages(
         "Nothing else is blocking close",
     )
     assert 2 <= len(blobs) <= 3
-    parents = _parent_headlines(fake_discord)
-    assert len(parents) == 1
-    assert "\n" not in parents[0].content.strip()
+    assert _parent_headlines(fake_discord) == []
     store.close()
 
 
@@ -1173,54 +1171,23 @@ def _parent_headlines(fake_discord):
     ]
 
 
-def test_channel_tldr_posts_short_parent_headline(tmp_path: Path):
+def test_completed_job_does_not_post_parent_channel_excerpt(tmp_path: Path):
     orch, store, fake_discord, _ = _orch(tmp_path)
     receipt = orch.run_task(
         TaskIntake(
             text="review invoices",
             channel_id="ch",
             workspace_id="ws",
-            message_id="ask-tldr",
+            message_id="ask-no-parent",
         )
     )
     assert receipt.status == TaskStatus.COMPLETED
     assert fake_discord.threads
-    parents = _parent_headlines(fake_discord)
-    assert len(parents) == 1
-    line = parents[0].content.strip()
-    assert "\n" not in line
-    assert len(line) <= 200
-    rendered = render_receipt(receipt)
-    assert line != rendered.strip()
-    assert "**Receipt**" not in line
-    assert "Progress:" not in line
-    assert not (parents[0].metadata or {}).get("components")
+    assert _parent_headlines(fake_discord) == []
     store.close()
 
 
-def test_channel_tldr_one_per_job_when_settle_retried(tmp_path: Path):
-    orch, store, fake_discord, _ = _orch(tmp_path)
-    intake = TaskIntake(
-        text="review invoices",
-        channel_id="ch",
-        workspace_id="ws",
-        message_id="ask-tldr-dup",
-    )
-    receipt = orch.run_task(intake)
-    thread_id = next(iter(fake_discord.threads))
-    orch._post_channel_tldr(
-        intake,
-        run_id=receipt.run_id,
-        task_id=receipt.task_id,
-        status=receipt.status,
-        summary=receipt.summary,
-        thread_id=thread_id,
-    )
-    assert len(_parent_headlines(fake_discord)) == 1
-    store.close()
-
-
-def test_channel_tldr_skips_when_job_never_started_a_thread(tmp_path: Path):
+def test_job_without_thread_has_no_parent_excerpt(tmp_path: Path):
     orch, store, fake_discord, _ = _orch(tmp_path)
     receipt = orch.run_task(
         TaskIntake(text="review invoices", channel_id="ch", workspace_id="ws")
@@ -1231,25 +1198,97 @@ def test_channel_tldr_skips_when_job_never_started_a_thread(tmp_path: Path):
     store.close()
 
 
-def test_channel_tldr_discord_error_does_not_fail_job(tmp_path: Path):
-    orch, store, fake_discord, _ = _orch(tmp_path)
-    inner = orch.discord.send_message
+def test_long_thinking_stays_visible_and_answer_keeps_its_start(
+    tmp_path: Path, monkeypatch
+):
+    clock = _Clock()
+    monkeypatch.setattr(
+        "agent_discord.orchestration.orchestrator._monotonic",
+        clock,
+    )
+    think_start = "Checking realms first."
+    thinking = think_start + "".join(
+        f" Step {index} inspects realm jobs cards and snowflake artifacts."
+        for index in range(50)
+    )
+    answer_start = "The impressive stack is always free."
+    answer = answer_start + "".join(
+        f" Step {index} keeps named host tools on this Mac."
+        for index in range(50)
+    )
+    assert len(thinking) > 1500
+    assert len(answer) > 1500
 
-    def boom(channel_id, content, *, thread_id=None, **kwargs):
-        if thread_id is None and (content or "").strip():
-            raise RuntimeError("discord down")
-        return inner(channel_id, content, thread_id=thread_id, **kwargs)
+    class _LongStreamBackend(_TokenStreamBackend):
+        def stream(self, request):
+            self.last_request = request
+            clock.advance(TOKEN_CARD_FLUSH_SECONDS + 0.05)
+            yield DispatchEvent(
+                kind=EventKind.PROGRESS,
+                summary=ProgressSummary(
+                    stage="thinking",
+                    message="completed",
+                    details={
+                        "token": True,
+                        "stream_phase": "thinking",
+                        "token_text": thinking,
+                    },
+                ),
+            )
+            clock.advance(TOKEN_CARD_FLUSH_SECONDS + 0.05)
+            yield DispatchEvent(
+                kind=EventKind.PROGRESS,
+                summary=ProgressSummary(
+                    stage="done",
+                    message="completed",
+                    percent=100.0,
+                    details={
+                        "token": True,
+                        "stream_phase": "done",
+                        "token_text": answer,
+                    },
+                ),
+            )
+            yield DispatchEvent(
+                kind=EventKind.RECEIPT,
+                summary=ProgressSummary(
+                    stage="done",
+                    message="completed",
+                    percent=100.0,
+                ),
+            )
 
-    orch.discord.send_message = boom
+    store = SQLiteStore(tmp_path / "visible-stream.sqlite3")
+    store.initialize()
+    fake_discord = FakeDiscordMCPProvider()
+    facade = _CountingFacade(
+        DiscordFacade(fake_discord, bot_token_fingerprint="fp", owner_id="test")
+    )
+    orch = AgentOrchestrator(
+        store=store,
+        backend=_LongStreamBackend(clock),
+        discord=facade,
+        post_progress_to_discord=True,
+        host_repos=(),
+    )
     receipt = orch.run_task(
         TaskIntake(
-            text="review invoices",
+            text="What are some of the impressive stack features offered in discord-OS?",
             channel_id="ch",
             workspace_id="ws",
-            message_id="ask-tldr-err",
+            message_id="ask-visible",
         )
     )
-    assert receipt.status == TaskStatus.COMPLETED
+    card_text = " ".join(facade.edit_blobs)
+    thread_text = " ".join(
+        (message.content or "")
+        for message in fake_discord.sent
+        if getattr(message, "thread_id", None)
+    )
+    assert think_start in card_text or think_start in thread_text
+    assert receipt.summary.startswith(answer_start)
+    assert not receipt.summary.startswith("ays ")
+    assert _parent_headlines(fake_discord) == []
     store.close()
 
 
