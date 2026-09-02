@@ -1171,6 +1171,59 @@ def _parent_headlines(fake_discord):
     ]
 
 
+def _parent_job_cards(fake_discord):
+    return [
+        m
+        for m in fake_discord.sent
+        if m.channel_id == "ch"
+        and not getattr(m, "thread_id", None)
+        and (m.metadata or {}).get("components")
+    ]
+
+
+def _thread_card_blobs(fake_discord, thread_id: str) -> str:
+    parts: list[str] = []
+    for message in fake_discord.sent:
+        if getattr(message, "thread_id", None) != thread_id:
+            continue
+        parts.append(message.content or "")
+        parts.append(json.dumps(message.metadata or {}, default=str))
+    return " ".join(parts)
+
+
+def test_write_gate_approve_and_done_stay_in_job_thread(tmp_path: Path):
+    from agent_discord.orchestration.service import set_write_gate
+
+    orch, store, fake_discord, backend = _orch(tmp_path)
+    set_write_gate(store, True)
+    parked = orch.run_task(
+        TaskIntake(
+            text="implement the login timeout fix",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="ask-gate",
+        )
+    )
+    assert parked.status == TaskStatus.PENDING
+    assert backend.dispatch_count == 0
+    assert fake_discord.threads
+    thread_id = next(iter(fake_discord.threads))
+    assert _parent_job_cards(fake_discord) == []
+    assert _parent_headlines(fake_discord) == []
+    parked_blob = _thread_card_blobs(fake_discord, thread_id)
+    assert "Approve write" in parked_blob
+    assert "Waiting for Approve to write." in parked_blob
+
+    result = orch.apply_job_action("approve", parked.run_id)
+    assert result["status"] == TaskStatus.COMPLETED.value
+    assert backend.dispatch_count == 1
+    assert _parent_job_cards(fake_discord) == []
+    assert _parent_headlines(fake_discord) == []
+    done_blob = _thread_card_blobs(fake_discord, thread_id)
+    assert "Done" in done_blob or "login timeout" in done_blob.lower()
+    store.close()
+
+
 def test_completed_job_does_not_post_parent_channel_excerpt(tmp_path: Path):
     orch, store, fake_discord, _ = _orch(tmp_path)
     receipt = orch.run_task(
