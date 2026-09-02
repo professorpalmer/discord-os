@@ -446,41 +446,44 @@ def cmd_map(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     out = out or sys.stdout
     from agent_discord.aws_map import (
         analog_payload,
-        filter_rank,
+        format_lifts,
         format_table,
         lift_payload,
-        lifts,
         load_catalog,
         lookup,
+        lookup_lifts,
+        RANKS,
     )
 
     query = str(getattr(args, "query", "") or "").strip()
-    rank = str(getattr(args, "rank", "") or "").strip()
-    try:
-        rows = lookup(query)
-        if rank:
-            filter_rank(rank)
-            rows = tuple(row for row in rows if row.rank == rank)
-    except ValueError as exc:
-        print(str(exc), file=sys.stderr)
+    rank = str(getattr(args, "rank", "") or "").strip().lower()
+    if rank and rank not in RANKS:
+        print(f"rank {rank!r} is not in {sorted(RANKS)}", file=sys.stderr)
         return 1
+    rows = lookup(query)
+    world = lookup_lifts(query)
+    if rank:
+        rows = tuple(row for row in rows if row.rank == rank)
+        world = tuple(item for item in world if item.rank == rank)
     if args.json:
         payload: dict[str, Any] = {
             "thesis": str(load_catalog().get("thesis") or ""),
             "analogs": [analog_payload(row) for row in rows],
+            "lifts": [lift_payload(item) for item in world],
         }
-        if not query:
-            payload["lifts"] = [lift_payload(item) for item in lifts()]
-            if rank:
-                payload["lifts"] = [
-                    item for item in payload["lifts"] if item["rank"] == rank
-                ]
         print(json.dumps(payload, indent=2), file=out)
+        if query and not rows and not world:
+            return 1
         return 0
-    if not rows:
+    if not rows and not world:
         print("no analogs matched", file=out)
         return 1
-    print(format_table(rows), file=out)
+    chunks: list[str] = []
+    if rows:
+        chunks.append(format_table(rows))
+    if world:
+        chunks.append(format_lifts(world))
+    print("\n\n".join(chunks), file=out)
     return 0
 
 

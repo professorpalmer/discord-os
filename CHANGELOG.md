@@ -4,7 +4,7 @@
 
 AWS names as Discord OS analogs, queryable from the host.
 
-- `discord-os map` reads packaged JSON (`S3` is snowflake objects, not a CDN URL).
+- `discord-os map` reads packaged JSON (`S3` is snowflake objects, not a CDN URL). Text and JSON both include world lifts.
 - Ranks are shipped / now / next / never. World lifts (arxiv lineage, OpenHands durable handles, Restate approve-and-wait) sit in the same catalog.
 - Docs: [docs/aws](docs/aws/README.md).
 

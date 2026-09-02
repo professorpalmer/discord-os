@@ -24,7 +24,7 @@ Ranks:
 
 Each analog names the AWS service, the Discord or host primitive, the owning module, and a constraint. `S3` is attachments addressed by channel/message/attachment snowflakes plus sha256. The CDN URL is a fetch, never the key.
 
-World lifts (arxiv, OpenHands durable handles, Restate human-in-the-loop, Discord Components v2 / snapshots) live in the same JSON under `lifts`. Adaptation is always: SQLite + Discord REST on this Mac.
+World lifts (arxiv, OpenHands durable handles, Restate human-in-the-loop, Discord Components v2 / snapshots) live in the same JSON under `lifts`. `discord-os map write-key` finds them. Adaptation is always: SQLite + Discord REST on this Mac.
 
 ## Do not lift
 
