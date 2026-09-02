@@ -417,12 +417,27 @@ class AgentOrchestrator:
             )
             if started:
                 job_thread_id = started
+                binder = getattr(self.store, "bind_task_thread", None)
+                if callable(binder):
+                    try:
+                        binder(task_id, started)
+                    except Exception:
+                        pass
+                merger = getattr(self.store, "merge_task_metadata", None)
+                if callable(merger) and intake.message_id:
+                    try:
+                        merger(task_id, {"message_id": intake.message_id})
+                    except Exception:
+                        pass
         if job_thread_id:
             from agent_discord.orchestration.jobs import note_origin_thread
 
             note_origin_thread(job_thread_id)
             self._mark_thread_live(job_thread_id, run_id)
         live = _LiveCard(self, intake.channel_id, job_thread_id, run_id)
+        resume_card = str((intake.metadata or {}).get("card_message_id") or "").strip()
+        if resume_card:
+            live.message_id = resume_card
         if self.post_progress_to_discord and self.discord is not None:
             live.paint(
                 progress_card(
@@ -620,6 +635,8 @@ class AgentOrchestrator:
                     intake,
                     task_id=task_id,
                     run_id=run_id,
+                    thread_id=job_thread_id,
+                    live=live,
                 )
                 self._release_live_thread(job_thread_id, run_id)
                 return receipt
@@ -1177,12 +1194,19 @@ class AgentOrchestrator:
         task = self.store.get_task(task_id) or {}
         intake_meta = dict(meta.get("intake_meta") or {})
         intake_meta["approved"] = True
+        intake_meta["inbound_claimed"] = True
+        card_mid = str(meta.get("card_message_id") or "").strip()
+        if card_mid:
+            intake_meta["card_message_id"] = card_mid
+        parked_thread = str(task.get("thread_id") or meta.get("thread_id") or "").strip()
+        parked_message = str(meta.get("message_id") or "").strip()
         intake = TaskIntake(
             text=str(task.get("intake_text") or meta.get("text") or ""),
             channel_id=str(task.get("channel_id") or meta.get("channel_id") or ""),
             workspace_id=str(task.get("workspace_id") or meta.get("workspace_id") or "default"),
             guild_id=meta.get("guild_id"),
-            thread_id=task.get("thread_id") or meta.get("thread_id"),
+            thread_id=parked_thread or None,
+            message_id=parked_message or None,
             requester_id=task.get("requester_id") or meta.get("requester_id"),
             metadata=intake_meta,
         )
@@ -1214,7 +1238,10 @@ class AgentOrchestrator:
         *,
         task_id: str,
         run_id: str,
+        thread_id: Optional[str] = None,
+        live: Optional[_LiveCard] = None,
     ) -> RunReceipt:
+        job_thread = (thread_id or intake.thread_id or "").strip() or None
         merger = getattr(self.store, "merge_task_metadata", None)
         if callable(merger):
             merger(
@@ -1225,7 +1252,8 @@ class AgentOrchestrator:
                     "channel_id": intake.channel_id,
                     "workspace_id": intake.workspace_id,
                     "guild_id": intake.guild_id,
-                    "thread_id": intake.thread_id,
+                    "thread_id": job_thread,
+                    "message_id": intake.message_id,
                     "requester_id": intake.requester_id,
                     "intake_meta": dict(intake.metadata or {}),
                 },
@@ -1243,18 +1271,24 @@ class AgentOrchestrator:
             summary=summary,
         )
         if self.post_progress_to_discord and self.discord is not None:
+            card = working_card(
+                task_label="Approve write",
+                message=summary,
+                run_id=run_id,
+                actions="parked",
+            )
             try:
-                send_card(
-                    self.discord,
-                    intake.channel_id,
-                    working_card(
-                        task_label="Approve write",
-                        message=summary,
-                        run_id=run_id,
-                        actions="parked",
-                    ),
-                    thread_id=intake.thread_id,
-                )
+                if live is not None:
+                    live.paint(card, stage="parked")
+                    if live.message_id and callable(merger):
+                        merger(task_id, {"card_message_id": live.message_id})
+                else:
+                    send_card(
+                        self.discord,
+                        intake.channel_id,
+                        card,
+                        thread_id=job_thread,
+                    )
             except Exception:
                 pass
         self._set_presence("idle", "Discord OS")

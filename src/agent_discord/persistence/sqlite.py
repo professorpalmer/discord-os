@@ -847,6 +847,18 @@ class SQLiteStore:
         )
         self._connection().commit()
 
+    def bind_task_thread(self, task_id: str, thread_id: str) -> None:
+        tid = (thread_id or "").strip()
+        rid = (task_id or "").strip()
+        if not tid or not rid:
+            return
+        self._connection().execute(
+            "UPDATE tasks SET thread_id=?, updated_at=datetime('now') WHERE task_id=?",
+            (tid, rid),
+        )
+        self._connection().commit()
+        self.merge_task_metadata(rid, {"thread_id": tid})
+
     def task_metadata(self, task_id: str) -> dict[str, Any]:
         row = self.get_task(task_id)
         if row is None:
