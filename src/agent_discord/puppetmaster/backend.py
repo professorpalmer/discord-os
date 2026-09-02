@@ -31,7 +31,7 @@ from agent_discord.redaction import (
     strip_forbidden_keys,
 )
 
-TOKEN_TEXT_LIMIT = 1500
+PHASE_TEXT_LIMIT = 16000
 RECEIPT_TEXT_LIMIT = 1800
 STREAM_PHASES = frozenset({"thinking", "plan", "code", "dispatch", "done"})
 _CLI_FLAG_CACHE: dict[tuple[str, str, str], bool] = {}
@@ -710,7 +710,12 @@ def _strip_monologue_prefix(raw: str) -> str:
     return text
 
 
-def public_card_text(text: str, *, fallback: str = "") -> str:
+def public_card_text(
+    text: str,
+    *,
+    fallback: str = "",
+    limit: int = RECEIPT_TEXT_LIMIT,
+) -> str:
     """User-facing card body. Drops monologue, prompt echoes, auth dumps."""
 
     raw = (text or "").strip()
@@ -724,7 +729,7 @@ def public_card_text(text: str, *, fallback: str = "") -> str:
 
     if is_github_auth_dump(raw):
         return fallback
-    body = usable_worker_text(raw)
+    body = usable_worker_text(raw, limit=limit)
     if not body or is_prompt_echo(body) or is_github_auth_dump(body):
         return fallback
     return body
@@ -1083,11 +1088,16 @@ class TokenStreamBuffer:
 
     def extend(self, chunk: str) -> str:
         if chunk:
-            self.text = (self.text + chunk)[-TOKEN_TEXT_LIMIT:]
+            self.text = self.text + chunk
+            if len(self.text) > PHASE_TEXT_LIMIT:
+                self.text = self.text[:PHASE_TEXT_LIMIT]
         return self.text
 
     def set_phase(self, phase: str) -> str:
-        self.phase = _normalize_stream_phase(phase, self.phase)
+        next_phase = _normalize_stream_phase(phase, self.phase)
+        if next_phase != self.phase:
+            self.text = ""
+        self.phase = next_phase
         return self.phase
 
 
@@ -1157,7 +1167,7 @@ def _parse_token_line(
     """Parse a token/reasoning/delta NDJSON line into a safe PROGRESS event.
 
     Raw chain-of-thought keys are stripped; only allowed reasoning summaries
-    and visible token text are kept. Accumulated text is bounded.
+    and visible token text are kept. Each phase keeps text from the start.
     """
     raw = (line or "").strip()
     if not raw:

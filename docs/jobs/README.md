@@ -1,6 +1,6 @@
 # Jobs
 
-Each ask is an OS thread **and** a Discord thread on the user message. That thread is the cowork space: describe an outcome, step away, come back to a spoken deliverable or a named failure — never a green OK with no answer. Two cooks at once. SQLite holds the DAG. Puppetmaster is the worker. Same machine. Not a cloud VM. Follow-ups in that Discord thread stay there (steer) with thread history.
+Each ask is an OS thread **and** a Discord thread on the user message. That thread is the cowork space: describe an outcome, step away, come back to a spoken deliverable or a named failure — never a green OK with no answer. The parent channel stays the ask plus the thread starter. Answers do not leak a leftover line outside the thread. Two cooks at once. SQLite holds the DAG. Puppetmaster is the worker. Same machine. Not a cloud VM. Follow-ups in that Discord thread stay there (steer) with thread history.
 
 Analyze work overlaps. Implement and swarm writes serialize per resolved realm cwd so two channels do not fight one working tree.
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.14
+
+The job stays in the thread. The parent channel does not get a leftover line.
+
+- No parent-channel TLDR. The channel stays the ask plus the thread starter.
+- The live card keeps the start of the current beat so the thought chain stays readable.
+- A stream phase change resets the token buffer. Done uses the start of the answer, not a mid-word tail.
+
 ## 0.5.13
 
 The job thread is the cowork space. Done is a deliverable or a named failure.
