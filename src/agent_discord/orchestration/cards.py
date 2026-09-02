@@ -351,11 +351,13 @@ def receipt_card(receipt: RunReceipt, *, max_progress: int = 5) -> CardMessage:
                     jump = discord_jump_url(
                         obj.guild_id, obj.channel_id, obj.message_id
                     )
-                lines.append(obj.filename or art.kind)
+                label = obj.filename or art.kind
             elif art.path:
-                lines.append(art.path)
+                label = art.path
             else:
-                lines.append(art.kind)
+                label = art.kind
+            digest = (art.sha256 or "")[:12]
+            lines.append(f"{label} {digest}".strip() if digest else label)
         if lines:
             fields.append(("Files", "\n".join(lines[:8]), False))
     if receipt.usage and receipt.usage.model:

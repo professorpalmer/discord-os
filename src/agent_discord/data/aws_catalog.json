@@ -59,10 +59,10 @@
     },
     {
       "aws": "Step Functions",
-      "discord": "SQLite runs/events plus one live card",
-      "module": "src/agent_discord/orchestration/orchestrator.py",
-      "rank": "next",
-      "note": "fail_stale_runs is not resume. 429 retry is one in-process re-dispatch. Do not import a Temporal cluster.",
+      "discord": "SQLite lineage DAG plus one live card",
+      "module": "src/agent_discord/orchestration/lineage.py",
+      "rank": "shipped",
+      "note": "node_key = sha256(step, input, parents). Retry parents a new run at the previous tip. fail_stale_runs still marks a dead process failed. Not a Temporal cluster.",
       "source": "job_d9a1e008889e"
     },
     {
@@ -294,7 +294,7 @@
       "discord": "Activities iframe dashboards",
       "module": "",
       "rank": "never",
-      "note": "An embedded app is a second UI. Discord is already the screen. Components v2 on the live card is the dashboard.",
+      "note": "An embedded app is a second UI. Discord is already the screen. Done cards cite sha256 lineage on Components v2. Do not ship Activities.",
       "source": "https://docs.discord.com/developers/activities/how-activities-work"
     },
     {
@@ -326,15 +326,15 @@
     {
       "id": "execution-lineage",
       "title": "Durable intermediate artifacts, not chat as state",
-      "rank": "now",
-      "adapt": "Each job already has DiscordObjectRef + SQLite events. Persist FINDING/plan/diff as typed artifacts with sha256 identity. Done answers should cite those snowflakes instead of re-inferring.",
+      "rank": "shipped",
+      "adapt": "Each run records intake/dispatch/finding/diff/settle nodes. Spoken Done is a settle artifact with sha256. The receipt cites that digest. discord-os lineage dumps the DAG.",
       "source": "https://arxiv.org/html/2605.12087"
     },
     {
       "id": "dag-replay",
       "title": "Execution lineage DAG for steer and retry",
-      "rank": "next",
-      "adapt": "Encode kv = hash(step, inputs, parent hashes) in SQLite. A steer is an upstream edit; replay only descendants. Do not replace JobPool with a hosted orchestrator.",
+      "rank": "shipped",
+      "adapt": "Steer appends a lineage node on the live run. Retry queues a new run with replay_of pointing at the previous tip. Descendants are listed; a dead process is not resumed in place.",
       "source": "https://arxiv.org/html/2605.06365"
     },
     {
@@ -347,8 +347,8 @@
     {
       "id": "restate-hitl",
       "title": "Suspend for approval without a second UI",
-      "rank": "next",
-      "adapt": "HOST Gate already parks implement. Restate-style suspend maps to a card button (existing Approve/Cancel/Retry) plus a SQLite wait state. Do not pay wall-clock on a hosted worker.",
+      "rank": "shipped",
+      "adapt": "HOST Gate parks implement. Approve/Cancel/Retry are Components v2 buttons on the live card plus a SQLite wait state. Not a hosted worker clock.",
       "source": "https://github.com/restatedev/ai-examples"
     },
     {

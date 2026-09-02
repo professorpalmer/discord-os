@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import threading
 import time
 from dataclasses import replace
@@ -361,6 +362,7 @@ class AgentOrchestrator:
         self._live_threads: dict[str, str] = {}
         self._steer_inbox: dict[str, list[str]] = {}
         self.steer_count = 0
+        self._lineage_tips: dict[str, str] = {}
 
     def run_task(self, intake: TaskIntake) -> RunReceipt:
         pin = self.backend.resolve_model(self.model)
@@ -405,6 +407,19 @@ class AgentOrchestrator:
         )
         self._run_status[run_id] = TaskStatus.RUNNING
         self._set_presence("dnd", intake.text)
+        replay_of = str((intake.metadata or {}).get("replay_of") or "").strip()
+        if replay_of:
+            from agent_discord.orchestration.lineage import list_nodes, tip_key
+
+            prev_tip = tip_key(list_nodes(self.store, replay_of))
+            self._record_lineage(
+                task_id,
+                run_id,
+                "replay",
+                replay_of,
+                parent_keys=(prev_tip,) if prev_tip else (),
+            )
+        self._record_lineage(task_id, run_id, "intake", intake.text)
 
         job_thread_id = intake.thread_id
         if (
@@ -632,6 +647,7 @@ class AgentOrchestrator:
             context=snapshot,
             metadata=extra_meta,
         )
+        self._record_lineage(task_id, run_id, "dispatch", prompt)
         prefer_host_report = bool(host_github) and not is_github_unauthed_report(
             host_github
         )
@@ -877,6 +893,14 @@ class AgentOrchestrator:
         for art in result.artifacts:
             persisted = self._persist_artifact(art, intake=intake, task_id=task_id, run_id=run_id)
             receipt_artifacts.append(persisted)
+            step = "diff" if persisted.kind in {"diff", "patch"} else "finding"
+            self._record_lineage(
+                task_id,
+                run_id,
+                step,
+                persisted.sha256 or persisted.kind,
+                artifact_id=persisted.artifact_id,
+            )
 
         usage_map = None
         if result.usage is not None:
@@ -945,6 +969,22 @@ class AgentOrchestrator:
                 )
             except Exception:
                 pass
+
+        settle_art = self._persist_text_artifact(
+            safe_final_summary,
+            kind="settle",
+            intake=intake,
+            task_id=task_id,
+            run_id=run_id,
+        )
+        receipt_artifacts.append(settle_art)
+        self._record_lineage(
+            task_id,
+            run_id,
+            "settle",
+            safe_final_summary,
+            artifact_id=settle_art.artifact_id,
+        )
 
         receipt = RunReceipt(
             task_id=task_id,
@@ -1114,11 +1154,21 @@ class AgentOrchestrator:
             if task:
                 text = str(task.get("intake_text") or "")
             if text:
+                from agent_discord.orchestration.lineage import (
+                    descendants_to_replay,
+                    list_nodes,
+                    tip_key,
+                )
+
+                nodes = list_nodes(self.store, run_id)
+                tip = tip_key(nodes)
                 return {
                     "action": verb,
                     "run_id": run_id,
                     "status": "queued",
                     "intake_text": text,
+                    "replay_of": run_id,
+                    "replay_keys": list(descendants_to_replay(nodes, tip) if tip else ()),
                 }
             return {"action": verb, "run_id": run_id, "status": "missing"}
         if verb == "approve":
@@ -1359,6 +1409,73 @@ class AgentOrchestrator:
             summary=f"ignored duplicate inbound message_id={message_id}",
             error=None,
         )
+
+    def _record_lineage(
+        self,
+        task_id: str,
+        run_id: str,
+        step: str,
+        body: str,
+        *,
+        artifact_id: str = "",
+        parent_keys: tuple[str, ...] = (),
+    ) -> str:
+        from agent_discord.orchestration.lineage import record_node
+
+        parents = list(parent_keys)
+        tip = self._lineage_tips.get(run_id)
+        if tip and tip not in parents:
+            parents.insert(0, tip)
+        key = record_node(
+            self.store,
+            run_id=run_id,
+            task_id=task_id,
+            step=step,
+            body=body,
+            parent_keys=parents,
+            artifact_id=artifact_id,
+        )
+        self._lineage_tips[run_id] = key
+        return key
+
+    def _persist_text_artifact(
+        self,
+        text: str,
+        *,
+        kind: str,
+        intake: TaskIntake,
+        task_id: str,
+        run_id: str,
+    ) -> ArtifactRef:
+        body = (text or "").encode("utf-8")
+        digest = hashlib.sha256(body).hexdigest()
+        artifact_id = uuid4().hex
+        filename = f"{kind}.md"
+        provenance = {
+            "run_id": run_id,
+            "task_id": task_id,
+            "channel_id": intake.channel_id,
+        }
+        ref = ArtifactRef(
+            artifact_id=artifact_id,
+            kind=kind,
+            path="",
+            provenance=provenance,
+            sha256=digest,
+            size=len(body),
+            filename=filename,
+        )
+        self.store.add_artifact(
+            artifact_id=artifact_id,
+            task_id=task_id,
+            run_id=run_id,
+            kind=kind,
+            filename=filename,
+            sha256=digest,
+            size=len(body),
+            provenance=provenance,
+        )
+        return ref
 
     def _persist_artifact(
         self,
@@ -1696,6 +1813,8 @@ class AgentOrchestrator:
                 hook(rid, body)
             except Exception:
                 pass
+        run = self.store.get_run(rid) or {}
+        self._record_lineage(str(run.get("task_id") or ""), rid, "steer", body)
         return True
 
     def _mark_thread_live(self, thread_id: Optional[str], run_id: str) -> None:

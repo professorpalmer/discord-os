@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.11
+
+SQLite execution lineage. Retry parents a new run. Activities stay never.
+
+- Each run records intake / dispatch / finding / diff / settle nodes. Done cites sha256. `discord-os lineage` dumps the DAG.
+- Steer appends a lineage node. Retry queues `replay_of` at the previous tip. A dead process still fails closed; this is not Temporal.
+- The live Components v2 card is the console. Discord Activities stay never.
+
 ## 0.5.10
 
 Steer, claim-before-watermark, analyze-without-implement, cwd write lock, and REST-poll of live job threads.
