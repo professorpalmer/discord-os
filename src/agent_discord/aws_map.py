@@ -94,6 +94,18 @@ def lookup(query: str, *, catalog: Optional[Mapping[str, Any]] = None) -> tuple[
     return tuple(hits)
 
 
+def lookup_lifts(query: str, *, catalog: Optional[Mapping[str, Any]] = None) -> tuple[Lift, ...]:
+    needle = query.strip().lower()
+    if not needle:
+        return lifts(catalog)
+    hits: list[Lift] = []
+    for row in lifts(catalog):
+        blob = f"{row.id} {row.title} {row.adapt} {row.source}".lower()
+        if needle in blob:
+            hits.append(row)
+    return tuple(hits)
+
+
 def filter_rank(
     rank: str,
     *,
@@ -142,3 +154,20 @@ def format_table(rows: Sequence[Analog]) -> str:
     if not rows:
         return "no analogs matched"
     return "\n\n".join(format_analog(row) for row in rows)
+
+
+def format_lift(row: Lift) -> str:
+    lines = [
+        f"{row.id}: {row.title}",
+        f"rank: {row.rank}",
+        row.adapt,
+    ]
+    if row.source:
+        lines.append(row.source)
+    return "\n".join(lines)
+
+
+def format_lifts(rows: Sequence[Lift]) -> str:
+    if not rows:
+        return "no lifts matched"
+    return "\n\n".join(format_lift(row) for row in rows)

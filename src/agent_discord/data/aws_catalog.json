@@ -43,10 +43,10 @@
     },
     {
       "aws": "Lambda reserved concurrency",
-      "discord": "JobPool max_live=8 plus per-cwd write lock",
+      "discord": "JobPool max_live=8; listen write_key is still channel_id",
       "module": "src/agent_discord/orchestration/jobs.py",
       "rank": "now",
-      "note": "Listen currently keys the write lock on channel_id, not resolved cwd. Two channels on one tree can write in parallel.",
+      "note": "realm_write_key(cwd) exists. REST listen and HOST Ask still pass channel_id. Two channels on one tree can implement in parallel.",
       "source": "job_d9a1e008889e"
     },
     {
@@ -99,7 +99,7 @@
     },
     {
       "aws": "RDS",
-      "discord": "SQLite WAL: bindings, tasks, runs, events, memory, artifacts, watermarks, gateway lock",
+      "discord": "SQLite WAL: bindings, tasks, runs, events, memory, artifacts, watermarks, gateway lock, schedules, spend_events, preferences, operators",
       "module": "src/agent_discord/persistence/sqlite.py",
       "rank": "shipped",
       "note": "Thread-local connections, busy_timeout 30s. Tests inject fakes; no network in pytest.",
@@ -140,7 +140,7 @@
     {
       "aws": "EventBridge",
       "discord": "schedule rows in SQLite; listen loop fires them",
-      "module": "src/agent_discord/cli.py",
+      "module": "src/agent_discord/orchestration/listen.py",
       "rank": "next",
       "note": "Inbound Discord webhooks are not an event bus. The only webhook PATCH is interaction follow-up after deferred ACK.",
       "source": "job_36e88e788ecd"
@@ -172,9 +172,9 @@
     {
       "aws": "Cost Explorer",
       "discord": "HOST Halt / discord-os spend",
-      "module": "src/agent_discord/orchestration/service.py",
+      "module": "src/agent_discord/cli.py",
       "rank": "now",
-      "note": "Feed real usage into spend_events from CLI JSON cost/tokens.",
+      "note": "HOST Halt is panel.py. discord-os spend is this CLI. PuppetmasterCliBackend._SAFE_SUMMARY_KEYS drops cost/tokens even when CLI JSON emits them.",
       "source": "job_25b133796ba5"
     },
     {
@@ -252,9 +252,17 @@
     {
       "aws": "Pinpoint",
       "discord": "Discord mobile notifications on channel posts",
+      "module": "src/agent_discord/orchestration/cards.py",
+      "rank": "shipped",
+      "note": "Same plane as SNS. Voice memos are Transcribe (whisper CLI in voice.py), not a second push vendor.",
+      "source": "docs/host"
+    },
+    {
+      "aws": "Transcribe",
+      "discord": "local whisper CLI on voice attachments",
       "module": "src/agent_discord/discord/voice.py",
       "rank": "shipped",
-      "note": "Voice memos become intake via local whisper CLI if present. No second push vendor.",
+      "note": "Intake only. Discord already notifies; this is speech-to-text on the Mac.",
       "source": "docs/NEXT_LEVEL_PLAN.md"
     },
     {
@@ -333,7 +341,7 @@
       "id": "openhands-handle",
       "title": "Durable job handle that survives host restart",
       "rank": "now",
-      "adapt": "OpenHands asks for job id, spec hash, artifact ids, cancel receipt, idempotency key. Discord OS has run rows but acks the Discord message before claim. Claim first, then watermark.",
+      "adapt": "OpenHands asks for job id, spec hash, artifact ids, cancel receipt, idempotency key. Discord is not deleted on submit. The lost-on-crash ack is listen_watermarks. Claim first, then watermark.",
       "source": "https://github.com/OpenHands/OpenHands/issues/14590"
     },
     {
