@@ -31,4 +31,6 @@ Stdlib-first. Tests inject fakes. No network in `pytest`.
 | `src/agent_discord/puppetmaster/` | Compute backends |
 | `src/agent_discord/persistence/` | SQLite |
 
+AWS names for these boxes live in [docs/aws](../aws/README.md). Query: `discord-os map`.
+
 Optional Discord MCP adapters: see [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) at the repo root. Upstream source is not copied.

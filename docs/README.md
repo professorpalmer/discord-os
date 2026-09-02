@@ -15,6 +15,7 @@ Surface README is setup + explainer + this map. Feature pages live in their own 
 | [compute](compute/README.md) | Puppetmaster, keys, model pins |
 | [objects](objects/README.md) | Snowflake object store |
 | [architecture](architecture/README.md) | Process shape and contracts |
+| [aws](aws/README.md) | AWS names as Discord analogs |
 | [cli](cli/README.md) | Command map |
 
 History (not product surface): [NEXT_LEVEL_PLAN.md](NEXT_LEVEL_PLAN.md). Screenshots: [screenshots/](screenshots/).

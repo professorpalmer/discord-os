@@ -25,6 +25,7 @@ discord-os pair --user-id ID [--role owner|operator]
 discord-os schedule --every 1h --channel-id ID PROMPT
 discord-os spend [--cap USD] [--halt] [--resume]
 discord-os put|get|ls …
+discord-os map [QUERY] [--rank shipped|now|next|never] [--json]
 ```
 
 `python -m agent_discord` is the same entry. `--fake` is the hermetic path.
