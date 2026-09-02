@@ -1,6 +1,6 @@
 # Snowflake objects
 
-Artifacts are Discord objects, not a local disk dump with a progress relay.
+Artifacts are Discord objects, not a local disk dump with a progress relay. This is the S3 analog: snowflake triple plus sha256. The CDN URL expires. `get` re-fetches the message.
 
 ```text
 bytes → attachment + caption

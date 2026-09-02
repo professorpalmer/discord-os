@@ -1,6 +1,6 @@
 # Cards
 
-One live card per job. That card lives in the **job thread**, not the channel.
+One live card per job. That card lives in the **job thread**, not the channel. Components v2 is the console. Discord Activities stay never.
 
 The moment an ask lands, Discord OS opens a thread on the user message and posts "On it." Then the worker starts. The channel stays free.
 

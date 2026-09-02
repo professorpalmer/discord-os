@@ -1,6 +1,6 @@
 # Realms
 
-One Discord channel is one checkout. Bounce `#puppetmaster` / `#dugout` / `#marionette` on the phone. Same Mac.
+One Discord channel is one checkout. Bounce `#puppetmaster` / `#dugout` / `#marionette` on the phone. Same Mac disk. Implement writes serialize on that cwd, not on the channel id.
 
 Hermes steal: platform + channel = room. Not Bot Mode chrome.
 

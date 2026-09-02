@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.12
+
+Public copy names the host computer, not a harness UI.
+
+- GitHub, PyPI, README, CLI `--help`, and feature docs lead with Discord as the screen and this Mac as SQLite + JobPool + Puppetmaster.
+- Artifacts stay snowflake IDs plus sha256. Phone is the remote.
+
 ## 0.5.11
 
 SQLite execution lineage. Retry parents a new run. Activities stay never.

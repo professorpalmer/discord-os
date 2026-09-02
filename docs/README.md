@@ -1,6 +1,8 @@
 # Docs index
 
-Surface README is setup + explainer + this map. Feature pages live in their own folders so an agent can open one directory and know the seam.
+Discord is the screen. This process is the computer. The folders below are the seams of that computer: JobPool, SQLite lineage, REST intake, Puppetmaster, snowflake objects.
+
+Surface README is first run plus this map. Feature pages live in their own folders so an agent can open one directory and know the seam.
 
 | Folder | What it owns |
 |---|---|

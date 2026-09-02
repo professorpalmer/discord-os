@@ -1,6 +1,6 @@
 # Host
 
-The host is the long-running process on this Mac. Discord is only the remote.
+The host is the long-running process on this Mac: listen loop, JobPool, SQLite, Puppetmaster workers. Discord is only the remote.
 
 `discord-os setup` / `host start` detaches it and posts the HOST card: On, Off, Ask, a More menu (Pair / Halt / Gate / Roles / GitHub / Files / Terminal / Browser), and Recent jobs. Message intake is REST. A Gateway is open **only** so those controls work. Do not run a second bot process on the same token. Discord has no tabs — the More select is the grouping.
 
