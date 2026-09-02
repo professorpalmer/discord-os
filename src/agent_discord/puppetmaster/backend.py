@@ -11,7 +11,7 @@ import subprocess
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator, Mapping, Optional
+from typing import Any, Callable, Iterator, Mapping, Optional
 
 from agent_discord.contracts import (
     DispatchEvent,
@@ -257,8 +257,7 @@ class PuppetmasterCliBackend:
         command = [
             self.cli,
             "cursor",
-            "--implement",
-            "--allow-dirty",
+            *cursor_write_argv(request),
             "--model",
             pin.adapter_name,
             "--timeout-seconds",
@@ -332,16 +331,7 @@ class PuppetmasterCliBackend:
                 ),
             ),
             final_summary=summary,
-            usage=UsageReceipt(
-                model=pin.canonical,
-                adapter_name=pin.adapter_name,
-                metadata={
-                    "backend": "cli",
-                    "cli": self.cli,
-                    "cli_model": pin.adapter_name,
-                    "job_id": safe_meta.get("job_id"),
-                },
-            ),
+            usage=usage_from_cli_meta(pin, self.cli, safe_meta),
         )
 
     def steer(self, run_id: str, text: str) -> None:
@@ -352,6 +342,35 @@ class PuppetmasterCliBackend:
         if not rid or not body:
             return
         self._steers.setdefault(rid, []).append(body)
+
+    def _take_backend_steers(self, run_id: str) -> list[str]:
+        rid = (run_id or "").strip()
+        if not rid:
+            return []
+        return list(self._steers.pop(rid, []))
+
+    def _flush_live_steers(self, run_id: str, proc: Any) -> None:
+        texts = self._take_backend_steers(run_id)
+        if not texts:
+            return
+        blob = "\n".join(texts).strip()
+        if not blob:
+            return
+        path = Path(resolved_state_dir()) / "steers" / f"{run_id}.txt"
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(blob + "\n")
+        except OSError:
+            pass
+        stdin = getattr(proc, "stdin", None)
+        if stdin is None:
+            return
+        try:
+            stdin.write(blob + "\n")
+            stdin.flush()
+        except Exception:
+            pass
 
     def cancel(self, run_id: str) -> bool:
         """Report unsupported cancellation instead of calling a fake CLI command."""
@@ -388,12 +407,14 @@ class PuppetmasterCliBackend:
             return
 
         prompt = _safe_dispatch_prompt(request)
+        early_steers = self._take_backend_steers(request.run_id)
+        if early_steers:
+            prompt = f"{prompt}\n\nFollow-up:\n" + "\n".join(early_steers)
         command = prepend_early_job_id(
             [
                 self.cli,
                 "cursor",
-                "--implement",
-                "--allow-dirty",
+                *cursor_write_argv(request),
                 "--model",
                 pin.adapter_name,
                 "--timeout-seconds",
@@ -412,6 +433,7 @@ class PuppetmasterCliBackend:
                 command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                stdin=subprocess.PIPE,
                 text=True,
                 cwd=workdir,
                 env=worker_env(),
@@ -438,12 +460,19 @@ class PuppetmasterCliBackend:
             model=pin.canonical,
             cli=self.cli,
             timeout_seconds=self.timeout_seconds,
+            steer_poll=lambda: self._flush_live_steers(request.run_id, proc),
         ):
             if event.kind == EventKind.ERROR:
                 self._statuses[request.run_id] = TaskStatus.FAILED
             elif event.kind == EventKind.RECEIPT:
                 self._statuses[request.run_id] = TaskStatus.COMPLETED
             yield event
+        stdin = getattr(proc, "stdin", None)
+        if stdin is not None:
+            try:
+                stdin.close()
+            except Exception:
+                pass
         if self._statuses.get(request.run_id) == TaskStatus.RUNNING:
             self._statuses[request.run_id] = TaskStatus.COMPLETED
 
@@ -524,8 +553,69 @@ _SAFE_SUMMARY_KEYS = frozenset(
         "ok",
         "error",
         "message",
+        "cost",
+        "tokens",
+        "usage",
+        "input_tokens",
+        "output_tokens",
+        "total_cost",
+        "cost_usd",
     }
 )
+
+
+def cursor_write_argv(request: DispatchRequest) -> list[str]:
+    """Honor compute_mode. Analyze stays read-only on the Cursor CLI."""
+
+    mode = str((request.metadata or {}).get("compute_mode") or "").strip().lower()
+    if mode == "analyze":
+        return []
+    return ["--implement", "--allow-dirty"]
+
+
+def usage_from_cli_meta(
+    pin: ModelPin,
+    cli: str,
+    safe_meta: Mapping[str, Any],
+) -> UsageReceipt:
+    payload = dict(safe_meta or {})
+    nested = payload.get("usage")
+    if isinstance(nested, Mapping):
+        for key in (
+            "cost",
+            "total_cost",
+            "cost_usd",
+            "input_tokens",
+            "output_tokens",
+            "tokens",
+        ):
+            if key in nested and key not in payload:
+                payload[key] = nested[key]
+    meta: dict[str, Any] = {
+        "backend": "cli",
+        "cli": cli,
+        "cli_model": pin.adapter_name,
+        "job_id": payload.get("job_id"),
+    }
+    for key in ("cost", "total_cost", "cost_usd", "tokens"):
+        if key in payload:
+            meta[key] = payload[key]
+    return UsageReceipt(
+        model=pin.canonical,
+        adapter_name=pin.adapter_name,
+        input_tokens=_optional_int(payload.get("input_tokens")),
+        output_tokens=_optional_int(payload.get("output_tokens")),
+        metadata=meta,
+    )
+
+
+def _optional_int(raw: Any) -> Optional[int]:
+    if raw is None or raw == "":
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def prepend_early_job_id(command: list[str]) -> list[str]:
@@ -1175,6 +1265,7 @@ def iter_cli_process_events(
     model: str,
     cli: str = "",
     timeout_seconds: float = 3600.0,
+    steer_poll: Optional[Callable[[], None]] = None,
 ) -> Iterator[DispatchEvent]:
     """Read CLI stdout/stderr plus optional `deltas --follow` into live events."""
 
@@ -1210,6 +1301,11 @@ def iter_cli_process_events(
             try:
                 item = line_queue.get(timeout=0.25)
             except queue.Empty:
+                if steer_poll is not None:
+                    try:
+                        steer_poll()
+                    except Exception:
+                        pass
                 if proc.poll() is not None and main_done >= 2:
                     break
                 continue

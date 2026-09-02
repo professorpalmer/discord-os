@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.10
+
+Steer, claim-before-watermark, analyze-without-implement, cwd write lock, and REST-poll of live job threads.
+
+- Live-thread follow-ups flush into the Cursor CLI worker (sidecar + stdin). Analyze omits `--implement --allow-dirty`.
+- Claim inbound before advancing the listen watermark. Duplicate claims do not spawn a second job.
+- Implement and swarm serialize on resolved realm cwd. The listen loop drains live job thread ids over REST. Gateway stays buttons-only.
+- CLI cost/tokens survive the safe summary filter. The 3.11 job-pool timing assert is 2.5s, not 0.45s.
+
 ## 0.5.9
 
 AWS names as Discord OS analogs, queryable from the host.

@@ -315,7 +315,10 @@ class FakeDiscordMCPProvider:
         matched = [
             m
             for m in self.inbox
-            if m.channel_id == channel_id
+            if (
+                m.channel_id == channel_id
+                or (thread_id is None and m.thread_id == channel_id)
+            )
             and (thread_id is None or m.thread_id == thread_id)
         ]
         return matched[-limit:]
