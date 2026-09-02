@@ -6,7 +6,7 @@ Discord is the screen. This process is the computer. The phone is the remote. On
 
 1. [README.md](README.md) — setup, phone verbs, index
 2. [docs/README.md](docs/README.md) — feature map
-3. The feature folder that matches the ask (`docs/realms`, `docs/jobs`, …)
+3. The feature folder that matches the ask (`docs/realms`, `docs/jobs`, `docs/aws`, …)
 4. CodeGraph, then the files that page names
 
 Do not crawl the tree first. Each `docs/<feature>/README.md` lists the modules that own that seam.
@@ -26,6 +26,7 @@ Do not crawl the tree first. Each `docs/<feature>/README.md` lists the modules t
 ```text
 discord-os setup --channel-id ID
 discord-os add realm|memory|repo|wiki|tool|github|list
+discord-os map [QUERY]
 discord-os check
 discord-os wiki query "…"
 ```

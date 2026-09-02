@@ -73,6 +73,7 @@ Read these if you are an agent in this repo. Start at [docs/](docs/README.md).
 | Compute and keys | [docs/compute](docs/compute/README.md) |
 | Snowflake objects | [docs/objects](docs/objects/README.md) |
 | Architecture | [docs/architecture](docs/architecture/README.md) |
+| AWS = Discord | [docs/aws](docs/aws/README.md) |
 | CLI map | [docs/cli](docs/cli/README.md) |
 
 ```bash

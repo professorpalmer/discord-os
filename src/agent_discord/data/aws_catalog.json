@@ -1,0 +1,389 @@
+{
+  "thesis": "Discord is the screen, identity, ACL, notification, and object plane. This process on one Mac is the computer. AWS names are analogs, not a second cloud.",
+  "constraints": [
+    "REST default; Gateway only for On/Off buttons",
+    "Artifacts are Discord objects (channel/message/attachment/sha256); never persist a CDN URL as the key",
+    "Two Discord threads cook at once; implement writes serialize per realm cwd",
+    "One live card per job; edit in place; do not flood the thread",
+    "Host tools are CLI or HTTP; no MCP bus inside Discord",
+    "No hosted fleet; no isolated VMs; JSON never YAML; no emojis"
+  ],
+  "analogs": [
+    {
+      "aws": "IAM",
+      "discord": "guild roles + pair owner/operator allowlist",
+      "module": "src/agent_discord/host/panel.py",
+      "rank": "shipped",
+      "note": "Discord roles are the ACL chrome. Pairing is the actual who-may-dispatch gate after first On.",
+      "source": "docs/host"
+    },
+    {
+      "aws": "STS",
+      "discord": "pairing tickets + KeyVault HMAC session",
+      "module": "src/agent_discord/keys/connect.py",
+      "rank": "shipped",
+      "note": "Tickets are assume-role for keys, not Discord OAuth for every job.",
+      "source": "docs/compute"
+    },
+    {
+      "aws": "EC2",
+      "discord": "this host process; On/Off is start/stop",
+      "module": "src/agent_discord/host/power.py",
+      "rank": "shipped",
+      "note": "One Mac. LaunchAgent is the reboot policy. Not a fleet.",
+      "source": "docs/host"
+    },
+    {
+      "aws": "ECS",
+      "discord": "channel realm = named checkout tag on the shared host",
+      "module": "src/agent_discord/host/realms.py",
+      "rank": "shipped",
+      "note": "A realm is not an AWS account or VPC. Prompt-named repo still overrides cwd.",
+      "source": "docs/realms"
+    },
+    {
+      "aws": "Lambda reserved concurrency",
+      "discord": "JobPool max_live=8 plus per-cwd write lock",
+      "module": "src/agent_discord/orchestration/jobs.py",
+      "rank": "now",
+      "note": "Listen currently keys the write lock on channel_id, not resolved cwd. Two channels on one tree can write in parallel.",
+      "source": "job_d9a1e008889e"
+    },
+    {
+      "aws": "SQS",
+      "discord": "REST drain + listen_watermarks snowflake cursor",
+      "module": "src/agent_discord/orchestration/listen.py",
+      "rank": "now",
+      "note": "Watermark advances at submit, before claim_inbound_message. Analog: delete the message before the consumer starts. Host death cannot revive it.",
+      "source": "job_d9a1e008889e"
+    },
+    {
+      "aws": "Step Functions",
+      "discord": "SQLite runs/events plus one live card",
+      "module": "src/agent_discord/orchestration/orchestrator.py",
+      "rank": "next",
+      "note": "fail_stale_runs is not resume. 429 retry is one in-process re-dispatch. Do not import a Temporal cluster.",
+      "source": "job_d9a1e008889e"
+    },
+    {
+      "aws": "S3",
+      "discord": "attachment + caption; durable key is snowflake triple + sha256",
+      "module": "src/agent_discord/discord/object_store.py",
+      "rank": "shipped",
+      "note": "CDN URL is ephemeral (~24h). get() re-fetches the message for a fresh URL. Channel id is the ACL.",
+      "source": "docs/objects"
+    },
+    {
+      "aws": "Glacier",
+      "discord": "message snapshots via forwarding; overflow local stash",
+      "module": "src/agent_discord/discord/object_store.py",
+      "rank": "next",
+      "note": "put_or_overflow already parks oversize locally. Discord message_snapshot is an immutable copy if we ever freeze a Done card.",
+      "source": "https://docs.discord.com/developers/resources/message"
+    },
+    {
+      "aws": "CloudFront",
+      "discord": "Discord CDN (not a durable key)",
+      "module": "src/agent_discord/discord/object_store.py",
+      "rank": "never",
+      "note": "Jump links are for humans. Persisting a CDN URL as the object key is forbidden.",
+      "source": "docs/objects"
+    },
+    {
+      "aws": "EFS",
+      "discord": "the Mac checkout bound to the channel",
+      "module": "src/agent_discord/host/realms.py",
+      "rank": "shipped",
+      "note": "Shared POSIX disk, not a Discord primitive. Isolation is a mutex, not a filesystem namespace.",
+      "source": "docs/realms"
+    },
+    {
+      "aws": "RDS",
+      "discord": "SQLite WAL: bindings, tasks, runs, events, memory, artifacts, watermarks, gateway lock",
+      "module": "src/agent_discord/persistence/sqlite.py",
+      "rank": "shipped",
+      "note": "Thread-local connections, busy_timeout 30s. Tests inject fakes; no network in pytest.",
+      "source": "docs/architecture"
+    },
+    {
+      "aws": "DynamoDB",
+      "discord": "workspace_bindings keyed by (workspace_id, channel_id)",
+      "module": "src/agent_discord/persistence/sqlite.py",
+      "rank": "shipped",
+      "note": "merge_binding_metadata must merge, not wipe.",
+      "source": "docs/realms"
+    },
+    {
+      "aws": "Secrets Manager",
+      "discord": "KeyVault + host .env SECRET_KEYS; keys in subprocess env never argv",
+      "module": "src/agent_discord/keys/vault.py",
+      "rank": "shipped",
+      "note": "IAM instance-profile analog on the agentic path: OPENROUTER_API_KEY in env only.",
+      "source": "docs/compute"
+    },
+    {
+      "aws": "Parameter Store",
+      "discord": "preferences table (preference/style/failure) + DISCORD_OS_* env",
+      "module": "src/agent_discord/persistence/sqlite.py",
+      "rank": "shipped",
+      "note": "prompt_memory_block injects into dispatch. Failures record on red runs; [failures] stripped from the prompt.",
+      "source": "job_25b133796ba5"
+    },
+    {
+      "aws": "Systems Manager",
+      "discord": "HostTool catalog (CLI/HTTP inventory, not an executor)",
+      "module": "src/agent_discord/host/tools.py",
+      "rank": "shipped",
+      "note": "Workers already have a shell. Catalog advertises wiki/gh/aws extras. No MCP bus inside Discord.",
+      "source": "docs/tools"
+    },
+    {
+      "aws": "EventBridge",
+      "discord": "schedule rows in SQLite; listen loop fires them",
+      "module": "src/agent_discord/cli.py",
+      "rank": "next",
+      "note": "Inbound Discord webhooks are not an event bus. The only webhook PATCH is interaction follow-up after deferred ACK.",
+      "source": "job_36e88e788ecd"
+    },
+    {
+      "aws": "SNS",
+      "discord": "channel posts (mobile push is Discord's)",
+      "module": "src/agent_discord/orchestration/cards.py",
+      "rank": "shipped",
+      "note": "No second push vendor. Phone is the remote because Discord already notifies.",
+      "source": "docs/host"
+    },
+    {
+      "aws": "CloudWatch Logs",
+      "discord": "one live card + persist-then-settle thread messages",
+      "module": "src/agent_discord/orchestration/orchestrator.py",
+      "rank": "shipped",
+      "note": "Token flush 0.35s. Do not spam a new message per token. Done is the user answer, not worker monologue.",
+      "source": "docs/cards"
+    },
+    {
+      "aws": "CloudTrail",
+      "discord": "SQLite events + spend_events",
+      "module": "src/agent_discord/persistence/sqlite.py",
+      "rank": "next",
+      "note": "Usage-first spend exists but CLI/swarm often omit cost metadata, so the $10 cap cannot see live Cursor spend.",
+      "source": "job_25b133796ba5"
+    },
+    {
+      "aws": "Cost Explorer",
+      "discord": "HOST Halt / discord-os spend",
+      "module": "src/agent_discord/orchestration/service.py",
+      "rank": "now",
+      "note": "Feed real usage into spend_events from CLI JSON cost/tokens.",
+      "source": "job_25b133796ba5"
+    },
+    {
+      "aws": "API Gateway",
+      "discord": "Discord REST facade; optional interactions HTTP",
+      "module": "src/agent_discord/discord/rest.py",
+      "rank": "shipped",
+      "note": "Intake is REST. Interactions HTTP is opt-in. MCP adapters are optional third-party, not the bus.",
+      "source": "docs/architecture"
+    },
+    {
+      "aws": "ALB",
+      "discord": "listen_channel_ids union of primary + realms + memory",
+      "module": "src/agent_discord/host/realms.py",
+      "rank": "now",
+      "note": "REST listen does not poll live job threads, so real Discord steer depends on a path tests cover with FakeDiscord only.",
+      "source": "job_d9a1e008889e"
+    },
+    {
+      "aws": "VPC",
+      "discord": "private staff server; channel is the subnet",
+      "module": "src/agent_discord/host/realms.py",
+      "rank": "never",
+      "note": "Discord categories/forums are visual + who-can-type, not a sandbox of the Mac disk.",
+      "source": "job_7fbccfc4a5b8"
+    },
+    {
+      "aws": "Organizations",
+      "discord": "one bot token, one SQLite, one GH_TOKEN",
+      "module": "src/agent_discord/persistence/sqlite.py",
+      "rank": "never",
+      "note": "Do not mint per-realm bot tokens or pretend Discord subscriptions are filesystem IAM.",
+      "source": "job_7fbccfc4a5b8"
+    },
+    {
+      "aws": "KMS",
+      "discord": "KeyVault HMAC-SHA256 keystream",
+      "module": "src/agent_discord/keys/vault.py",
+      "rank": "shipped",
+      "note": "Local wrapping, not a cloud HSM.",
+      "source": "docs/compute"
+    },
+    {
+      "aws": "Athena",
+      "discord": "SQLite FTS on memory_entries + last-N channel substring",
+      "module": "src/agent_discord/host/memory.py",
+      "rank": "next",
+      "note": "No Discord guild search API in this repo. Recall is not an analytics warehouse.",
+      "source": "job_36e88e788ecd"
+    },
+    {
+      "aws": "Knowledge Bases",
+      "discord": "portable wiki over HTTP (discord-os wiki query)",
+      "module": "src/agent_discord/host/wiki.py",
+      "rank": "shipped",
+      "note": "Same results as wiki MCP. Fail-closed error dicts. No MCP session in the Discord worker.",
+      "source": "docs/wiki"
+    },
+    {
+      "aws": "ElastiCache",
+      "discord": "think-tank channels + SQLite source=think-tank",
+      "module": "src/agent_discord/host/memory.py",
+      "rank": "shipped",
+      "note": "Durable group-chat memory, not TTL cache. Hermes persist-then-settle into other bank rooms.",
+      "source": "docs/memory"
+    },
+    {
+      "aws": "Cognito",
+      "discord": "Discord identity; first On may become owner",
+      "module": "src/agent_discord/host/power.py",
+      "rank": "shipped",
+      "note": "Do not add a second IdP.",
+      "source": "docs/host"
+    },
+    {
+      "aws": "Pinpoint",
+      "discord": "Discord mobile notifications on channel posts",
+      "module": "src/agent_discord/discord/voice.py",
+      "rank": "shipped",
+      "note": "Voice memos become intake via local whisper CLI if present. No second push vendor.",
+      "source": "docs/NEXT_LEVEL_PLAN.md"
+    },
+    {
+      "aws": "IoT Core",
+      "discord": "the phone is the remote",
+      "module": "src/agent_discord/host/panel.py",
+      "rank": "shipped",
+      "note": "HOST card On/Off/Ask/More. Discord has no tabs; More select is the grouping.",
+      "source": "docs/host"
+    },
+    {
+      "aws": "Batch / Fargate / App Runner",
+      "discord": "Puppetmaster backends on this Mac",
+      "module": "src/agent_discord/puppetmaster/backend.py",
+      "rank": "now",
+      "note": "Agentic honors analyze vs implement. PuppetmasterCliBackend argv-locks --implement --allow-dirty. Swarm children remap to implement and skip the write gate.",
+      "source": "job_25b133796ba5"
+    },
+    {
+      "aws": "SageMaker / Bedrock",
+      "discord": "OpenRouter or Cursor pin; fail closed; no silent remap",
+      "module": "src/agent_discord/config.py",
+      "rank": "shipped",
+      "note": "Optional Marionette HTTP is fail-closed. Discord OS is not a compute host.",
+      "source": "docs/compute"
+    },
+    {
+      "aws": "Amplify",
+      "discord": "Activities iframe dashboards",
+      "module": "",
+      "rank": "never",
+      "note": "An embedded app is a second UI. Discord is already the screen. Components v2 on the live card is the dashboard.",
+      "source": "https://docs.discord.com/developers/activities/how-activities-work"
+    },
+    {
+      "aws": "WAF / GuardDuty / Config",
+      "discord": "author_may_dispatch + skip harness cards + path-confined open",
+      "module": "src/agent_discord/orchestration/listen.py",
+      "rank": "shipped",
+      "note": "Best-effort seams. Do not invent a SIEM fleet.",
+      "source": "docs/cards"
+    },
+    {
+      "aws": "Backup",
+      "discord": "git on the bound checkout + Discord object pointers",
+      "module": "src/agent_discord/discord/object_store.py",
+      "rank": "shipped",
+      "note": "The Mac disk is the volume. Discord holds the artifact pointers, not a second backup vendor.",
+      "source": "docs/objects"
+    },
+    {
+      "aws": "ECS Exec / SSM Session",
+      "discord": "live-thread steer",
+      "module": "src/agent_discord/orchestration/orchestrator.py",
+      "rank": "now",
+      "note": "Listen routes follow-ups to steer and returns True, but PuppetmasterCliBackend.steer only fills _steers which stream() never reads. Card text updates; the worker keeps the original prompt.",
+      "source": "job_d9a1e008889e"
+    }
+  ],
+  "lifts": [
+    {
+      "id": "execution-lineage",
+      "title": "Durable intermediate artifacts, not chat as state",
+      "rank": "now",
+      "adapt": "Each job already has DiscordObjectRef + SQLite events. Persist FINDING/plan/diff as typed artifacts with sha256 identity. Done answers should cite those snowflakes instead of re-inferring.",
+      "source": "https://arxiv.org/html/2605.12087"
+    },
+    {
+      "id": "dag-replay",
+      "title": "Execution lineage DAG for steer and retry",
+      "rank": "next",
+      "adapt": "Encode kv = hash(step, inputs, parent hashes) in SQLite. A steer is an upstream edit; replay only descendants. Do not replace JobPool with a hosted orchestrator.",
+      "source": "https://arxiv.org/html/2605.06365"
+    },
+    {
+      "id": "openhands-handle",
+      "title": "Durable job handle that survives host restart",
+      "rank": "now",
+      "adapt": "OpenHands asks for job id, spec hash, artifact ids, cancel receipt, idempotency key. Discord OS has run rows but acks the Discord message before claim. Claim first, then watermark.",
+      "source": "https://github.com/OpenHands/OpenHands/issues/14590"
+    },
+    {
+      "id": "restate-hitl",
+      "title": "Suspend for approval without a second UI",
+      "rank": "next",
+      "adapt": "HOST Gate already parks implement. Restate-style suspend maps to a card button (existing Approve/Cancel/Retry) plus a SQLite wait state. Do not pay wall-clock on a hosted worker.",
+      "source": "https://github.com/restatedev/ai-examples"
+    },
+    {
+      "id": "components-v2",
+      "title": "Keep Components v2 as the console, not Activities",
+      "rank": "shipped",
+      "adapt": "Live cards already PATCH with IS_COMPONENTS_V2. Do not mix content+polls on those messages. Polls can later be Gate/Approve, never job status spam.",
+      "source": "https://docs.discord.com/developers/resources/message"
+    },
+    {
+      "id": "message-forward",
+      "title": "Message snapshots as immutable Glacier",
+      "rank": "next",
+      "adapt": "Forward a Done card into a memory channel to freeze it. Snapshots do not follow later edits. Complements persist-then-settle.",
+      "source": "https://docs.discord.com/developers/resources/message"
+    },
+    {
+      "id": "forum-tags",
+      "title": "Forum tags as ticket types, not a second job system",
+      "rank": "never",
+      "adapt": "Jobs already open a thread on the user message. Forum channels would duplicate JobPool. Categories may later group realms visually.",
+      "source": "job_7fbccfc4a5b8"
+    },
+    {
+      "id": "cli-compute-mode",
+      "title": "Honor analyze vs implement on the Cursor CLI backend",
+      "rank": "now",
+      "adapt": "PuppetmasterCliBackend always passes --implement --allow-dirty. Agentic already skips implement on questions. Make argv match compute_dispatch_mode.",
+      "source": "job_25b133796ba5"
+    },
+    {
+      "id": "thread-poll",
+      "title": "REST-poll live job threads so steer is real",
+      "rank": "now",
+      "adapt": "drain_inbound should read_messages on live thread ids with a per-dest watermark. Gateway stays buttons-only. Do not subscribe MESSAGE_CREATE.",
+      "source": "job_d9a1e008889e"
+    },
+    {
+      "id": "write-key-cwd",
+      "title": "Serialize implement on resolved checkout, not channel id",
+      "rank": "now",
+      "adapt": "Pass realm cwd into JobPool.submit. Treat swarm implement handoff as a write lock.",
+      "source": "job_d9a1e008889e"
+    }
+  ]
+}
