@@ -161,6 +161,19 @@ CREATE TABLE IF NOT EXISTS spend_events (
     usd REAL NOT NULL,
     created_ms INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS lineage_nodes (
+    node_key TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    step TEXT NOT NULL,
+    parent_keys_json TEXT NOT NULL DEFAULT '[]',
+    input_sha256 TEXT NOT NULL,
+    artifact_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'complete',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_lineage_run ON lineage_nodes(run_id);
 """
 
 PREFERENCE_KINDS = frozenset({"preference", "style", "failure"})
@@ -185,6 +198,7 @@ class SQLiteStore:
         self._migrate_artifacts(conn)
         self._migrate_preferences(conn)
         self._migrate_service_tables(conn)
+        self._migrate_lineage_nodes(conn)
         self._fts_enabled = self._try_enable_fts(conn)
         conn.commit()
 
@@ -292,6 +306,24 @@ class SQLiteStore:
                 usd REAL NOT NULL,
                 created_ms INTEGER NOT NULL
             );
+            """
+        )
+
+    def _migrate_lineage_nodes(self, conn: sqlite3.Connection) -> None:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS lineage_nodes (
+                node_key TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                task_id TEXT NOT NULL,
+                step TEXT NOT NULL,
+                parent_keys_json TEXT NOT NULL DEFAULT '[]',
+                input_sha256 TEXT NOT NULL,
+                artifact_id TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'complete',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_lineage_run ON lineage_nodes(run_id);
             """
         )
 
@@ -448,7 +480,7 @@ class SQLiteStore:
         conn.commit()
 
     def fail_stale_runs(self, *, reason: str = "host restarted") -> int:
-        """Mark leftover running rows failed. They cannot resume after a process death."""
+        """Mark leftover running rows failed. Lineage stays so Retry can parent a new run."""
 
         conn = self._connection()
         cur = conn.execute(
@@ -1086,6 +1118,91 @@ class SQLiteStore:
             item["provenance"] = json.loads(item.pop("provenance_json") or "{}")
             out.append(item)
         return out
+
+    def upsert_lineage_node(
+        self,
+        *,
+        node_key: str,
+        run_id: str,
+        task_id: str,
+        step: str,
+        parent_keys: Sequence[str] = (),
+        input_sha256: str = "",
+        artifact_id: str = "",
+        status: str = "complete",
+    ) -> None:
+        conn = self._connection()
+        parents = json.dumps(list(parent_keys), sort_keys=True)
+        conn.execute(
+            """
+            INSERT INTO lineage_nodes (
+                node_key, run_id, task_id, step, parent_keys_json,
+                input_sha256, artifact_id, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(node_key) DO UPDATE SET
+                artifact_id=CASE
+                    WHEN excluded.artifact_id != '' THEN excluded.artifact_id
+                    ELSE lineage_nodes.artifact_id
+                END,
+                status=excluded.status
+            """,
+            (
+                node_key,
+                run_id,
+                task_id,
+                step,
+                parents,
+                input_sha256,
+                artifact_id,
+                status,
+            ),
+        )
+        conn.commit()
+
+    def list_lineage_nodes(self, run_id: str) -> Sequence[Mapping[str, Any]]:
+        rows = self._connection().execute(
+            """
+            SELECT * FROM lineage_nodes
+            WHERE run_id=?
+            ORDER BY created_at ASC, node_key ASC
+            """,
+            (run_id,),
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            raw = item.pop("parent_keys_json", "[]")
+            try:
+                item["parent_keys"] = json.loads(raw or "[]")
+            except json.JSONDecodeError:
+                item["parent_keys"] = []
+            out.append(item)
+        return out
+
+    def mark_lineage_stale(self, node_keys: Sequence[str]) -> int:
+        keys = [str(k) for k in node_keys if str(k or "").strip()]
+        if not keys:
+            return 0
+        conn = self._connection()
+        placeholders = ",".join("?" for _ in keys)
+        cur = conn.execute(
+            f"UPDATE lineage_nodes SET status='stale' WHERE node_key IN ({placeholders})",
+            keys,
+        )
+        conn.commit()
+        return int(cur.rowcount or 0)
+
+    def latest_lineage_run_id(self) -> Optional[str]:
+        row = self._connection().execute(
+            """
+            SELECT run_id FROM lineage_nodes
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        if row is None:
+            return None
+        return str(row["run_id"] or "") or None
 
     def list_objects(
         self,

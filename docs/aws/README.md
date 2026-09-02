@@ -28,8 +28,8 @@ World lifts (arxiv, OpenHands durable handles, Restate human-in-the-loop, Discor
 
 ## Do not lift
 
-- A Temporal/Step Functions cluster
-- Discord Activities as a second dashboard
+- A Temporal/Step Functions cluster (SQLite lineage on this Mac is the analog)
+- Discord Activities as a second dashboard (the live card cites lineage)
 - Per-realm bot tokens or VPC-style isolation of the Mac disk
 - Forum channels as a second job system
 - Persisting Discord CDN URLs

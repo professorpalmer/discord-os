@@ -69,7 +69,21 @@ def test_now_lifts_include_steer_and_write_key():
     assert world["write-key-cwd"] == "shipped"
     assert world["thread-poll"] == "shipped"
     assert world["cli-compute-mode"] == "shipped"
-    assert "execution-lineage" in world
+    assert world["execution-lineage"] == "shipped"
+    assert world["dag-replay"] == "shipped"
+
+
+def test_step_functions_analog_is_sqlite_lineage():
+    row = lookup("Step Functions")[0]
+    assert row.rank == "shipped"
+    assert "lineage" in row.discord.lower()
+    assert "Temporal" in row.note
+
+
+def test_amplify_activities_stay_never():
+    row = lookup("Amplify")[0]
+    assert row.rank == "never"
+    assert "Activities" in row.discord
 
 
 def test_lookup_miss_is_empty():
