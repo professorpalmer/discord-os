@@ -8,6 +8,7 @@ from pathlib import Path
 from agent_discord.contracts import (
     DiscordMessage,
     DispatchEvent,
+    DispatchResult,
     EventKind,
     ProgressSummary,
     RunReceipt,
@@ -134,6 +135,67 @@ def test_failed_dispatch_receipt(tmp_path: Path):
     assert receipt.error
     assert orch.status(receipt.run_id) == TaskStatus.FAILED
     store.close()
+
+
+class _CompletedAuthFailureBackend:
+    pin = DEFAULT_MODEL_PIN
+
+    def resolve_model(self, requested: str):
+        return self.pin
+
+    def dispatch(self, request):
+        stitch = (
+            "Named git checkouts:\n"
+            "Do not treat .agent-discord as the subject repository.\n"
+            "AUTH FAILURE: provider 'openrouter' rejected the API key (HTTP 401). "
+            "The worker never reached the model.\n"
+        )
+        return DispatchResult(
+            run_id=request.run_id,
+            status=TaskStatus.COMPLETED,
+            events=(
+                DispatchEvent(
+                    kind=EventKind.RECEIPT,
+                    summary=ProgressSummary(
+                        stage="done", message="completed", percent=100.0
+                    ),
+                ),
+            ),
+            final_summary=stitch,
+        )
+
+    def cancel(self, run_id: str) -> bool:
+        return False
+
+    def status(self, run_id: str) -> TaskStatus:
+        return TaskStatus.COMPLETED
+
+
+def test_completed_openrouter_401_settles_as_failed_spoken_error(tmp_path: Path):
+    store = SQLiteStore(tmp_path / "auth-fail.sqlite3")
+    store.initialize()
+    fake_discord = FakeDiscordMCPProvider()
+    facade = DiscordFacade(fake_discord, bot_token_fingerprint="fp", owner_id="test")
+    orch = AgentOrchestrator(
+        store=store,
+        backend=_CompletedAuthFailureBackend(),
+        discord=facade,
+        post_progress_to_discord=True,
+    )
+    receipt = orch.run_task(
+        TaskIntake(
+            text="https://5thnode.com/ is this useful?",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="ask-401",
+        )
+    )
+    assert receipt.status == TaskStatus.FAILED
+    assert "401" in receipt.summary
+    assert "OpenRouter" in receipt.summary
+    assert "Worker finished without a written answer." not in receipt.summary
+    store.close()
+
 
 
 def test_cancel_interface(tmp_path: Path):
