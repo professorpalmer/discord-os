@@ -38,6 +38,8 @@ COLOR_WORK = 0xC27C0E
 COLOR_FAIL = 0xDA373C
 COLOR_FILE = 0x5865F2
 CODE_BODY_MAX = 1800
+THINKING_BODY_MAX = 1000
+V2_TEXT_BUDGET = 3900
 _TRUNCATION_NOTE = f"Truncated to {CODE_BODY_MAX} characters."
 
 _PROVIDER_LABELS = {"openrouter": "OpenRouter"}
@@ -71,10 +73,13 @@ class CardMessage:
     updated_ts: Optional[int] = None
     avatar_url: str = ""
     rows: tuple[dict[str, Any], ...] = ()
+    thinking: str = ""
 
     @property
     def text(self) -> str:
         lines = [self.title]
+        if self.thinking:
+            lines.append(self.thinking)
         if self.description:
             lines.append(self.description)
         for name, value, _inline in self.fields:
@@ -101,7 +106,7 @@ class CardMessage:
         *,
         rows: Optional[list[dict[str, Any]]] = None,
     ) -> list[dict[str, Any]]:
-        """One Container: heading, status table, body, file, buttons."""
+        """One Container: heading, optional thinking fence, spoken body, file, buttons."""
 
         heading = f"### {self.title}"
         if self.avatar_url:
@@ -110,6 +115,7 @@ class CardMessage:
             ]
         else:
             children = [text_display(heading)]
+        used = len(heading)
         if self.kind == "HOST":
             live = self.title == "Running"
             table = [
@@ -117,7 +123,14 @@ class CardMessage:
                 ("listen", "live" if live else "idle"),
             ]
             table.extend((name, value) for name, value, _inline in self.fields)
-            children.append(text_display(status_table(table)))
+            table_text = status_table(table)
+            children.append(text_display(table_text))
+            used += len(table_text)
+        if self.thinking:
+            think_cap = min(THINKING_BODY_MAX, max(120, V2_TEXT_BUDGET - used - 80))
+            fence = _bounded_fence("", self.thinking, max_chars=think_cap)
+            children.append(text_display(fence))
+            used += len(fence)
         body_parts: list[str] = []
         if self.description:
             body_parts.append(self.description)
@@ -129,7 +142,11 @@ class CardMessage:
             )
         stamp = discord_time(self.updated_ts)
         body_parts.append(f"-# {CARD_FOOTER}  ·  {stamp}")
-        children.append(text_display(redact_text_markers("\n\n".join(body_parts))))
+        body = redact_text_markers("\n\n".join(body_parts))
+        leftover = V2_TEXT_BUDGET - used
+        if leftover >= 0 and len(body) > leftover:
+            body = body[:leftover]
+        children.append(text_display(body))
         if self.file_name:
             children.append(attachment_component(self.file_name))
         extra = list(self.rows)
@@ -251,13 +268,16 @@ def progress_card(
     percent: Optional[float] = None,
     run_id: str = "",
     actions: str = "running",
+    thinking: str = "",
 ) -> CardMessage:
     title = _title_case(stage) or "Working"
     body = redact_text_markers(message or "")
+    think = redact_text_markers(thinking or "")
     return CardMessage(
         kind="PROGRESS",
         title=title,
         description=body,
+        thinking=think,
         color=COLOR_WORK,
         percent=percent,
         rows=_job_rows(run_id, actions),
@@ -333,10 +353,18 @@ def render_receipt_card(receipt: RunReceipt, *, max_progress: int = 5) -> str:
     return receipt_card(receipt, max_progress=max_progress).text
 
 
-def receipt_card(receipt: RunReceipt, *, max_progress: int = 5) -> CardMessage:
+def receipt_card(
+    receipt: RunReceipt,
+    *,
+    max_progress: int = 5,
+    thinking: str = "",
+) -> CardMessage:
     title, color = _RECEIPT_TITLES.get(receipt.status, ("Receipt", COLOR_IDLE))
     summary = str(strip_forbidden_keys({"summary": receipt.summary}).get("summary", ""))
     description = redact_text_markers(summary.strip() or title)
+    think = redact_text_markers(thinking or "")
+    if think and think.strip() == description.strip():
+        think = ""
     fields: list[tuple[str, str, bool]] = []
     jump = ""
     if receipt.artifacts:
@@ -369,6 +397,7 @@ def receipt_card(receipt: RunReceipt, *, max_progress: int = 5) -> CardMessage:
         kind="RECEIPT",
         title=title,
         description=description,
+        thinking=think,
         color=color,
         fields=tuple(fields),
         link_url=jump,
@@ -669,11 +698,12 @@ def _fence_language(language: str) -> str:
     return "".join((language or "").split()).replace("`", "")[:32]
 
 
-def _bounded_fence(language: str, source: str) -> str:
+def _bounded_fence(language: str, source: str, *, max_chars: int = CODE_BODY_MAX) -> str:
     cleaned = redact_text_markers(source or "")
-    truncated = len(cleaned) > CODE_BODY_MAX
+    cap = max(1, int(max_chars))
+    truncated = len(cleaned) > cap
     if truncated:
-        cleaned = cleaned[:CODE_BODY_MAX]
+        cleaned = cleaned[:cap]
     fence = "```"
     while fence in cleaned:
         fence += "`"
@@ -681,7 +711,9 @@ def _bounded_fence(language: str, source: str) -> str:
     opener = f"{fence}{lang}" if lang else fence
     block = f"{opener}\n{cleaned}\n{fence}"
     if truncated:
-        return f"{block}\n{_TRUNCATION_NOTE}"
+        if cap == CODE_BODY_MAX:
+            return f"{block}\n{_TRUNCATION_NOTE}"
+        return f"{block}\nTruncated to {cap} characters."
     return block
 
 

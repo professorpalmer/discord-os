@@ -140,6 +140,42 @@ _SCAFFOLDING_MARKERS = (
     "i must call",
     "first response must include",
 )
+_PROCESS_STARTS = (
+    "let me ",
+    "let's ",
+    "i'll start",
+    "i'll check",
+    "i'll fetch",
+    "i'll look",
+    "i should ",
+)
+_PROCESS_VERBS = (
+    "fetch",
+    "curl",
+    "read the",
+    "check if",
+    "check the",
+    "look at",
+    "inspect",
+    "explor",
+    "write the report",
+    "write an exploration",
+    "try to find",
+    "try to get",
+)
+_PROCESS_ANYWHERE = (
+    "the deliverable is",
+    "this is a think-tank",
+    "this is an exploration",
+    "think-tank exploration",
+    "write an exploration report",
+    "the task is to fetch",
+    "the task is really about",
+    "workspace root",
+    "full-edit worker",
+    "full-edit mode",
+    "captured as a diff",
+)
 _ANSWER_CUT_RE = re.compile(
     r"(?:here's the (?:straight )?answer for discord|let me write the discord answer)\s*:\s*",
     re.IGNORECASE,
@@ -798,6 +834,7 @@ def _split_sentences(text: str) -> list[str]:
     raw = (text or "").strip()
     if not raw:
         return []
+    raw = re.sub(r"([.!?])([A-Za-z])", r"\1 \2", raw)
     parts = [part.strip() for part in _SENTENCE_SPLIT_RE.split(raw) if part.strip()]
     return parts or [raw]
 
@@ -809,7 +846,20 @@ def _is_scaffolding_sentence(sentence: str) -> bool:
     if _is_skipped_worker_line(raw):
         return True
     lower = raw.lower()
-    return any(marker in lower for marker in _SCAFFOLDING_MARKERS)
+    if any(marker in lower for marker in _SCAFFOLDING_MARKERS):
+        return True
+    return _is_process_sentence(raw)
+
+
+def _is_process_sentence(sentence: str) -> bool:
+    lower = (sentence or "").strip().lower()
+    if not lower:
+        return True
+    if any(marker in lower for marker in _PROCESS_ANYWHERE):
+        return True
+    if any(lower.startswith(start) for start in _PROCESS_STARTS):
+        return any(verb in lower for verb in _PROCESS_VERBS)
+    return False
 
 
 def _is_scaffolding_memory(content: str) -> bool:

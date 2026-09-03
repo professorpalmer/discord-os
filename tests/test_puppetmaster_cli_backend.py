@@ -685,6 +685,44 @@ def test_public_card_text_dedups_repeated_paragraph():
     assert "Here's the answer for Discord" not in kept
 
 
+def test_public_card_text_drops_exploration_diary():
+    from agent_discord.puppetmaster.backend import public_card_text
+
+    blob = (
+        "Let me start by exploring the task. The task is to fetch content "
+        "from https://crhq.ai/ and write an exploration report for Discord. "
+        "Let me use curl to fetch the content.I'll start by fetching the URL. "
+        "This is a think-tank exploration task. The deliverable is prose for Discord. "
+        "CRHQ is a hub-and-satellite fleet: one human, many isolated agent servers, "
+        "skills as versioned packages, a credential vault, and scheduled jobs. "
+        "Lift the skill-package and vault ideas. Do not lift dedicated servers."
+    )
+    kept = public_card_text(blob)
+    lower = kept.lower()
+    assert "hub-and-satellite" in lower
+    assert "skill-package" in lower
+    assert "let me start" not in lower
+    assert "let me use curl" not in lower
+    assert "deliverable is prose" not in lower
+    assert "think-tank exploration" not in lower
+
+
+def test_completion_summary_drops_diary_and_keeps_spoken_answer():
+    from agent_discord.puppetmaster.backend import TokenStreamBuffer, _completion_summary
+
+    diary = " ".join(
+        f"Let me start by exploring page {index} of the site."
+        for index in range(40)
+    )
+    answer = (
+        " CRHQ is a hub-and-satellite fleet with versioned skill packages "
+        "and a credential vault. Steal those. Do not steal dedicated servers."
+    )
+    spoken = _completion_summary({}, TokenStreamBuffer(text=diary + answer), cli="")
+    assert "hub-and-satellite" in spoken.lower()
+    assert "let me start" not in spoken.lower()
+
+
 def test_usable_worker_text_clips_at_sentence_boundary():
     from agent_discord.puppetmaster.backend import RECEIPT_TEXT_LIMIT, usable_worker_text
 

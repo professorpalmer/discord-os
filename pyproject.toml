@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "discord-os"
-version = "0.5.16"
+version = "0.5.17"
 description = "Discord is the screen. This Mac is the computer: SQLite lineage, two jobs at once, Puppetmaster workers. Artifacts are Discord snowflakes plus sha256."
 readme = "README.pypi.md"
 license = { text = "MIT" }

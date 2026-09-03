@@ -51,6 +51,7 @@ SETTLE_SHORT_LIMIT = 280
 SETTLE_BUBBLE_SOFT = 420
 SETTLE_MAX_BUBBLES = 3
 _STREAM_PHASES = frozenset({"thinking", "plan", "code", "dispatch", "done"})
+_PROCESS_PHASES = frozenset({"thinking", "start", "plan", "code", "dispatch"})
 _SWARM_ROLES = (
     "explore",
     "pipeline-mapper",
@@ -237,6 +238,7 @@ class _LiveCard:
         self.message_id: Optional[str] = None
         self.stage = ""
         self.text = ""
+        self.thinking = ""
 
     def paint(
         self,
@@ -269,6 +271,9 @@ class _LiveCard:
             self.stage = stage
         if new_text:
             self.text = new_text
+        incoming_thinking = str(getattr(card, "thinking", "") or "")
+        if incoming_thinking:
+            self.thinking = incoming_thinking
 
     def finish(self, card: Any, *, summary: str) -> None:
         from agent_discord.puppetmaster.backend import public_card_text
@@ -696,6 +701,7 @@ class AgentOrchestrator:
             if prefer_host_report
             else (host_github or "")
         )
+        thinking_hold = ""
         token_dirty = bool(token_text)
         last_flush_at = _monotonic()
         last_percent: Optional[float] = None
@@ -703,18 +709,30 @@ class AgentOrchestrator:
         stream_error: Optional[str] = None
         painted_live = False
 
+        def _remember_process(text: str) -> None:
+            nonlocal thinking_hold
+            raw = (text or "").strip()
+            if not raw:
+                return
+            if thinking_hold:
+                if raw not in thinking_hold:
+                    thinking_hold = f"{thinking_hold}\n\n{raw}"
+            else:
+                thinking_hold = raw
+
         def flush_token_card(*, force: bool = False) -> None:
             nonlocal progress_message_id, token_dirty, last_flush_at, painted_live
             from agent_discord.puppetmaster.backend import is_prompt_echo
+            from agent_discord.puppetmaster.backend import public_card_text
 
             visible = redact_text_markers(token_text).strip()
             if is_prompt_echo(visible):
                 visible = ""
             if not token_dirty and not force:
                 return
-            if not visible and not force and last_percent is None:
+            if not visible and not thinking_hold and not force and last_percent is None:
                 return
-            first_tokens = bool(visible) and not painted_live
+            first_tokens = bool(visible or thinking_hold) and not painted_live
             if (
                 not force
                 and not first_tokens
@@ -722,23 +740,32 @@ class AgentOrchestrator:
             ):
                 return
             if self.post_progress_to_discord and self.discord is not None:
-                from agent_discord.puppetmaster.backend import public_card_text
-
-                shown = public_card_text(visible, limit=0) or "Working."
+                shown = public_card_text(visible, limit=0)
+                if stream_stage in _PROCESS_PHASES:
+                    think_zone = (
+                        f"{thinking_hold}\n\n{visible}".strip()
+                        if thinking_hold and visible and visible not in thinking_hold
+                        else (visible or thinking_hold)
+                    )
+                    spoken = ""
+                else:
+                    think_zone = thinking_hold
+                    spoken = shown
                 live.paint(
                     progress_card(
                         stage=stream_stage,
-                        message=_card_window(shown) or "Working.",
+                        message=_card_window(spoken) if spoken else "",
+                        thinking=think_zone,
                         percent=last_percent,
                         run_id=run_id,
                     ),
                     stage=stream_stage,
-                    keep=shown,
+                    keep=spoken,
                 )
                 progress_message_id = live.message_id
             token_dirty = False
             last_flush_at = _monotonic()
-            if visible:
+            if visible or thinking_hold:
                 painted_live = True
 
         receipt_payload: dict[str, Any] = {}
@@ -801,25 +828,26 @@ class AgentOrchestrator:
                         progress_message_id = live.message_id
                     continue
                 if _is_token_stream(summary.details):
-                    from agent_discord.puppetmaster.backend import is_prompt_echo
-
                     from agent_discord.puppetmaster.backend import public_card_text
 
-                    incoming = public_card_text(
-                        str(summary.details.get("token_text") or ""),
-                        limit=0,
+                    raw_incoming = redact_text_markers(
+                        str(summary.details.get("token_text") or "")
+                    ).strip()
+                    phase = str(
+                        summary.details.get("stream_phase") or summary.stage or stream_stage
                     )
-                    if incoming:
-                        token_text = incoming
+                    if phase in _STREAM_PHASES and phase != stream_stage:
+                        if stream_stage in _PROCESS_PHASES:
+                            _remember_process(token_text)
+                        stream_stage = phase
+                    if raw_incoming:
+                        token_text = raw_incoming
                         token_dirty = True
                     else:
                         spoken_bit = public_card_text(summary.message or "", limit=0)
                         if spoken_bit:
                             token_text = (token_text + spoken_bit).strip()
                             token_dirty = True
-                    phase = str(
-                        summary.details.get("stream_phase") or summary.stage or stream_stage
-                    )
                     if phase in _STREAM_PHASES:
                         stream_stage = phase
                     flush_token_card()
@@ -967,6 +995,8 @@ class AgentOrchestrator:
                 error=result.error or failure,
                 final_summary=failure,
             )
+        if stream_stage in _PROCESS_PHASES:
+            _remember_process(token_text)
         safe_final_summary = spoken or "Worker finished without a written answer."
         safe_error = redact_text_markers(result.error) if result.error else None
         self.store.update_run(
@@ -1026,7 +1056,10 @@ class AgentOrchestrator:
             usage=result.usage,
             error=safe_error,
         )
-        card = receipt_card(receipt)
+        think = live.thinking or thinking_hold
+        if think and public_card_text(think, limit=0) == safe_final_summary:
+            think = ""
+        card = receipt_card(receipt, thinking=think)
         rendered = card.text
         self._event(
             task_id,

@@ -894,12 +894,13 @@ def test_settle_does_not_duplicate_done_body(tmp_path: Path, monkeypatch):
         )
     )
     assert done_body in receipt.summary
+    assert any(prior in blob for blob in facade.edit_blobs)
     settles = [
         m
         for m in fake_discord.sent
         if (m.content or "").strip() and getattr(m, "thread_id", None)
     ]
-    assert any(prior in (m.content or "") for m in settles)
+    assert all(prior not in (m.content or "") for m in settles)
     assert all(done_body not in (m.content or "") for m in settles)
     store.close()
 
@@ -1375,15 +1376,95 @@ def test_long_thinking_stays_visible_and_answer_keeps_its_start(
         )
     )
     card_text = " ".join(facade.edit_blobs)
-    thread_text = " ".join(
-        (message.content or "")
-        for message in fake_discord.sent
-        if getattr(message, "thread_id", None)
-    )
-    assert think_start in card_text or think_start in thread_text
+    assert think_start in card_text
     assert receipt.summary.startswith(answer_start)
     assert not receipt.summary.startswith("ays ")
     assert _parent_headlines(fake_discord) == []
+    store.close()
+
+
+def test_thinking_fence_keeps_diary_and_done_body_is_spoken(
+    tmp_path: Path, monkeypatch
+):
+    clock = _Clock()
+    monkeypatch.setattr(
+        "agent_discord.orchestration.orchestrator._monotonic",
+        clock,
+    )
+    diary = "Let me start by exploring the repo with curl."
+    spoken = "CRHQ is a hub-and-satellite fleet with versioned skill packages."
+
+    class _DiaryBackend(_TokenStreamBackend):
+        def stream(self, request):
+            self.last_request = request
+            clock.advance(TOKEN_CARD_FLUSH_SECONDS + 0.05)
+            yield DispatchEvent(
+                kind=EventKind.PROGRESS,
+                summary=ProgressSummary(
+                    stage="thinking",
+                    message="completed",
+                    details={
+                        "token": True,
+                        "stream_phase": "thinking",
+                        "token_text": diary,
+                    },
+                ),
+            )
+            clock.advance(TOKEN_CARD_FLUSH_SECONDS + 0.05)
+            yield DispatchEvent(
+                kind=EventKind.PROGRESS,
+                summary=ProgressSummary(
+                    stage="done",
+                    message="completed",
+                    percent=100.0,
+                    details={
+                        "token": True,
+                        "stream_phase": "done",
+                        "token_text": spoken,
+                    },
+                ),
+            )
+            yield DispatchEvent(
+                kind=EventKind.RECEIPT,
+                summary=ProgressSummary(
+                    stage="done",
+                    message="completed",
+                    percent=100.0,
+                ),
+            )
+
+    store = SQLiteStore(tmp_path / "thinking-fence.sqlite3")
+    store.initialize()
+    fake_discord = FakeDiscordMCPProvider()
+    facade = _CountingFacade(
+        DiscordFacade(fake_discord, bot_token_fingerprint="fp", owner_id="test")
+    )
+    orch = AgentOrchestrator(
+        store=store,
+        backend=_DiaryBackend(clock),
+        discord=facade,
+        post_progress_to_discord=True,
+        host_repos=(),
+    )
+    receipt = orch.run_task(
+        TaskIntake(
+            text="What is CRHQ?",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="ask-fence",
+        )
+    )
+    card_text = " ".join(facade.edit_blobs)
+    assert diary in card_text
+    assert spoken in card_text
+    assert spoken in receipt.summary
+    assert diary not in receipt.summary
+    settles = [
+        message
+        for message in fake_discord.sent
+        if (message.content or "").strip() and getattr(message, "thread_id", None)
+    ]
+    assert all(diary not in (message.content or "") for message in settles)
     store.close()
 
 
