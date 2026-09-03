@@ -104,7 +104,7 @@ def string_select(
     custom_id: str,
     options: Sequence[dict[str, str]],
     *,
-    placeholder: str = "Recent jobs",
+    placeholder: str = "Jobs",
 ) -> dict[str, Any]:
     items = []
     for option in options[:25]:
@@ -120,7 +120,7 @@ def string_select(
     return {
         "type": TYPE_STRING_SELECT,
         "custom_id": custom_id,
-        "placeholder": (placeholder or "Recent jobs")[:150],
+        "placeholder": (placeholder or "Jobs")[:150],
         "min_values": 1,
         "max_values": 1,
         "options": items,

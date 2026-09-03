@@ -7,7 +7,7 @@ Surface README is first run plus this map. Feature pages live in their own folde
 | Folder | What it owns |
 |---|---|
 | [setup](setup/README.md) | First run, `add`, why there is no wizard |
-| [host](host/README.md) | On/Off/Ask, LaunchAgent, pairing, spend, schedule |
+| [host](host/README.md) | On/Off/Ask, Jobs briefing, LaunchAgent, pairing, spend, schedule |
 | [realms](realms/README.md) | Channel = checkout |
 | [jobs](jobs/README.md) | Parallel cooks |
 | [tools](tools/README.md) | Named CLI/HTTP catalog |
