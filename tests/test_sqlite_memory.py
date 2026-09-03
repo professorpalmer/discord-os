@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_discord.contracts import EventKind
+from agent_discord.contracts import EventKind, TaskStatus
 from agent_discord.discord.errors import GatewayOwnershipError
 from agent_discord.discord.gateway import SqliteGatewayOwnerRegistry
 from agent_discord.persistence.sqlite import PREFERENCE_KINDS, SQLiteStore
@@ -300,4 +300,81 @@ def test_preference_rejects_unknown_kind(tmp_path: Path):
     with pytest.raises(ValueError):
         store.set_preference("ws", "x", "y", kind="unknown")
     assert PREFERENCE_KINDS == frozenset({"preference", "style", "failure"})
+    store.close()
+
+
+def _stamp_task(store: SQLiteStore, task_id: str, updated_at: str) -> None:
+    conn = store._connection()
+    conn.execute(
+        "UPDATE tasks SET updated_at=? WHERE task_id=?",
+        (updated_at, task_id),
+    )
+    conn.commit()
+
+
+def test_list_recent_jobs_ranks_attention_ahead_of_recency(tmp_path: Path):
+    store = SQLiteStore(tmp_path / "attention.sqlite3")
+    store.initialize()
+    store.create_task(
+        task_id="parked",
+        workspace_id="ws",
+        channel_id="ch",
+        intake_text="Approve write",
+    )
+    store.create_run(
+        run_id="parked-run",
+        task_id="parked",
+        model="cursor/grok-4-5",
+        adapter_name="grok-4.5",
+        status=TaskStatus.PENDING,
+    )
+    store.create_task(
+        task_id="done",
+        workspace_id="ws",
+        channel_id="ch",
+        intake_text="already finished",
+    )
+    store.create_run(
+        run_id="done-run",
+        task_id="done",
+        model="cursor/grok-4-5",
+        adapter_name="grok-4.5",
+        status=TaskStatus.COMPLETED,
+    )
+    store.update_run("done-run", status=TaskStatus.COMPLETED, summary="ok")
+    _stamp_task(store, "parked", "2026-01-01 00:00:00")
+    _stamp_task(store, "done", "2026-09-03 18:00:00")
+    jobs = store.list_recent_jobs("ch", limit=5)
+    assert [job["run_id"] for job in jobs] == ["parked-run", "done-run"]
+    store.close()
+
+
+def test_list_recent_jobs_uses_latest_run_per_task(tmp_path: Path):
+    store = SQLiteStore(tmp_path / "latest-run.sqlite3")
+    store.initialize()
+    store.create_task(
+        task_id="t",
+        workspace_id="ws",
+        channel_id="ch",
+        intake_text="retry after fail",
+    )
+    store.create_run(
+        run_id="failed-run",
+        task_id="t",
+        model="cursor/grok-4-5",
+        adapter_name="grok-4.5",
+        status=TaskStatus.FAILED,
+    )
+    store.update_run("failed-run", status=TaskStatus.FAILED, summary="boom")
+    store.create_run(
+        run_id="ok-run",
+        task_id="t",
+        model="cursor/grok-4-5",
+        adapter_name="grok-4.5",
+        status=TaskStatus.COMPLETED,
+    )
+    store.update_run("ok-run", status=TaskStatus.COMPLETED, summary="ok")
+    jobs = store.list_recent_jobs("ch", limit=5)
+    assert [job["run_id"] for job in jobs] == ["ok-run"]
+    assert jobs[0]["status"] == "completed"
     store.close()

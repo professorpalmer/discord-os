@@ -8,7 +8,7 @@ Token flushes edit that same card. Reasoning stays in a fenced thinking zone on 
 
 Done is the spoken summary after process diary is dropped from the body. The diary can remain inside the thinking fence. Worker monologue (`report:`, host-reach dumps) never reaches Discord as the answer.
 
-Harness cards (`**Card**`, `**Receipt**`, HOST, NOTE) are skipped on intake so the bot does not dispatch itself. HOST stays the settings analog — do not dump metrics into job cards.
+Harness cards (`**Card**`, `**Receipt**`, HOST, NOTE) are skipped on intake so the bot does not dispatch itself. HOST stays the settings analog — do not dump metrics into job cards. The HOST job line is Need / Live / Last over the same SQLite jobs. It is not a second board.
 
 A follow-up in the job thread stays there (steer). Do not start a nested thread.
 

@@ -109,7 +109,9 @@ def host_panel_components(
             )
     options = _job_select_options(jobs or ())
     if options:
-        rows.append(action_row([string_select(JOBS_ID, options)]))
+            rows.append(
+                action_row([string_select(JOBS_ID, options, placeholder="Jobs")])
+            )
     return rows
 
 
@@ -824,12 +826,18 @@ def _panel_last_job(store: Any, channel_id: str) -> str:
     text = " ".join(text.split())
     if len(text) > 80:
         text = text[:77] + "..."
+    if status in {"pending", "failed"}:
+        prefix = "Need"
+    elif status in {"running", "progress"}:
+        prefix = "Live"
+    else:
+        prefix = "Last"
     if status and text:
-        return f"Last: {status} · {text}"
+        return f"{prefix}: {status} · {text}"
     if status:
-        return f"Last: {status}"
+        return f"{prefix}: {status}"
     if text:
-        return f"Last: {text}"
+        return f"{prefix}: {text}"
     return ""
 
 

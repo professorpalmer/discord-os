@@ -10,6 +10,7 @@ from agent_discord.discord.rest import callback_interaction, send_channel_messag
 from agent_discord.discord.ws import decode_frame, encode_frame
 from agent_discord.discord.providers.fake import FakeDiscordMCPProvider
 from agent_discord.host.install import render_launchd_plist
+from agent_discord.contracts import TaskStatus
 from agent_discord.host.panel import (
     ASK_ID,
     ASK_MODAL_ID,
@@ -33,6 +34,7 @@ from agent_discord.host.panel import (
     handle_gateway_interaction,
     host_panel_components,
     panel_action_from_interaction,
+    _panel_last_job,
 )
 from agent_discord.orchestration.listen import publish_host_card
 from agent_discord.persistence.sqlite import SQLiteStore
@@ -417,4 +419,28 @@ def test_roles_modal_adds_operator_role(tmp_path: Path):
     )
     assert action == "roles"
     assert "role-99" in store.list_operator_roles()
+    store.close()
+
+
+def test_panel_last_job_names_need_live_or_last(tmp_path: Path):
+    store = SQLiteStore(tmp_path / "focus.sqlite3")
+    store.initialize()
+    store.create_task(
+        task_id="parked",
+        workspace_id="ws",
+        channel_id="ch",
+        intake_text="Approve write",
+    )
+    store.create_run(
+        run_id="parked-run",
+        task_id="parked",
+        model="cursor/grok-4-5",
+        adapter_name="grok-4.5",
+        status=TaskStatus.PENDING,
+    )
+    assert _panel_last_job(store, "ch").startswith("Need: pending")
+    store.update_run("parked-run", status=TaskStatus.RUNNING, summary="working")
+    assert _panel_last_job(store, "ch").startswith("Live: running")
+    store.update_run("parked-run", status=TaskStatus.COMPLETED, summary="done")
+    assert _panel_last_job(store, "ch").startswith("Last: completed")
     store.close()
