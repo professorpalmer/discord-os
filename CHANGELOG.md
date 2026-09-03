@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.17
+
+Thinking stays on the card. Done is the spoken summary.
+
+- The live card puts reasoning in a fenced zone. The body is the answer.
+- Process diary is dropped from the Done body. A matching fence is omitted.
+
 ## 0.5.16
 
 A Discord 503 after the thread opens no longer leaves an empty thread.

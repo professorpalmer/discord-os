@@ -18,11 +18,14 @@ from agent_discord.discord.layout import (
     working_presence,
 )
 from agent_discord.host.panel import ASK_ID, OFF_ID, ON_ID
+from agent_discord.contracts import RunReceipt, TaskStatus
 from agent_discord.orchestration.cards import (
     CARD_FOOTER,
     CODE_BODY_MAX,
     COLOR_IDLE,
     COLOR_LIVE,
+    THINKING_BODY_MAX,
+    V2_TEXT_BUDGET,
     code_card,
     connect_card,
     diff_card,
@@ -30,6 +33,7 @@ from agent_discord.orchestration.cards import (
     job_action_row,
     object_card,
     progress_card,
+    receipt_card,
     working_card,
 )
 
@@ -206,3 +210,55 @@ def test_host_card_github_row():
     assert "sign-in" in _joined(card)
     ok = host_card(armed=True, github="ok")
     assert "ok" in _joined(ok)
+
+
+def test_thinking_zone_is_fenced_and_summary_stays_outside():
+    diary = "Let me start by exploring the repo with curl."
+    spoken = "CRHQ is a hub-and-satellite fleet with versioned skill packages."
+    live = progress_card(stage="thinking", message="", thinking=diary)
+    joined = _joined(live)
+    assert f"```\n{diary}\n```" in joined
+    assert live.description == ""
+    assert live.thinking == diary
+    done = receipt_card(
+        RunReceipt(
+            task_id="t",
+            run_id="r",
+            status=TaskStatus.COMPLETED,
+            summary=spoken,
+        ),
+        thinking=diary,
+    )
+    body = _joined(done)
+    assert f"```\n{diary}\n```" in body
+    assert spoken in body
+    assert not done.description.startswith("```")
+    assert done.description == spoken
+    same = receipt_card(
+        RunReceipt(
+            task_id="t",
+            run_id="r",
+            status=TaskStatus.COMPLETED,
+            summary=spoken,
+        ),
+        thinking=spoken,
+    )
+    assert same.thinking == ""
+    assert "```" not in _joined(same)
+
+
+def test_v2_thinking_plus_summary_stays_under_budget():
+    card = receipt_card(
+        RunReceipt(
+            task_id="t",
+            run_id="r",
+            status=TaskStatus.COMPLETED,
+            summary="Y" * 3000,
+        ),
+        thinking="X" * 8000,
+    )
+    texts = iter_component_text(card.v2_components())
+    assert sum(len(item) for item in texts) <= V2_TEXT_BUDGET
+    joined = "\n".join(texts)
+    assert "X" * 40 in joined
+    assert ("X" * (THINKING_BODY_MAX + 1)) not in joined
