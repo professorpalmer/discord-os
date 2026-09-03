@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.18
+
+HOST briefs parked and failed jobs before last Done.
+
+- Latest run per task. Order is parked, failed, live, then Done.
+- The HOST line is Need / Live / Last. The Jobs select uses the same ranking.
+- No second board and no pull-queue.
+
 ## 0.5.17
 
 Thinking stays on the card. Done is the spoken summary.

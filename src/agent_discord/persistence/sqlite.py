@@ -549,15 +549,31 @@ class SQLiteStore:
     def list_recent_jobs(
         self, channel_id: str, *, limit: int = 5
     ) -> list[dict[str, Any]]:
+        """Latest run per task, attention first: parked, failed, live, then Done."""
+
         capped = max(1, min(int(limit), 25))
         rows = self._connection().execute(
             """
             SELECT t.task_id, t.intake_text, t.status AS task_status,
                    r.run_id, r.summary, r.status AS run_status
             FROM tasks t
-            LEFT JOIN runs r ON r.task_id = t.task_id
+            LEFT JOIN runs r ON r.run_id = (
+                SELECT run_id FROM runs
+                WHERE task_id = t.task_id
+                ORDER BY created_at DESC, run_id DESC
+                LIMIT 1
+            )
             WHERE t.channel_id=?
-            ORDER BY t.updated_at DESC
+            ORDER BY
+              CASE COALESCE(r.status, t.status)
+                WHEN 'pending' THEN 0
+                WHEN 'failed' THEN 1
+                WHEN 'running' THEN 2
+                WHEN 'progress' THEN 2
+                WHEN 'cancelled' THEN 3
+                ELSE 4
+              END,
+              t.updated_at DESC
             LIMIT ?
             """,
             (channel_id, capped),
