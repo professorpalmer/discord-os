@@ -32,12 +32,12 @@ CONNECT_COMMAND = {
 }
 OPEN_COMMAND = {
     "name": "open",
-    "description": "Open Terminal, files, or an allowlisted URL on the listen host",
+    "description": "Open Terminal, files, or an allowlisted URL here or on the host",
     "type": 1,
     "options": [
         {
             "name": "surface",
-            "description": "Host surface to open",
+            "description": "Surface to open",
             "type": 3,
             "required": True,
             "choices": [
@@ -51,6 +51,16 @@ OPEN_COMMAND = {
             "description": "Workspace-relative path, or allowlisted http(s) URL",
             "type": 3,
             "required": False,
+        },
+        {
+            "name": "dest",
+            "description": "here = Discord (this phone). host = listen machine GUI",
+            "type": 3,
+            "required": False,
+            "choices": [
+                {"name": "here", "value": "remote"},
+                {"name": "host", "value": "host"},
+            ],
         },
     ],
 }
@@ -113,8 +123,10 @@ def handle_interaction_payload(
         options = _option_map(data.get("options"))
         surface = str(options.get("surface") or "files")
         target = str(options.get("target") or ".")
+        dest = str(options.get("dest") or "").strip()
+        command = f"/open {dest} {surface} {target}".strip() if dest else f"/open {surface} {target}".strip()
         opened = handle_open_message(
-            f"/open {surface} {target}".strip(),
+            command,
             roots=roots,
             runner=runner,
             browser_open=browser_open,

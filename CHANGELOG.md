@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.19
+
+More dest is here or host. The panel Gateway reconnects after a peer reset.
+
+- Files here lists the folder in Discord. Browser here returns a link the tapping client opens. Terminal dest is host.
+- Discord does not send which client tapped. Presence is not a dest.
+- Gateway lookup failures and ConnectionResetError reconnect. A REST blip no longer kills listen.
+
 ## 0.5.18
 
 HOST briefs parked and failed jobs before last Done.

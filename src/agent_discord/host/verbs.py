@@ -7,14 +7,21 @@ from pathlib import Path
 from typing import Callable, Optional, Sequence
 
 from agent_discord.host.actions import (
+    DEST_HOST,
+    DEST_REMOTE,
     CommandRunner,
     HostActionError,
     HostActionResult,
-    run_host_action,
+    OpenIntent,
+    default_dest,
+    run_open_intent,
 )
 
 
 OPEN_PREFIXES = frozenset({"/open", "!open"})
+
+
+_DEST_WORDS = {"here": DEST_REMOTE, "remote": DEST_REMOTE, "host": DEST_HOST}
 
 
 @dataclass(frozen=True)
@@ -22,6 +29,7 @@ class ParsedOpen:
     surface: str
     target: str
     raw_command: str
+    dest: str = DEST_HOST
 
 
 @dataclass(frozen=True)
@@ -31,6 +39,8 @@ class OpenPublicResult:
     card: str
     error: str = ""
     opened: bool = False
+    dest: str = DEST_HOST
+    link_url: str = ""
 
 
 def is_open_command(text: str) -> bool:
@@ -47,21 +57,39 @@ def parse_open_command(text: str) -> ParsedOpen:
     if not parts:
         return ParsedOpen(surface="files", target=".", raw_command=stripped)
     rest = parts[1:]
+    dest = ""
+    if rest and rest[0].lower() in _DEST_WORDS:
+        dest = _DEST_WORDS[rest[0].lower()]
+        rest = rest[1:]
     if not rest:
-        return ParsedOpen(surface="files", target=".", raw_command=stripped)
+        return ParsedOpen(
+            surface="files",
+            target=".",
+            raw_command=stripped,
+            dest=dest or DEST_HOST,
+        )
     head = rest[0].lower()
     if head in {"terminal", "term", "shell"}:
         target = rest[1] if len(rest) > 1 else "."
-        return ParsedOpen(surface="terminal", target=target, raw_command=stripped)
-    if head in {"files", "finder", "explorer", "folder"}:
+        surface = "terminal"
+    elif head in {"files", "finder", "explorer", "folder"}:
         target = rest[1] if len(rest) > 1 else "."
-        return ParsedOpen(surface="files", target=target, raw_command=stripped)
-    if head in {"browser", "url"}:
+        surface = "files"
+    elif head in {"browser", "url"}:
         target = rest[1] if len(rest) > 1 else ""
-        return ParsedOpen(surface="browser", target=target, raw_command=stripped)
-    if head.startswith("http://") or head.startswith("https://"):
-        return ParsedOpen(surface="browser", target=rest[0], raw_command=stripped)
-    return ParsedOpen(surface="files", target=rest[0], raw_command=stripped)
+        surface = "browser"
+    elif head.startswith("http://") or head.startswith("https://"):
+        surface = "browser"
+        target = rest[0]
+    else:
+        surface = "files"
+        target = rest[0]
+    return ParsedOpen(
+        surface=surface,
+        target=target,
+        raw_command=stripped,
+        dest=dest or default_dest(surface, target),
+    )
 
 
 def handle_open_message(
@@ -75,9 +103,12 @@ def handle_open_message(
 
     parsed = parse_open_command(text)
     try:
-        result = run_host_action(
-            parsed.surface,
-            parsed.target,
+        result = run_open_intent(
+            OpenIntent(
+                surface=parsed.surface,
+                target=parsed.target,
+                dest=parsed.dest,
+            ),
             roots=roots,
             runner=runner,
             browser_open=browser_open,
@@ -86,6 +117,7 @@ def handle_open_message(
         card = render_open_card(
             surface=parsed.surface,
             target=parsed.target,
+            dest=parsed.dest,
             error=str(exc),
         )
         return OpenPublicResult(
@@ -93,13 +125,21 @@ def handle_open_message(
             target=parsed.target,
             card=card,
             error=str(exc),
+            dest=parsed.dest,
             opened=False,
         )
-    card = render_open_card(surface=result.surface, target=_public_target(result))
+    card = render_open_card(
+        surface=result.surface,
+        target=_public_target(result),
+        dest=result.dest,
+        link_url=result.link_url,
+    )
     return OpenPublicResult(
         surface=result.surface,
         target=result.target,
         card=card,
+        dest=result.dest,
+        link_url=result.link_url,
         opened=result.opened,
     )
 

@@ -48,7 +48,7 @@ From Discord you can also type `bind puppetmaster` or `bind memory` in that chan
 | You | Host |
 |---|---|
 | **On** / **Off** / **Ask** | Power and prompt |
-| **More** | Pair, Halt, Gate, Roles, GitHub, Files, Terminal, Browser |
+| **More** | Pair, Halt, Gate, Roles, GitHub, Files/Browser here or on host, Terminal on host |
 | `bind puppetmaster` | This channel is that checkout |
 | `bind memory` | This channel is think-tank |
 | a sentence | A task. Two channels cook at once. |

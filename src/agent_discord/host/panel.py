@@ -5,6 +5,13 @@ from __future__ import annotations
 from typing import Any, Callable, Mapping, Optional
 
 from agent_discord.discord.layout import action_row, string_select
+from agent_discord.host.actions import (
+    DEST_HOST,
+    DEST_REMOTE,
+    OpenIntent,
+    open_custom_id,
+    open_intent_from_custom_id,
+)
 
 
 ON_ID = "discord-os:on"
@@ -26,6 +33,7 @@ FILES_ID = "discord-os:files"
 TERMINAL_ID = "discord-os:terminal"
 BROWSER_ID = "discord-os:browser"
 BROWSER_MODAL_ID = "discord-os:browser-modal"
+BROWSER_REMOTE_MODAL_ID = "discord-os:browser-modal:remote"
 BROWSER_TEXT_ID = "discord-os:browser-text"
 GITHUB_ID = "discord-os:github"
 COMPONENT_ROW = 1
@@ -167,19 +175,29 @@ def _more_select_options(
         options.extend(
             [
                 {
-                    "label": "Files",
-                    "value": FILES_ID,
-                    "description": "Open the folder on this Mac",
+                    "label": "Files here",
+                    "value": open_custom_id("files", DEST_REMOTE),
+                    "description": "List the folder in Discord",
                 },
                 {
-                    "label": "Terminal",
-                    "value": TERMINAL_ID,
-                    "description": "Open a shell on this Mac",
+                    "label": "Files on host",
+                    "value": open_custom_id("files", DEST_HOST),
+                    "description": "Open Finder on the host",
                 },
                 {
-                    "label": "Browser",
-                    "value": BROWSER_ID,
-                    "description": "Open Chromium on this Mac",
+                    "label": "Terminal on host",
+                    "value": open_custom_id("terminal", DEST_HOST),
+                    "description": "Open a shell on the host",
+                },
+                {
+                    "label": "Browser here",
+                    "value": open_custom_id("browser", DEST_REMOTE),
+                    "description": "Open a link in Discord",
+                },
+                {
+                    "label": "Browser on host",
+                    "value": open_custom_id("browser", DEST_HOST),
+                    "description": "Open Chromium on the host",
                 },
             ]
         )
@@ -225,6 +243,17 @@ def roles_modal_payload() -> dict[str, Any]:
         "Discord role id",
         "Snowflake role id",
         max_length=32,
+    )
+
+
+def browser_remote_modal_payload() -> dict[str, Any]:
+    return _text_modal_payload(
+        BROWSER_REMOTE_MODAL_ID,
+        "Open here",
+        BROWSER_TEXT_ID,
+        "URL",
+        "http://127.0.0.1 or Discord jump",
+        max_length=400,
     )
 
 
@@ -410,12 +439,9 @@ def panel_action_from_custom_id(custom_id: str) -> Optional[str]:
         return "gate"
     if raw == ROLES_ID:
         return "roles"
-    if raw == FILES_ID:
-        return "files"
-    if raw == TERMINAL_ID:
-        return "terminal"
-    if raw == BROWSER_ID:
-        return "browser"
+    intent = open_intent_from_custom_id(raw)
+    if intent is not None:
+        return intent.surface
     if raw == GITHUB_ID:
         return "github"
     return None
@@ -602,6 +628,14 @@ def handle_gateway_interaction(
     if action == "roles":
         _ack_interaction(payload, roles_modal_payload(), opener=opener)
         return action
+    intent = _open_intent_from_payload(payload)
+    if (
+        intent is not None
+        and intent.dest == DEST_REMOTE
+        and intent.surface == "browser"
+    ):
+        _ack_interaction(payload, browser_remote_modal_payload(), opener=opener)
+        return action
     _ack_interaction(payload, {"type": CALLBACK_DEFERRED_UPDATE}, opener=opener)
 
     from agent_discord.orchestration.service import (
@@ -625,11 +659,14 @@ def handle_gateway_interaction(
         toggle_spend_halted(store)
     if action == "gate":
         toggle_write_gate(store)
-    if action in {"files", "terminal", "browser"}:
+    if intent is not None:
         if _channel_armed(store, channel_id):
-            _open_host_surface(
-                action,
-                "" if action == "browser" else ".",
+            _dispatch_open_intent(
+                intent,
+                payload,
+                channel_id=channel_id,
+                token=token,
+                opener=opener,
                 roots=host_roots,
                 runner=host_runner,
                 browser_open=browser_open,
@@ -736,11 +773,15 @@ def _handle_modal_submit(
             store, channel_id, payload, token=token, opener=opener, confirm_off=False
         )
         return "roles"
-    if custom_id == BROWSER_MODAL_ID:
+    if custom_id in {BROWSER_MODAL_ID, BROWSER_REMOTE_MODAL_ID}:
+        dest = DEST_REMOTE if custom_id == BROWSER_REMOTE_MODAL_ID else DEST_HOST
         if _channel_armed(store, channel_id):
-            _open_host_surface(
-                "browser",
-                text,
+            _dispatch_open_intent(
+                OpenIntent(surface="browser", target=text, dest=dest),
+                payload,
+                channel_id=channel_id,
+                token=token,
+                opener=opener,
                 roots=host_roots,
                 runner=host_runner,
                 browser_open=browser_open,
@@ -752,27 +793,109 @@ def _handle_modal_submit(
     return None
 
 
-def _open_host_surface(
-    surface: str,
-    target: str,
+def _open_intent_from_payload(payload: Mapping[str, Any]) -> Optional[OpenIntent]:
+    data = payload.get("data")
+    custom_id = ""
+    if isinstance(data, dict):
+        custom_id = str(data.get("custom_id") or "")
+    if custom_id == MORE_ID:
+        custom_id = selected_more_id(payload)
+    return open_intent_from_custom_id(custom_id)
+
+
+def _dispatch_open_intent(
+    intent: OpenIntent,
+    payload: Mapping[str, Any],
     *,
+    channel_id: str,
+    token: str,
+    opener: Any,
     roots: Optional[list[Any]],
     runner: Any,
     browser_open: Any,
 ) -> None:
-    from agent_discord.host.actions import run_host_action
+    from agent_discord.host.actions import HostActionError, run_open_intent
+    from agent_discord.orchestration.cards import open_card
 
     try:
-        run_host_action(
-            surface,
-            target,
+        result = run_open_intent(
+            intent,
             roots=list(roots or ()),
             runner=runner,
             browser_open=browser_open,
         )
-        print(f"panel opened {surface}", flush=True)
+        print(f"panel opened {result.surface} dest={result.dest}", flush=True)
+    except HostActionError as exc:
+        print(f"panel open failed: {exc}", flush=True)
+        _followup_open_card(
+            payload,
+            open_card(
+                surface=intent.surface,
+                target=intent.target,
+                dest=intent.dest,
+                error=str(exc),
+            ),
+            channel_id=channel_id,
+            token=token,
+            opener=opener,
+        )
+        return
     except Exception as exc:
         print(f"panel open failed: {exc}", flush=True)
+        return
+    if result.dest == DEST_REMOTE or result.link_url:
+        _followup_open_card(
+            payload,
+            open_card(
+                surface=result.surface,
+                target=result.target,
+                dest=result.dest,
+                link_url=result.link_url,
+            ),
+            channel_id=channel_id,
+            token=token,
+            opener=opener,
+        )
+
+
+def _followup_open_card(
+    payload: Mapping[str, Any],
+    card: Any,
+    *,
+    channel_id: str,
+    token: str,
+    opener: Any,
+) -> None:
+    body = card.v2_payload()
+    application_id = str(payload.get("application_id") or "")
+    _interaction_id, ix_token = interaction_ids(payload)
+    try:
+        if application_id and ix_token:
+            from agent_discord.discord.rest import create_followup_message
+
+            create_followup_message(
+                application_id=application_id,
+                interaction_token=ix_token,
+                payload={
+                    "flags": body["flags"],
+                    "components": body["components"],
+                },
+                opener=opener,
+            )
+            return
+        if token.strip():
+            from agent_discord.discord.rest import send_channel_message
+
+            send_channel_message(
+                token=token,
+                channel_id=channel_id,
+                content="",
+                components=body["components"],
+                flags=body["flags"],
+                opener=opener,
+            )
+    except Exception as exc:
+        print(f"panel open card failed: {exc}", flush=True)
 
 
 def _paint_interaction(
