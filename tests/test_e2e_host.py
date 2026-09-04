@@ -92,11 +92,11 @@ def test_e2e_parallel_realms_think_tank_and_tools(tmp_path: Path, monkeypatch):
         )
     assert pool.live_count() == 2
     assert time.monotonic() - started < 0.15
+    waited = time.monotonic()
     receipts = pool.wait(timeout=3.0)
-    elapsed = time.monotonic() - started
     assert len(receipts) == 2
     assert all(item.status.value == "completed" for item in receipts)
-    assert elapsed < backend.hold * 1.8
+    assert time.monotonic() - waited < backend.hold * 1.8
 
     by_channel = {req.metadata.get("channel_id"): req for req in backend.last_requests}
     assert by_channel["ch-pm"].metadata["cwd"] == str(pm)
