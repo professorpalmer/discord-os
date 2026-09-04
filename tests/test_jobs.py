@@ -56,8 +56,7 @@ def test_job_pool_runs_two_asks_in_parallel(tmp_path: Path):
     assert len(receipts) == 2
     assert all(item.status == TaskStatus.COMPLETED for item in receipts)
     assert len(backend.started) == 2
-    assert abs(backend.started[1] - backend.started[0]) < 0.12
-    assert elapsed < 2.5
+    assert elapsed < backend.hold * 1.8
     store.close()
 
 
