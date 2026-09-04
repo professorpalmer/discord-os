@@ -22,13 +22,22 @@ class _SlowBackend(FakePuppetmasterBackend):
         super().__init__()
         self.hold = hold
         self.started: list[float] = []
+        self.ended: list[float] = []
         self._gate = threading.Lock()
 
     def dispatch(self, request):  # type: ignore[override]
         with self._gate:
             self.started.append(time.monotonic())
         time.sleep(self.hold)
+        with self._gate:
+            self.ended.append(time.monotonic())
         return super().dispatch(request)
+
+
+def assert_dispatches_overlapped(backend: _SlowBackend) -> None:
+    assert len(backend.started) == 2
+    assert len(backend.ended) == 2
+    assert max(backend.started) < min(backend.ended)
 
 
 def test_job_pool_runs_two_asks_in_parallel(tmp_path: Path):
