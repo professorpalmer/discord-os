@@ -16,7 +16,7 @@ from agent_discord.orchestration.jobs import JobPool
 from agent_discord.orchestration.listen import DISCORD_EPOCH_MS, drain_inbound
 from agent_discord.orchestration.orchestrator import AgentOrchestrator
 from agent_discord.persistence.sqlite import SQLiteStore
-from tests.test_jobs import _SlowBackend
+from tests.test_jobs import _SlowBackend, assert_dispatches_overlapped
 
 
 def _git_repo(path: Path) -> Path:
@@ -70,7 +70,7 @@ def test_e2e_parallel_realms_think_tank_and_tools(tmp_path: Path, monkeypatch):
             ),
         ]
     )
-    backend = _SlowBackend(hold=0.2)
+    backend = _SlowBackend(hold=0.5)
     orch = AgentOrchestrator(
         store=store,
         backend=backend,
@@ -92,11 +92,10 @@ def test_e2e_parallel_realms_think_tank_and_tools(tmp_path: Path, monkeypatch):
         )
     assert pool.live_count() == 2
     assert time.monotonic() - started < 0.15
-    waited = time.monotonic()
     receipts = pool.wait(timeout=3.0)
     assert len(receipts) == 2
     assert all(item.status.value == "completed" for item in receipts)
-    assert time.monotonic() - waited < backend.hold * 1.8
+    assert_dispatches_overlapped(backend)
 
     by_channel = {req.metadata.get("channel_id"): req for req in backend.last_requests}
     assert by_channel["ch-pm"].metadata["cwd"] == str(pm)
