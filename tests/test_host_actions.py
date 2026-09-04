@@ -12,18 +12,28 @@ from agent_discord.contracts import DiscordMessage
 from agent_discord.discord.facade import DiscordFacade
 from agent_discord.discord.providers.fake import FakeDiscordMCPProvider
 from agent_discord.host.actions import (
+    DEST_HOST,
+    DEST_REMOTE,
     HostActionError,
+    OpenIntent,
     allow_browser_url,
     confine_host_path,
+    dest_hint_from_interaction,
     host_browser_argv,
+    interaction_client_platform,
     job_action_from_custom_id,
     job_custom_id,
+    list_remote_files,
+    open_custom_id,
+    open_intent_from_custom_id,
     run_host_action,
+    run_open_intent,
 )
 from agent_discord.host.panel import (
     ASK_ID,
     BROWSER_ID,
     JOBS_ID,
+    MORE_ID,
     OFF_ID,
     ON_ID,
     handle_gateway_interaction,
@@ -151,9 +161,14 @@ def test_parse_open_command_surfaces():
     parsed = parse_open_command("/open terminal src")
     assert parsed.surface == "terminal"
     assert parsed.target == "src"
-    assert parse_open_command("/open https://discord.com/channels/1/2/3").surface == "browser"
+    jump = parse_open_command("/open https://discord.com/channels/1/2/3")
+    assert jump.surface == "browser"
+    assert jump.dest == DEST_REMOTE
     assert parse_open_command("/open browser").target == ""
+    assert parse_open_command("/open browser").dest == DEST_HOST
     assert parse_open_command("/open").surface == "files"
+    assert parse_open_command("/open here files").dest == DEST_REMOTE
+    assert parse_open_command("/open host browser http://127.0.0.1/health").dest == DEST_HOST
 
 
 def test_listen_open_does_not_dispatch_implement(tmp_path: Path):
@@ -291,4 +306,199 @@ def test_browser_button_acks_update_not_url_modal(tmp_path: Path, monkeypatch):
     assert result == "browser"
     assert captured[0]["type"] == 6
     assert opened == [["/opt/harness-chromium"]]
+    store.close()
+
+
+def test_dest_hint_empty_on_todays_interaction_shape():
+    payload = {
+        "type": 3,
+        "id": "ix",
+        "token": "tok",
+        "locale": "en-US",
+        "context": 0,
+        "member": {"user": {"id": "1"}, "roles": []},
+        "data": {"custom_id": "discord-os:more", "values": ["discord-os:open:browser:remote"]},
+    }
+    assert interaction_client_platform(payload) == ""
+    assert dest_hint_from_interaction(payload) == ""
+    hinted = dict(payload)
+    hinted["used_client"] = "mobile"
+    assert dest_hint_from_interaction(hinted) == DEST_REMOTE
+    hinted["used_client"] = "desktop"
+    assert dest_hint_from_interaction(hinted) == DEST_HOST
+
+
+def test_open_intent_legacy_ids_stay_host():
+    files = open_intent_from_custom_id("discord-os:files")
+    assert files is not None
+    assert files.surface == "files"
+    assert files.dest == DEST_HOST
+    browser = open_intent_from_custom_id(BROWSER_ID)
+    assert browser is not None
+    assert browser.dest == DEST_HOST
+    remote = open_intent_from_custom_id(open_custom_id("browser", DEST_REMOTE))
+    assert remote == OpenIntent(surface="browser", target="", dest=DEST_REMOTE)
+    assert open_intent_from_custom_id(ON_ID) is None
+
+
+def test_run_open_intent_remote_does_not_launch_gui(tmp_path: Path):
+    (tmp_path / "readme.txt").write_text("hi", encoding="utf-8")
+    calls: list[list[str]] = []
+
+    def runner(argv, *, cwd=None):
+        calls.append(list(argv))
+
+    listed = run_open_intent(
+        OpenIntent(surface="files", target=".", dest=DEST_REMOTE),
+        roots=[tmp_path],
+        runner=runner,
+    )
+    assert listed.opened
+    assert listed.dest == DEST_REMOTE
+    assert "readme.txt" in listed.listing
+    assert calls == []
+    assert "readme.txt" in list_remote_files(".", [tmp_path])
+
+    opened_urls: list[str] = []
+    link = run_open_intent(
+        OpenIntent(
+            surface="browser",
+            target="http://127.0.0.1:9/health",
+            dest=DEST_REMOTE,
+        ),
+        roots=[tmp_path],
+        runner=runner,
+        browser_open=opened_urls.append,
+    )
+    assert link.opened
+    assert link.link_url == "http://127.0.0.1:9/health"
+    assert opened_urls == []
+    assert calls == []
+    with pytest.raises(HostActionError, match="dest is host"):
+        run_open_intent(
+            OpenIntent(surface="terminal", target=".", dest=DEST_REMOTE),
+            roots=[tmp_path],
+            runner=runner,
+        )
+
+
+def test_open_card_remote_browser_is_a_link():
+    from agent_discord.orchestration.cards import open_card
+
+    card = open_card(
+        surface="browser",
+        target="http://127.0.0.1:9/health",
+        dest=DEST_REMOTE,
+        link_url="http://127.0.0.1:9/health",
+    )
+    assert card.title == "Open here"
+    assert card.link_url == "http://127.0.0.1:9/health"
+    dumped = json.dumps(card.v2_components())
+    assert "http://127.0.0.1:9/health" in dumped
+    assert dumped.count('"style": 5') == 1
+
+
+def test_remote_browser_more_opens_url_modal(tmp_path: Path):
+    store = SQLiteStore(tmp_path / "remote-browser.sqlite3")
+    store.initialize()
+    store.set_host_control("ch", armed=True)
+    opened: list[list[str]] = []
+    captured: list[dict] = []
+
+    def runner(argv, *, cwd=None):
+        opened.append(list(argv))
+
+    class _Resp:
+        def read(self) -> bytes:
+            return b""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+    def opener(request, timeout=10):
+        captured.append(
+            json.loads(request.data.decode("utf-8")) if request.data else {}
+        )
+        return _Resp()
+
+    result = handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix",
+            "token": "tok",
+            "application_id": "app-1",
+            "user": {"id": "owner-1"},
+            "data": {
+                "custom_id": MORE_ID,
+                "values": [open_custom_id("browser", DEST_REMOTE)],
+            },
+            "message": {"id": "panel-1"},
+        },
+        opener=opener,
+        host_roots=[tmp_path],
+        host_runner=runner,
+    )
+    assert result == "browser"
+    assert captured[0]["type"] == 9
+    assert captured[0]["data"]["custom_id"] == "discord-os:browser-modal:remote"
+    assert opened == []
+    store.close()
+
+
+def test_remote_files_more_lists_in_followup(tmp_path: Path):
+    (tmp_path / "notes.md").write_text("list me", encoding="utf-8")
+    store = SQLiteStore(tmp_path / "remote-files.sqlite3")
+    store.initialize()
+    store.set_host_control("ch", armed=True)
+    opened: list[list[str]] = []
+    captured: list[dict] = []
+
+    def runner(argv, *, cwd=None):
+        opened.append(list(argv))
+
+    class _Resp:
+        def read(self) -> bytes:
+            return b""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+    def opener(request, timeout=10):
+        captured.append(
+            json.loads(request.data.decode("utf-8")) if request.data else {}
+        )
+        return _Resp()
+
+    result = handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix",
+            "token": "tok",
+            "application_id": "app-1",
+            "user": {"id": "owner-1"},
+            "data": {
+                "custom_id": MORE_ID,
+                "values": [open_custom_id("files", DEST_REMOTE)],
+            },
+            "message": {"id": "panel-1"},
+        },
+        opener=opener,
+        host_roots=[tmp_path],
+        host_runner=runner,
+    )
+    assert result == "files"
+    assert opened == []
+    dumped = json.dumps(captured)
+    assert "notes.md" in dumped
+    assert "Files here" in dumped
     store.close()

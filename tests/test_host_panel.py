@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from agent_discord.discord.realtime import run_discord_gateway
+from agent_discord.discord.errors import ToolInvocationError
+from agent_discord.discord.realtime import GatewayClosed, run_discord_gateway
 from agent_discord.discord.rest import callback_interaction, send_channel_message
 from agent_discord.discord.ws import decode_frame, encode_frame
 from agent_discord.discord.providers.fake import FakeDiscordMCPProvider
 from agent_discord.host.install import render_launchd_plist
 from agent_discord.contracts import TaskStatus
+from agent_discord.host.actions import DEST_HOST, DEST_REMOTE, open_custom_id
 from agent_discord.host.panel import (
     ASK_ID,
     ASK_MODAL_ID,
@@ -100,10 +102,13 @@ def test_panel_buttons_and_interaction_parse():
         GATE_ID,
         ROLES_ID,
         GITHUB_ID,
-        FILES_ID,
-        TERMINAL_ID,
-        BROWSER_ID,
+        open_custom_id("files", DEST_REMOTE),
+        open_custom_id("files", DEST_HOST),
+        open_custom_id("terminal", DEST_HOST),
+        open_custom_id("browser", DEST_REMOTE),
+        open_custom_id("browser", DEST_HOST),
     ]
+    assert "this Mac" not in json.dumps(armed[1]["components"][0]["options"])
     paired = host_panel_components(True, paired=True)
     paired_more = [item["value"] for item in paired[1]["components"][0]["options"]]
     assert PAIR_ID not in paired_more
@@ -269,6 +274,47 @@ def test_gateway_identifies_after_hello():
     assert identify["d"]["intents"] == 1
     assert identify["d"]["presence"]["status"] == "idle"
     assert "READY" in events
+
+
+def test_gateway_peer_reset_is_reconnectable():
+    class _ResetSocket:
+        def send_text(self, text: str) -> None:
+            return None
+
+        def recv_text(self, timeout: float = 1.0) -> str:
+            raise ConnectionResetError(54, "Connection reset by peer")
+
+        def close(self) -> None:
+            return None
+
+    try:
+        run_discord_gateway(
+            "tok",
+            lambda event, payload: None,
+            connect=lambda url: _ResetSocket(),
+            gateway_url="wss://example.test/?v=10&encoding=json",
+        )
+    except GatewayClosed as exc:
+        assert not exc.fatal
+        assert "reset" in str(exc).lower()
+    else:
+        raise AssertionError("expected GatewayClosed")
+
+
+def test_gateway_lookup_failure_is_reconnectable(monkeypatch):
+    def boom() -> str:
+        raise ToolInvocationError("Discord gateway URL lookup failed")
+
+    monkeypatch.setattr(
+        "agent_discord.discord.realtime.fetch_gateway_url",
+        boom,
+    )
+    try:
+        run_discord_gateway("tok", lambda event, payload: None)
+    except GatewayClosed as exc:
+        assert not exc.fatal
+    else:
+        raise AssertionError("expected GatewayClosed")
 
 
 def test_ask_modal_extracts_task_text():

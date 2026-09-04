@@ -22,7 +22,7 @@ discord-os note TEXT [--channel-id ID]
 discord-os connect [--from-env] [--ticket T]
 discord-os status [--json]
 discord-os invite
-discord-os open {terminal,files,browser} [PATH_OR_URL]
+discord-os open {terminal,files,browser} [PATH_OR_URL] [--here|--host]
 discord-os pair --user-id ID [--role owner|operator]
 discord-os schedule --every 1h --channel-id ID PROMPT
 discord-os spend [--cap USD] [--halt] [--resume]

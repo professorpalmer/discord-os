@@ -669,6 +669,8 @@ def _absorb_open(
                 surface=result.surface,
                 target=result.target,
                 error=result.error,
+                dest=result.dest,
+                link_url=result.link_url,
             ),
             thread_id=thread_id,
         )
