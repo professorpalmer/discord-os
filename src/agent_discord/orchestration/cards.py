@@ -410,11 +410,26 @@ def render_open_card(
     surface: str,
     target: str,
     error: str = "",
+    dest: str = "host",
+    link_url: str = "",
 ) -> str:
-    return open_card(surface=surface, target=target, error=error).text
+    return open_card(
+        surface=surface,
+        target=target,
+        error=error,
+        dest=dest,
+        link_url=link_url,
+    ).text
 
 
-def open_card(*, surface: str, target: str, error: str = "") -> CardMessage:
+def open_card(
+    *,
+    surface: str,
+    target: str,
+    error: str = "",
+    dest: str = "host",
+    link_url: str = "",
+) -> CardMessage:
     label = _SURFACE_LABELS.get(surface, surface or "Host")
     if error:
         return CardMessage(
@@ -423,10 +438,26 @@ def open_card(*, surface: str, target: str, error: str = "") -> CardMessage:
             description=redact_text_markers(error),
             color=COLOR_FAIL,
         )
+    href = (link_url or target).strip()
+    if dest == "remote" and surface == "browser":
+        return CardMessage(
+            kind="OPEN",
+            title="Open here",
+            description=redact_text_markers(href or label),
+            color=COLOR_LIVE,
+            link_url=href,
+        )
+    if dest == "remote":
+        return CardMessage(
+            kind="OPEN",
+            title=f"{label} here",
+            description=redact_text_markers(target or label),
+            color=COLOR_LIVE,
+        )
     detail = target if surface == "browser" and target else label
     return CardMessage(
         kind="OPEN",
-        title="Opened",
+        title="Opened on the host",
         description=detail,
         color=COLOR_LIVE,
     )

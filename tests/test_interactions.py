@@ -29,7 +29,7 @@ SIGNATURE = "11" * 64
 def test_slash_connect_has_no_secret_option():
     assert "options" not in CONNECT_COMMAND
     names = {item["name"] for item in OPEN_COMMAND["options"]}
-    assert names == {"surface", "target"}
+    assert names == {"surface", "target", "dest"}
 
 
 def test_verify_ed25519_injected(monkeypatch):

@@ -1,4 +1,10 @@
-"""Open Terminal, file manager, or browser on the listen host.
+"""Open Terminal, files, or a browser.
+
+Dest is the noun: ``host`` opens a GUI on the listen machine;
+``remote`` stays in Discord so the tapping client (phone or desktop)
+is the dest. Discord does not send client platform on INTERACTION_CREATE.
+Presence client_status is not a dest. ``used_client`` is parsed if Discord
+ever ships it, and never routes Terminal by itself.
 
 Paths stay inside configured roots. Browser URLs are allowlisted.
 The runner is injectable so tests never spawn a GUI.
@@ -14,7 +20,7 @@ import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional, Sequence
+from typing import Any, Callable, Mapping, Optional, Sequence
 from urllib.parse import urlparse
 
 from agent_discord.discord.layout import CUSTOM_ID_MAX
@@ -24,6 +30,30 @@ class HostActionError(ValueError):
     """Rejected host open (path escape, bad URL, unknown surface)."""
 
 
+DEST_HOST = "host"
+DEST_REMOTE = "remote"
+DESTS = frozenset({DEST_HOST, DEST_REMOTE})
+SURFACES = frozenset({"terminal", "files", "browser"})
+OPEN_ID_PREFIX = "discord-os:open:"
+JOB_ID_PREFIX = "discord-os:job:"
+JOB_VERBS = frozenset({"approve", "cancel", "retry"})
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+_DISCORD_HOSTS = frozenset({"discord.com", "canary.discord.com", "ptb.discord.com"})
+_CLIENT_TO_DEST = {
+    "mobile": DEST_REMOTE,
+    "android": DEST_REMOTE,
+    "ios": DEST_REMOTE,
+    "desktop": DEST_HOST,
+    "web": DEST_HOST,
+}
+_LEGACY_OPEN_IDS = {
+    "discord-os:files": ("files", DEST_HOST),
+    "discord-os:terminal": ("terminal", DEST_HOST),
+    "discord-os:browser": ("browser", DEST_HOST),
+}
+_REMOTE_FILE_LIMIT = 24
+
+
 @dataclass(frozen=True)
 class HostActionResult:
     surface: str
@@ -31,15 +61,21 @@ class HostActionResult:
     argv: tuple[str, ...] = ()
     error: str = ""
     opened: bool = False
+    dest: str = DEST_HOST
+    listing: str = ""
+    link_url: str = ""
+
+
+@dataclass(frozen=True)
+class OpenIntent:
+    """One open: surface, target, dest. Dest is never inferred from presence."""
+
+    surface: str
+    target: str
+    dest: str = DEST_HOST
 
 
 CommandRunner = Callable[..., object]
-
-SURFACES = frozenset({"terminal", "files", "browser"})
-JOB_ID_PREFIX = "discord-os:job:"
-JOB_VERBS = frozenset({"approve", "cancel", "retry"})
-_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
-_DISCORD_HOSTS = frozenset({"discord.com", "canary.discord.com", "ptb.discord.com"})
 
 
 @dataclass(frozen=True)
@@ -69,6 +105,144 @@ def job_action_from_custom_id(custom_id: str) -> Optional[JobAction]:
     if not run_id:
         return None
     return JobAction(action=verb, run_id=run_id)
+
+
+def open_custom_id(surface: str, dest: str) -> str:
+    kind = (surface or "").strip().lower()
+    where = (dest or "").strip().lower()
+    return f"{OPEN_ID_PREFIX}{kind}:{where}"[:CUSTOM_ID_MAX]
+
+
+def open_intent_from_custom_id(custom_id: str) -> Optional[OpenIntent]:
+    raw = (custom_id or "").strip()
+    legacy = _LEGACY_OPEN_IDS.get(raw)
+    if legacy is not None:
+        surface, dest = legacy
+        target = "" if surface == "browser" else "."
+        return OpenIntent(surface=surface, target=target, dest=dest)
+    if not raw.startswith(OPEN_ID_PREFIX):
+        return None
+    rest = raw[len(OPEN_ID_PREFIX) :]
+    surface, sep, dest = rest.partition(":")
+    if not sep or surface not in SURFACES or dest not in DESTS:
+        return None
+    target = "" if surface == "browser" else "."
+    return OpenIntent(surface=surface, target=target, dest=dest)
+
+
+def legal_dests(surface: str) -> frozenset[str]:
+    kind = (surface or "").strip().lower()
+    if kind == "terminal":
+        return frozenset({DEST_HOST})
+    if kind in SURFACES:
+        return frozenset({DEST_HOST, DEST_REMOTE})
+    return frozenset()
+
+
+def default_dest(surface: str, target: str = "") -> str:
+    if (surface or "").strip().lower() == "browser" and (target or "").strip():
+        return DEST_REMOTE
+    return DEST_HOST
+
+
+def interaction_client_platform(payload: Mapping[str, Any]) -> str:
+    """Client string if Discord ever puts one on INTERACTION_CREATE. Else empty."""
+
+    for key in ("used_client", "client", "platform"):
+        raw = payload.get(key)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip().lower()
+    data = payload.get("data")
+    if isinstance(data, Mapping):
+        for key in ("used_client", "client", "platform"):
+            raw = data.get(key)
+            if isinstance(raw, str) and raw.strip():
+                return raw.strip().lower()
+    return ""
+
+
+def dest_hint_from_interaction(payload: Mapping[str, Any]) -> str:
+    """Label hint only. Never a dest router. Empty on today's Discord payloads."""
+
+    return _CLIENT_TO_DEST.get(interaction_client_platform(payload), "")
+
+
+def run_open_intent(
+    intent: OpenIntent,
+    *,
+    roots: Sequence[Path],
+    runner: Optional[CommandRunner] = None,
+    browser_open: Optional[Callable[[str], object]] = None,
+) -> HostActionResult:
+    kind = (intent.surface or "").strip().lower()
+    dest = (intent.dest or default_dest(kind, intent.target)).strip().lower()
+    if kind not in SURFACES:
+        raise HostActionError(f"unknown surface {intent.surface!r}")
+    if dest not in DESTS:
+        raise HostActionError(f"unknown dest {intent.dest!r}")
+    if dest not in legal_dests(kind):
+        raise HostActionError(f"{kind} dest is host")
+    if dest == DEST_HOST:
+        result = run_host_action(
+            kind,
+            intent.target,
+            roots=roots,
+            runner=runner,
+            browser_open=browser_open,
+        )
+        return HostActionResult(
+            surface=result.surface,
+            target=result.target,
+            argv=result.argv,
+            error=result.error,
+            opened=result.opened,
+            dest=DEST_HOST,
+        )
+    if kind == "browser":
+        url = allow_browser_url(intent.target)
+        return HostActionResult(
+            surface="browser",
+            target=url,
+            dest=DEST_REMOTE,
+            link_url=url,
+            opened=True,
+        )
+    listing = list_remote_files(intent.target, roots)
+    return HostActionResult(
+        surface="files",
+        target=listing,
+        dest=DEST_REMOTE,
+        listing=listing,
+        opened=True,
+    )
+
+
+def list_remote_files(
+    raw: str,
+    roots: Sequence[Path],
+    *,
+    limit: int = _REMOTE_FILE_LIMIT,
+) -> str:
+    path = confine_host_path(raw, roots)
+    if path.is_file():
+        return path.name
+    if not path.is_dir():
+        raise HostActionError("path is not a file or folder")
+    shown: list[str] = []
+    hidden = 0
+    children = sorted(path.iterdir(), key=lambda item: item.name.lower())
+    for child in children:
+        if child.name.startswith("."):
+            continue
+        if len(shown) < max(1, int(limit)):
+            suffix = "/" if child.is_dir() else ""
+            shown.append(f"{child.name}{suffix}")
+        else:
+            hidden += 1
+    body = "\n".join(shown) if shown else "(empty)"
+    if hidden:
+        body += f"\n+{hidden} more"
+    return body
 
 
 def run_host_action(

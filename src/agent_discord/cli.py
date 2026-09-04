@@ -335,18 +335,29 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_open = sub.add_parser(
         "open",
-        help="Open Terminal, files, or an allowlisted URL on this host",
+        help="Open Terminal, files, or an allowlisted URL here or on the host",
     )
     p_open.add_argument(
         "surface",
         choices=("terminal", "files", "browser"),
-        help="Host surface (poverty path; same engine as /open in listen)",
+        help="Surface (poverty path; same engine as /open in listen)",
     )
     p_open.add_argument(
         "target",
         nargs="?",
         default=".",
         help="Workspace-relative path, or allowlisted http(s) URL for browser",
+    )
+    dest = p_open.add_mutually_exclusive_group()
+    dest.add_argument(
+        "--here",
+        action="store_true",
+        help="Stay in Discord (phone dest): link or folder listing",
+    )
+    dest.add_argument(
+        "--host",
+        action="store_true",
+        help="Open a GUI on the listen machine",
     )
     p_open.add_argument("--json", action="store_true")
 
@@ -1429,26 +1440,29 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
             dests = listen_destinations(listen_ids, job_pool, orch)
             receipts: list[Any] = []
             for listen_id in dests:
-                receipts.extend(
-                    drain_inbound(
-                        orch,
-                        discord,
-                        channel_id=listen_id,
-                        workspace_id=args.workspace_id,
-                        guild_id=args.guild_id,
-                        thread_id=args.thread_id if listen_id == args.channel_id else None,
-                        limit=args.limit,
-                        workspace=config.workspace,
-                        since_ms=ignore_history_before_ms,
-                        host_roots=(
-                            tuple(repo.path for repo in host_repos)
-                            + (config.puppetmaster_cwd, config.workspace)
-                            if config.host_actions
-                            else ()
-                        ),
-                        job_pool=job_pool,
+                try:
+                    receipts.extend(
+                        drain_inbound(
+                            orch,
+                            discord,
+                            channel_id=listen_id,
+                            workspace_id=args.workspace_id,
+                            guild_id=args.guild_id,
+                            thread_id=args.thread_id if listen_id == args.channel_id else None,
+                            limit=args.limit,
+                            workspace=config.workspace,
+                            since_ms=ignore_history_before_ms,
+                            host_roots=(
+                                tuple(repo.path for repo in host_repos)
+                                + (config.puppetmaster_cwd, config.workspace)
+                                if config.host_actions
+                                else ()
+                            ),
+                            job_pool=job_pool,
+                        )
                     )
-                )
+                except Exception as exc:
+                    print(f"listen drain failed: {exc}", flush=True)
             while True:
                 try:
                     ask_channel, prompt, replay_of = asks.get_nowait()
@@ -1637,6 +1651,9 @@ def _start_panel_gateway(
                     discord_down.set()
                     return
                 time.sleep(0.4)
+            except Exception as exc:
+                print(f"panel gateway error: {exc}", flush=True)
+                time.sleep(1.0)
             else:
                 return
 
@@ -1987,13 +2004,20 @@ def cmd_open(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         return 1
     from agent_discord.host.verbs import handle_open_message
 
+    dest = "here" if args.here else "host" if args.host else ""
+    command = (
+        f"/open {dest} {args.surface} {args.target}".strip()
+        if dest
+        else f"/open {args.surface} {args.target}".strip()
+    )
     result = handle_open_message(
-        f"/open {args.surface} {args.target}".strip(),
+        command,
         roots=(config.puppetmaster_cwd, config.workspace),
     )
     payload = {
         "surface": result.surface,
         "target": result.target,
+        "dest": result.dest,
         "opened": result.opened,
         "error": result.error,
     }

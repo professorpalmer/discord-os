@@ -68,9 +68,14 @@ def run_discord_gateway(
     """
 
     halt = stop or threading.Event()
-    url = gateway_url or fetch_gateway_url()
-    opener = connect or WebSocketClient.connect
-    sock = opener(url)
+    try:
+        url = gateway_url or fetch_gateway_url()
+        opener = connect or WebSocketClient.connect
+        sock = opener(url)
+    except GatewayClosed:
+        raise
+    except Exception as exc:
+        raise GatewayClosed(str(exc), fatal=False) from exc
     seq: Optional[int] = None
     beat_stop = threading.Event()
     beater: Optional[threading.Thread] = None
@@ -152,6 +157,8 @@ def run_discord_gateway(
                 except Exception as exc:
                     print(f"panel dispatch failed: {exc}", flush=True)
     except WebSocketError as exc:
+        raise GatewayClosed(str(exc), fatal=False) from exc
+    except (ConnectionResetError, BrokenPipeError, TimeoutError, OSError) as exc:
         raise GatewayClosed(str(exc), fatal=False) from exc
     finally:
         beat_stop.set()
