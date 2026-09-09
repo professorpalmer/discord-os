@@ -249,6 +249,17 @@ def connect_card(
     )
 
 
+def github_wake_card(summary: str, *, kind: str = "") -> CardMessage:
+    title = "Checks failed" if kind == "check_failed" else "Review"
+    color = COLOR_FAIL if kind == "check_failed" else COLOR_WORK
+    return CardMessage(
+        kind="NOTE",
+        title=title,
+        description=redact_text_markers(summary or ""),
+        color=color,
+    )
+
+
 def render_progress_card(
     *,
     stage: str,
@@ -269,8 +280,12 @@ def progress_card(
     run_id: str = "",
     actions: str = "running",
     thinking: str = "",
+    job_code: str = "",
 ) -> CardMessage:
     title = _title_case(stage) or "Working"
+    code = (job_code or "").strip()
+    if code:
+        title = f"{code} · {title}"
     body = redact_text_markers(message or "")
     think = redact_text_markers(thinking or "")
     return CardMessage(

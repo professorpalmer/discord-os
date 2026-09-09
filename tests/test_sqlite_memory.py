@@ -349,6 +349,58 @@ def test_list_recent_jobs_ranks_attention_ahead_of_recency(tmp_path: Path):
     store.close()
 
 
+def test_list_recent_jobs_ranks_waiting_after_need(tmp_path: Path):
+    store = SQLiteStore(tmp_path / "waiting-rank.sqlite3")
+    store.initialize()
+    store.create_task(
+        task_id="wait",
+        workspace_id="ws",
+        channel_id="ch",
+        intake_text="open pr",
+    )
+    store.create_run(
+        run_id="wait-run",
+        task_id="wait",
+        model="cursor/grok-4-5",
+        adapter_name="grok-4.5",
+        status=TaskStatus.COMPLETED,
+    )
+    store.update_run("wait-run", status=TaskStatus.COMPLETED, summary="pr open")
+    store.set_job_github_attention("wait", "waiting", summary="PR #1 waiting on checks")
+    store.create_task(
+        task_id="need",
+        workspace_id="ws",
+        channel_id="ch",
+        intake_text="tests red",
+    )
+    store.create_run(
+        run_id="need-run",
+        task_id="need",
+        model="cursor/grok-4-5",
+        adapter_name="grok-4.5",
+        status=TaskStatus.COMPLETED,
+    )
+    store.update_run("need-run", status=TaskStatus.COMPLETED, summary="pr open")
+    store.set_job_github_attention("need", "need", summary="PR #2 failed: tests")
+    store.create_task(
+        task_id="done",
+        workspace_id="ws",
+        channel_id="ch",
+        intake_text="already finished",
+    )
+    store.create_run(
+        run_id="done-run",
+        task_id="done",
+        model="cursor/grok-4-5",
+        adapter_name="grok-4.5",
+        status=TaskStatus.COMPLETED,
+    )
+    store.update_run("done-run", status=TaskStatus.COMPLETED, summary="ok")
+    jobs = store.list_recent_jobs("ch", limit=5)
+    assert [job["run_id"] for job in jobs] == ["need-run", "wait-run", "done-run"]
+    store.close()
+
+
 def test_list_recent_jobs_uses_latest_run_per_task(tmp_path: Path):
     store = SQLiteStore(tmp_path / "latest-run.sqlite3")
     store.initialize()

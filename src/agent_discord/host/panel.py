@@ -214,11 +214,14 @@ def _job_select_options(jobs: list[dict[str, Any]] | tuple[dict[str, Any], ...])
         seen.add(run_id)
         label = str(job.get("intake_text") or job.get("summary") or run_id).replace("\n", " ")
         status = str(job.get("status") or "").strip()
+        code = str(job.get("job_code") or "").strip()
+        if code:
+            label = f"{code} {label}".strip()
         options.append(
             {
                 "label": label[:80] or run_id[:80],
                 "value": run_id[:100],
-                "description": status[:100],
+                "description": (f"{code} {status}".strip() if code else status)[:100],
             }
         )
     return options
@@ -940,28 +943,12 @@ def _panel_acl_counts(store: Any) -> tuple[int, int]:
 
 
 def _panel_last_job(store: Any, channel_id: str) -> str:
+    from agent_discord.orchestration.job_briefing import briefing_line
+
     jobs = _panel_jobs(store, channel_id)
     if not jobs:
         return ""
-    job = jobs[0]
-    status = str(job.get("status") or "").strip()
-    text = str(job.get("summary") or job.get("intake_text") or "").replace("\n", " ")
-    text = " ".join(text.split())
-    if len(text) > 80:
-        text = text[:77] + "..."
-    if status in {"pending", "failed"}:
-        prefix = "Need"
-    elif status in {"running", "progress"}:
-        prefix = "Live"
-    else:
-        prefix = "Last"
-    if status and text:
-        return f"{prefix}: {status} · {text}"
-    if status:
-        return f"{prefix}: {status}"
-    if text:
-        return f"{prefix}: {text}"
-    return ""
+    return briefing_line(jobs[0])
 
 
 def _panel_realm(store: Any, channel_id: str) -> str:

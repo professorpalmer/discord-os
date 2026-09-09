@@ -12,7 +12,7 @@ from typing import Any, Mapping, Optional, Sequence
 from uuid import uuid4
 
 from agent_discord import CLI_OWNER_PREFIX, LEGACY_CLI_OWNER_PREFIX
-from agent_discord.contracts import EventKind, TaskStatus
+from agent_discord.contracts import EventKind, JOB_CODE_PREFIX, TaskStatus
 from agent_discord.discord.errors import GatewayOwnershipError
 from agent_discord.persistence.research import RESEARCH_SCHEMA
 from agent_discord.redaction import redact_text_markers, strip_forbidden_keys
@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     status TEXT NOT NULL,
     requester_id TEXT,
     metadata_json TEXT NOT NULL DEFAULT '{}',
+    job_code TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -174,6 +175,35 @@ CREATE TABLE IF NOT EXISTS lineage_nodes (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_lineage_run ON lineage_nodes(run_id);
+
+CREATE TABLE IF NOT EXISTS job_pull_requests (
+    repo TEXT NOT NULL,
+    number INTEGER NOT NULL,
+    task_id TEXT NOT NULL,
+    branch TEXT NOT NULL DEFAULT '',
+    base TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (repo, number)
+);
+CREATE INDEX IF NOT EXISTS idx_job_pr_task ON job_pull_requests(task_id);
+
+CREATE TABLE IF NOT EXISTS github_wake_events (
+    event_id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    created_ms INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS github_rules (
+    rule_id TEXT PRIMARY KEY,
+    prompt TEXT NOT NULL DEFAULT '',
+    destination TEXT NOT NULL DEFAULT 'new',
+    repo TEXT NOT NULL DEFAULT '',
+    branch TEXT NOT NULL DEFAULT '',
+    conclusion TEXT NOT NULL DEFAULT '',
+    channel_id TEXT NOT NULL DEFAULT '',
+    workspace_id TEXT NOT NULL DEFAULT 'default',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_ms INTEGER NOT NULL
+);
 """
 
 PREFERENCE_KINDS = frozenset({"preference", "style", "failure"})
@@ -199,6 +229,7 @@ class SQLiteStore:
         self._migrate_preferences(conn)
         self._migrate_service_tables(conn)
         self._migrate_lineage_nodes(conn)
+        self._migrate_job_queue(conn)
         self._fts_enabled = self._try_enable_fts(conn)
         conn.commit()
 
@@ -327,6 +358,73 @@ class SQLiteStore:
             """
         )
 
+    def _migrate_job_queue(self, conn: sqlite3.Connection) -> None:
+        cols = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(tasks)").fetchall()
+        }
+        if "job_code" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN job_code TEXT NOT NULL DEFAULT ''")
+        conn.executescript(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_job_code
+            ON tasks(job_code) WHERE job_code != '';
+            CREATE TABLE IF NOT EXISTS job_pull_requests (
+                repo TEXT NOT NULL,
+                number INTEGER NOT NULL,
+                task_id TEXT NOT NULL,
+                branch TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (repo, number)
+            );
+            CREATE INDEX IF NOT EXISTS idx_job_pr_task ON job_pull_requests(task_id);
+            CREATE TABLE IF NOT EXISTS github_wake_events (
+                event_id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                created_ms INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS github_rules (
+                rule_id TEXT PRIMARY KEY,
+                prompt TEXT NOT NULL DEFAULT '',
+                destination TEXT NOT NULL DEFAULT 'new',
+                repo TEXT NOT NULL DEFAULT '',
+                branch TEXT NOT NULL DEFAULT '',
+                conclusion TEXT NOT NULL DEFAULT '',
+                channel_id TEXT NOT NULL DEFAULT '',
+                workspace_id TEXT NOT NULL DEFAULT 'default',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_ms INTEGER NOT NULL
+            );
+            """
+        )
+        pr_cols = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(job_pull_requests)").fetchall()
+        }
+        if pr_cols and "base" not in pr_cols:
+            conn.execute(
+                "ALTER TABLE job_pull_requests ADD COLUMN base TEXT NOT NULL DEFAULT ''"
+            )
+        missing = conn.execute(
+            "SELECT task_id FROM tasks WHERE job_code IS NULL OR job_code = ''"
+        ).fetchall()
+        for row in missing:
+            conn.execute(
+                "UPDATE tasks SET job_code=? WHERE task_id=?",
+                (self._mint_job_code(conn), row["task_id"]),
+            )
+
+    def _mint_job_code(self, conn: sqlite3.Connection) -> str:
+        row = conn.execute(
+            """
+            SELECT COALESCE(MAX(CAST(substr(job_code, ?) AS INTEGER)), 10000)
+            FROM tasks
+            WHERE job_code GLOB 'DOS-[0-9]*'
+            """,
+            (len(JOB_CODE_PREFIX) + 1,),
+        ).fetchone()
+        nxt = int(row[0] or 10000) + 1
+        return f"{JOB_CODE_PREFIX}{nxt}"
+
     def _try_enable_fts(self, conn: sqlite3.Connection) -> bool:
         try:
             conn.execute(
@@ -436,12 +534,13 @@ class SQLiteStore:
         metadata: Optional[Mapping[str, Any]] = None,
     ) -> None:
         conn = self._connection()
+        job_code = self._mint_job_code(conn)
         conn.execute(
             """
             INSERT INTO tasks (
                 task_id, workspace_id, channel_id, thread_id, intake_text,
-                status, requester_id, metadata_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                status, requester_id, metadata_json, job_code
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 task_id,
@@ -452,6 +551,7 @@ class SQLiteStore:
                 TaskStatus.PENDING.value,
                 requester_id,
                 json.dumps(dict(metadata or {}), sort_keys=True),
+                job_code,
             ),
         )
         conn.commit()
@@ -549,12 +649,14 @@ class SQLiteStore:
     def list_recent_jobs(
         self, channel_id: str, *, limit: int = 5
     ) -> list[dict[str, Any]]:
-        """Latest run per task, attention first: parked, failed, live, then Done."""
+        """Latest run per task, attention first: parked, failed, waiting, live, then Done."""
 
         capped = max(1, min(int(limit), 25))
+        channel = (channel_id or "").strip()
         rows = self._connection().execute(
             """
             SELECT t.task_id, t.intake_text, t.status AS task_status,
+                   t.metadata_json, t.job_code, t.thread_id, t.updated_at,
                    r.run_id, r.summary, r.status AS run_status
             FROM tasks t
             LEFT JOIN runs r ON r.run_id = (
@@ -563,38 +665,245 @@ class SQLiteStore:
                 ORDER BY created_at DESC, run_id DESC
                 LIMIT 1
             )
-            WHERE t.channel_id=?
-            ORDER BY
-              CASE COALESCE(r.status, t.status)
-                WHEN 'pending' THEN 0
-                WHEN 'failed' THEN 1
-                WHEN 'running' THEN 2
-                WHEN 'progress' THEN 2
-                WHEN 'cancelled' THEN 3
-                ELSE 4
-              END,
-              t.updated_at DESC
+            WHERE (? = '' OR t.channel_id=?)
+            ORDER BY t.updated_at DESC
             LIMIT ?
             """,
-            (channel_id, capped),
+            (channel, channel, max(capped * 4, 50)),
         ).fetchall()
-        items: list[dict[str, Any]] = []
         seen: set[str] = set()
+        ranked: list[tuple[int, dict[str, Any]]] = []
         for row in rows:
             run_id = str(row["run_id"] or "")
             if not run_id or run_id in seen:
                 continue
             seen.add(run_id)
-            items.append(
-                {
-                    "task_id": str(row["task_id"] or ""),
-                    "run_id": run_id,
-                    "intake_text": str(row["intake_text"] or ""),
-                    "summary": str(row["summary"] or ""),
-                    "status": str(row["run_status"] or row["task_status"] or ""),
-                }
+            status = str(row["run_status"] or row["task_status"] or "")
+            attention = _github_attention(row["metadata_json"])
+            summary = str(row["summary"] or "")
+            wake_summary = _github_last_summary(row["metadata_json"])
+            if attention and wake_summary:
+                summary = wake_summary
+            item = {
+                "task_id": str(row["task_id"] or ""),
+                "run_id": run_id,
+                "intake_text": str(row["intake_text"] or ""),
+                "summary": summary,
+                "status": status,
+                "job_code": str(row["job_code"] or ""),
+                "thread_id": str(row["thread_id"] or ""),
+                "attention": attention,
+            }
+            ranked.append((_job_rank(status, attention), item))
+        ranked.sort(key=lambda pair: pair[0])
+        return [item for _rank, item in ranked][:capped]
+
+    def task_job_code(self, task_id: str) -> str:
+        row = self.get_task(task_id)
+        if row is None:
+            return ""
+        return str(row.get("job_code") or "").strip()
+
+    def get_task_by_job_code(self, job_code: str) -> Optional[dict[str, Any]]:
+        code = (job_code or "").strip().upper()
+        if not code:
+            return None
+        row = self._connection().execute(
+            "SELECT * FROM tasks WHERE job_code=? COLLATE NOCASE",
+            (code,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def latest_run_id_for_task(self, task_id: str) -> str:
+        row = self._connection().execute(
+            """
+            SELECT run_id FROM runs
+            WHERE task_id=?
+            ORDER BY created_at DESC, run_id DESC
+            LIMIT 1
+            """,
+            (task_id,),
+        ).fetchone()
+        return str(row["run_id"] or "") if row else ""
+
+    def bind_job_pull_request(
+        self,
+        task_id: str,
+        *,
+        repo: str,
+        number: int,
+        branch: str = "",
+        base: str = "",
+    ) -> None:
+        rid = (task_id or "").strip()
+        owner_repo = (repo or "").strip().strip("/")
+        try:
+            pr_number = int(number)
+        except (TypeError, ValueError):
+            return
+        if not rid or not owner_repo or pr_number < 1:
+            return
+        head = (branch or "").strip()
+        onto = (base or "").strip()
+        conn = self._connection()
+        conn.execute(
+            """
+            INSERT INTO job_pull_requests (repo, number, task_id, branch, base)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(repo, number) DO UPDATE SET
+                task_id=excluded.task_id,
+                branch=CASE
+                    WHEN excluded.branch != '' THEN excluded.branch
+                    ELSE job_pull_requests.branch
+                END,
+                base=CASE
+                    WHEN excluded.base != '' THEN excluded.base
+                    ELSE job_pull_requests.base
+                END
+            """,
+            (owner_repo, pr_number, rid, head, onto),
+        )
+        conn.commit()
+        github = self.task_metadata(rid).get("github")
+        blob = dict(github) if isinstance(github, dict) else {}
+        blob.update({"repo": owner_repo, "number": pr_number})
+        if head:
+            blob["branch"] = head
+        if onto:
+            blob["base"] = onto
+        self.merge_task_metadata(rid, {"github": blob})
+
+    def job_for_pull_request(self, repo: str, number: int) -> Optional[dict[str, Any]]:
+        try:
+            pr_number = int(number)
+        except (TypeError, ValueError):
+            return None
+        row = self._connection().execute(
+            """
+            SELECT p.repo, p.number, p.task_id, p.branch, p.base,
+                   t.channel_id, t.thread_id
+            FROM job_pull_requests p
+            JOIN tasks t ON t.task_id = p.task_id
+            WHERE p.repo=? AND p.number=?
+            """,
+            ((repo or "").strip(), pr_number),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def job_for_head_branch(self, repo: str, branch: str) -> Optional[dict[str, Any]]:
+        owner_repo = (repo or "").strip().strip("/")
+        head = (branch or "").strip()
+        if not owner_repo or not head:
+            return None
+        row = self._connection().execute(
+            """
+            SELECT p.repo, p.number, p.task_id, p.branch, p.base,
+                   t.channel_id, t.thread_id
+            FROM job_pull_requests p
+            JOIN tasks t ON t.task_id = p.task_id
+            WHERE p.repo=? AND p.branch=?
+            ORDER BY t.updated_at DESC
+            LIMIT 1
+            """,
+            (owner_repo, head),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_job_pull_requests(self) -> list[dict[str, Any]]:
+        rows = self._connection().execute(
+            """
+            SELECT p.repo, p.number, p.task_id, p.branch, p.base,
+                   t.channel_id, t.thread_id,
+                   (
+                       SELECT run_id FROM runs
+                       WHERE task_id = t.task_id
+                       ORDER BY created_at DESC, run_id DESC
+                       LIMIT 1
+                   ) AS run_id
+            FROM job_pull_requests p
+            JOIN tasks t ON t.task_id = p.task_id
+            ORDER BY t.updated_at DESC
+            """
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def add_github_rule(
+        self,
+        *,
+        prompt: str = "",
+        destination: str = "new",
+        repo: str = "",
+        branch: str = "",
+        conclusion: str = "",
+        channel_id: str = "",
+        workspace_id: str = "default",
+    ) -> str:
+        rule_id = uuid4().hex
+        dest = (destination or "new").strip().lower() or "new"
+        conn = self._connection()
+        conn.execute(
+            """
+            INSERT INTO github_rules (
+                rule_id, prompt, destination, repo, branch, conclusion,
+                channel_id, workspace_id, enabled, created_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+            """,
+            (
+                rule_id,
+                (prompt or "").strip(),
+                dest,
+                (repo or "").strip().strip("/"),
+                (branch or "").strip(),
+                (conclusion or "").strip().lower(),
+                (channel_id or "").strip(),
+                (workspace_id or "default").strip() or "default",
+                int(time.time() * 1000),
+            ),
+        )
+        conn.commit()
+        return rule_id
+
+    def list_github_rules(self) -> list[dict[str, Any]]:
+        rows = self._connection().execute(
+            """
+            SELECT * FROM github_rules
+            WHERE enabled = 1
+            ORDER BY created_ms ASC
+            """
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def set_job_github_attention(
+        self, task_id: str, attention: str, *, summary: str = ""
+    ) -> None:
+        meta = self.task_metadata(task_id)
+        github = dict(meta.get("github") or {}) if isinstance(meta.get("github"), dict) else {}
+        github["attention"] = str(attention or "")
+        if summary:
+            github["last_summary"] = summary
+        elif not attention:
+            github.pop("last_summary", None)
+        self.merge_task_metadata(task_id, {"github": github})
+
+    def claim_github_wake(self, event_id: str, task_id: str) -> bool:
+        eid = (event_id or "").strip()
+        rid = (task_id or "").strip()
+        if not eid or not rid:
+            return False
+        conn = self._connection()
+        try:
+            conn.execute(
+                """
+                INSERT INTO github_wake_events (event_id, task_id, created_ms)
+                VALUES (?, ?, ?)
+                """,
+                (eid, rid, int(time.time() * 1000)),
             )
-        return items
+            conn.commit()
+        except sqlite3.IntegrityError:
+            return False
+        return True
+
 
     # --- events ---
 
@@ -1196,16 +1505,30 @@ class SQLiteStore:
             """,
             (run_id,),
         ).fetchall()
-        out: list[dict[str, Any]] = []
-        for row in rows:
-            item = dict(row)
-            raw = item.pop("parent_keys_json", "[]")
-            try:
-                item["parent_keys"] = json.loads(raw or "[]")
-            except json.JSONDecodeError:
-                item["parent_keys"] = []
-            out.append(item)
-        return out
+        return [self._decode_lineage_row(row) for row in rows]
+
+    def list_lineage_children(self, parent_key: str) -> Sequence[Mapping[str, Any]]:
+        key = (parent_key or "").strip()
+        if not key:
+            return []
+        rows = self._connection().execute(
+            """
+            SELECT * FROM lineage_nodes
+            WHERE parent_keys_json LIKE ?
+            ORDER BY created_at ASC, node_key ASC
+            """,
+            (f'%"{key}"%',),
+        ).fetchall()
+        return [self._decode_lineage_row(row) for row in rows]
+
+    def _decode_lineage_row(self, row: sqlite3.Row) -> dict[str, Any]:
+        item = dict(row)
+        raw = item.pop("parent_keys_json", "[]")
+        try:
+            item["parent_keys"] = json.loads(raw or "[]")
+        except json.JSONDecodeError:
+            item["parent_keys"] = []
+        return item
 
     def mark_lineage_stale(self, node_keys: Sequence[str]) -> int:
         keys = [str(k) for k in node_keys if str(k or "").strip()]
@@ -1549,6 +1872,41 @@ def _cli_owner_is_dead(owner_id: str) -> bool:
     except OSError:
         return True
     return False
+
+
+def _github_attention(raw: Any) -> str:
+    github = _github_blob(raw)
+    return str(github.get("attention") or "").strip().lower()
+
+
+def _github_last_summary(raw: Any) -> str:
+    github = _github_blob(raw)
+    return str(github.get("last_summary") or "").strip()
+
+
+def _github_blob(raw: Any) -> dict[str, Any]:
+    try:
+        meta = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    if not isinstance(meta, dict):
+        return {}
+    github = meta.get("github")
+    return dict(github) if isinstance(github, dict) else {}
+
+
+def _job_rank(status: str, attention: str) -> int:
+    if status == TaskStatus.PENDING.value:
+        return 0
+    if status == TaskStatus.FAILED.value or attention == "need":
+        return 1
+    if attention == "waiting":
+        return 2
+    if status in {TaskStatus.RUNNING.value, TaskStatus.PROGRESS.value}:
+        return 3
+    if status == TaskStatus.CANCELLED.value:
+        return 4
+    return 5
 
 
 def _memory_row(row: sqlite3.Row) -> dict[str, Any]:

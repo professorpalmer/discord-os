@@ -7,7 +7,7 @@ CLI / Discord
   → listen + JobPool
   → Orchestrator
        → backend (agentic | cursor | optional Marionette | fake)
-       → SQLite (bindings, tasks, runs, events, memory, artifacts, lineage, watermarks, gateway lock)
+       → SQLite (bindings, tasks, runs, events, memory, artifacts, lineage, GitHub binds/rules, watermarks, gateway lock)
        → Discord facade → object store → REST (default) | optional SaseQ/BrainDAO | fake
 ```
 

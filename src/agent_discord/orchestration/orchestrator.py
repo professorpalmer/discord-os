@@ -447,12 +447,20 @@ class AgentOrchestrator:
         if resume_card:
             live.message_id = resume_card
         if self.post_progress_to_discord and self.discord is not None:
+            job_code = ""
+            reader = getattr(self.store, "task_job_code", None)
+            if callable(reader):
+                try:
+                    job_code = str(reader(task_id) or "")
+                except Exception:
+                    job_code = ""
             live.paint(
                 progress_card(
                     stage="start",
                     message="On it.",
                     percent=1,
                     run_id=run_id,
+                    job_code=job_code,
                 ),
                 stage="start",
             )
@@ -1199,21 +1207,12 @@ class AgentOrchestrator:
             if task:
                 text = str(task.get("intake_text") or "")
             if text:
-                from agent_discord.orchestration.lineage import (
-                    descendants_to_replay,
-                    list_nodes,
-                    tip_key,
-                )
-
-                nodes = list_nodes(self.store, run_id)
-                tip = tip_key(nodes)
                 return {
                     "action": verb,
                     "run_id": run_id,
                     "status": "queued",
                     "intake_text": text,
                     "replay_of": run_id,
-                    "replay_keys": list(descendants_to_replay(nodes, tip) if tip else ()),
                 }
             return {"action": verb, "run_id": run_id, "status": "missing"}
         if verb == "approve":

@@ -12,7 +12,17 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Optional, Sequence
 
 LINEAGE_STEPS = frozenset(
-    {"intake", "dispatch", "finding", "diff", "settle", "steer", "replay"}
+    {
+        "intake",
+        "dispatch",
+        "finding",
+        "diff",
+        "settle",
+        "steer",
+        "replay",
+        "wake",
+        "stack",
+    }
 )
 
 
@@ -76,34 +86,38 @@ def record_node(
     return key
 
 
+def _node_from_row(row: Mapping[str, Any]) -> Optional[LineageNode]:
+    parents = row.get("parent_keys") or ()
+    if isinstance(parents, str):
+        try:
+            parents = json.loads(parents)
+        except json.JSONDecodeError:
+            parents = ()
+    node = LineageNode(
+        node_key=str(row.get("node_key") or ""),
+        run_id=str(row.get("run_id") or ""),
+        task_id=str(row.get("task_id") or ""),
+        step=str(row.get("step") or ""),
+        parent_keys=tuple(str(p) for p in parents),
+        input_sha256=str(row.get("input_sha256") or ""),
+        artifact_id=str(row.get("artifact_id") or ""),
+        status=str(row.get("status") or "complete"),
+    )
+    return node if node.node_key else None
+
+
 def list_nodes(store: Any, run_id: str) -> tuple[LineageNode, ...]:
     reader = getattr(store, "list_lineage_nodes", None)
     if not callable(reader):
         return ()
-    rows = reader(run_id) or ()
     out: list[LineageNode] = []
-    for row in rows:
+    for row in reader(run_id) or ():
         if not isinstance(row, Mapping):
             continue
-        parents = row.get("parent_keys") or ()
-        if isinstance(parents, str):
-            try:
-                parents = json.loads(parents)
-            except json.JSONDecodeError:
-                parents = ()
-        out.append(
-            LineageNode(
-                node_key=str(row.get("node_key") or ""),
-                run_id=str(row.get("run_id") or ""),
-                task_id=str(row.get("task_id") or ""),
-                step=str(row.get("step") or ""),
-                parent_keys=tuple(str(p) for p in parents),
-                input_sha256=str(row.get("input_sha256") or ""),
-                artifact_id=str(row.get("artifact_id") or ""),
-                status=str(row.get("status") or "complete"),
-            )
-        )
-    return tuple(n for n in out if n.node_key)
+        node = _node_from_row(row)
+        if node is not None:
+            out.append(node)
+    return tuple(out)
 
 
 def tip_key(nodes: Sequence[LineageNode]) -> str:
@@ -140,6 +154,52 @@ def descendants_to_replay(
         ordered.append(node.node_key)
         pending.extend(children_of(nodes, node.node_key))
     return tuple(ordered)
+
+
+def list_stack(store: Any, run_id: str) -> tuple[LineageNode, ...]:
+    """This run's nodes plus cross-run descendants (stacked PRs)."""
+
+    roots = list(list_nodes(store, run_id))
+    if not roots:
+        return ()
+    gathered: dict[str, LineageNode] = {node.node_key: node for node in roots}
+    pending = [node.node_key for node in roots]
+    reader = getattr(store, "list_lineage_children", None)
+    while pending:
+        parent = pending.pop(0)
+        kids = (reader(parent) or ()) if callable(reader) else ()
+        for row in kids:
+            if not isinstance(row, Mapping):
+                continue
+            child = _node_from_row(row)
+            if child is None or child.node_key in gathered:
+                continue
+            gathered[child.node_key] = child
+            pending.append(child.node_key)
+    combined = tuple(gathered[key] for key in gathered)
+    tip = tip_key(roots)
+    extra_keys = descendants_to_replay(combined, tip) if tip else ()
+    extra = tuple(gathered[key] for key in extra_keys if key in gathered)
+    return tuple(roots) + extra
+
+
+def child_job_codes(
+    store: Any, nodes: Sequence[LineageNode], root_task_id: str
+) -> tuple[str, ...]:
+    reader = getattr(store, "task_job_code", None)
+    if not callable(reader):
+        return ()
+    root = (root_task_id or "").strip()
+    seen: set[str] = set()
+    out: list[str] = []
+    for node in nodes:
+        if not node.task_id or node.task_id == root:
+            continue
+        code = str(reader(node.task_id) or "")
+        if code and code not in seen:
+            seen.add(code)
+            out.append(code)
+    return tuple(out)
 
 
 def mark_stale(store: Any, node_keys: Sequence[str]) -> int:
@@ -194,3 +254,21 @@ def latest_run_id(store: Any) -> Optional[str]:
         return None
     found = reader()
     return str(found) if found else None
+
+
+def resolve_run_id(store: Any, token: str) -> str:
+    """Run id, speakable job code, or latest."""
+
+    from agent_discord.orchestration.job_briefing import is_job_code, normalize_job_code
+
+    raw = (token or "").strip()
+    if not raw:
+        return latest_run_id(store) or ""
+    if is_job_code(raw):
+        finder = getattr(store, "get_task_by_job_code", None)
+        latest = getattr(store, "latest_run_id_for_task", None)
+        if callable(finder) and callable(latest):
+            task = finder(normalize_job_code(raw))
+            if task:
+                return str(latest(str(task.get("task_id") or "")) or "")
+    return raw
