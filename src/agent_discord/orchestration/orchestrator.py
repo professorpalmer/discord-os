@@ -1207,21 +1207,12 @@ class AgentOrchestrator:
             if task:
                 text = str(task.get("intake_text") or "")
             if text:
-                from agent_discord.orchestration.lineage import (
-                    descendants_to_replay,
-                    list_nodes,
-                    tip_key,
-                )
-
-                nodes = list_nodes(self.store, run_id)
-                tip = tip_key(nodes)
                 return {
                     "action": verb,
                     "run_id": run_id,
                     "status": "queued",
                     "intake_text": text,
                     "replay_of": run_id,
-                    "replay_keys": list(descendants_to_replay(nodes, tip) if tip else ()),
                 }
             return {"action": verb, "run_id": run_id, "status": "missing"}
         if verb == "approve":

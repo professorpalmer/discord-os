@@ -52,6 +52,8 @@ class PullSnapshot:
     merged: bool = False
     checks: tuple[CheckItem, ...] = ()
     reviews: tuple[ReviewNote, ...] = ()
+    branch: str = ""
+    base: str = ""
 
 
 @dataclass(frozen=True)
@@ -187,6 +189,73 @@ def discover_job_pull_requests(store: Any) -> None:
             binder(task_id, repo=repo, number=number)
         except Exception:
             continue
+        try:
+            link_stacked_pull_request(store, task_id)
+        except Exception:
+            continue
+
+
+def link_stacked_pull_request(store: Any, task_id: str) -> str:
+    """If this job's PR base is another job's head, parent the child at that tip."""
+
+    rid = (task_id or "").strip()
+    if not rid or store is None:
+        return ""
+    finder = getattr(store, "job_for_head_branch", None)
+    latest = getattr(store, "latest_run_id_for_task", None)
+    if not callable(finder) or not callable(latest):
+        return ""
+    repo = ""
+    base = ""
+    lister = getattr(store, "list_job_pull_requests", None)
+    if callable(lister):
+        try:
+            for row in lister() or ():
+                if str(row.get("task_id") or "") != rid:
+                    continue
+                repo = str(row.get("repo") or "")
+                base = str(row.get("base") or "")
+                break
+        except Exception:
+            repo, base = "", ""
+    if not repo or not base:
+        reader = getattr(store, "task_metadata", None)
+        blob: dict[str, Any] = {}
+        if callable(reader):
+            try:
+                github = (reader(rid) or {}).get("github") or {}
+            except Exception:
+                github = {}
+            if isinstance(github, dict):
+                blob = github
+        repo = repo or str(blob.get("repo") or "")
+        base = base or str(blob.get("base") or "")
+    if not repo or not base:
+        return ""
+    try:
+        parent = finder(repo, base)
+    except Exception:
+        parent = None
+    if not parent:
+        return ""
+    parent_task = str(parent.get("task_id") or "")
+    if not parent_task or parent_task == rid:
+        return ""
+    parent_run = latest(parent_task)
+    child_run = latest(rid)
+    if not parent_run or not child_run:
+        return ""
+    tip = tip_key(list_nodes(store, parent_run))
+    if not tip:
+        return ""
+    return record_node(
+        store,
+        run_id=child_run,
+        task_id=rid,
+        step="stack",
+        body=f"{repo} base={base}",
+        parent_keys=(tip,),
+    )
 
 
 def wake_github_jobs(
@@ -226,8 +295,21 @@ def wake_github_jobs(
             continue
         if snapshot is None:
             continue
+        try:
+            binder = getattr(store, "bind_job_pull_request", None)
+            if callable(binder):
+                binder(
+                    task_id,
+                    repo=repo,
+                    number=number,
+                    branch=snapshot.branch,
+                    base=snapshot.base,
+                )
+            link_stacked_pull_request(store, task_id)
+        except Exception:
+            pass
         for event in wake_events(snapshot, allowlisted_bots=allowlisted_bots):
-            result = _apply_wake(
+            result = apply_wake(
                 store,
                 discord,
                 task_id=task_id,
@@ -285,7 +367,7 @@ def gh_pull_snapshot(
                 "--repo",
                 repo,
                 "--json",
-                "mergedAt,statusCheckRollup,reviews,url",
+                "mergedAt,statusCheckRollup,reviews,url,headRefName,baseRefName",
             ],
             capture_output=True,
             text=True,
@@ -312,10 +394,12 @@ def gh_pull_snapshot(
         merged=merged,
         checks=tuple(checks),
         reviews=tuple(reviews) + tuple(comments),
+        branch=str(payload.get("headRefName") or ""),
+        base=str(payload.get("baseRefName") or ""),
     )
 
 
-def _apply_wake(
+def apply_wake(
     store: Any,
     discord: Any,
     *,

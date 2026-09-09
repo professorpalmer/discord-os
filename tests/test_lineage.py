@@ -6,11 +6,14 @@ from pathlib import Path
 
 from agent_discord.contracts import TaskIntake, TaskStatus
 from agent_discord.orchestration.cards import receipt_card
+from agent_discord.orchestration.github_wake import link_stacked_pull_request
 from agent_discord.orchestration.lineage import (
     LINEAGE_STEPS,
+    child_job_codes,
     descendants_to_replay,
     input_sha256,
     list_nodes,
+    list_stack,
     mark_stale,
     node_key,
     record_node,
@@ -97,6 +100,7 @@ def test_retry_parents_new_run_at_previous_tip(tmp_path: Path):
     )
     result = orch.apply_job_action("retry", first.run_id)
     assert result["replay_of"] == first.run_id
+    assert "replay_keys" not in result
     assert result["intake_text"] == "what is Discord OS?"
     second = orch.run_task(
         TaskIntake(
@@ -161,3 +165,96 @@ def test_cli_lineage_json(monkeypatch, tmp_path: Path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["run_id"] == "r9"
     assert payload["nodes"][0]["step"] == "intake"
+    assert payload["children"] == []
+
+
+def _stacked_jobs(store: SQLiteStore) -> tuple[str, str, str]:
+    store.create_task(
+        task_id="a", workspace_id="ws", channel_id="ch", intake_text="ship A"
+    )
+    store.create_run(
+        run_id="a-run",
+        task_id="a",
+        model="cursor/grok-4-5",
+        adapter_name="grok-4.5",
+        status=TaskStatus.COMPLETED,
+    )
+    record_node(store, run_id="a-run", task_id="a", step="intake", body="ship A")
+    store.bind_job_pull_request(
+        "a", repo="professorpalmer/discord-os", number=1, branch="feat-a"
+    )
+    store.create_task(
+        task_id="b", workspace_id="ws", channel_id="ch", intake_text="ship B"
+    )
+    store.create_run(
+        run_id="b-run",
+        task_id="b",
+        model="cursor/grok-4-5",
+        adapter_name="grok-4.5",
+        status=TaskStatus.COMPLETED,
+    )
+    record_node(store, run_id="b-run", task_id="b", step="intake", body="ship B")
+    store.bind_job_pull_request(
+        "b",
+        repo="professorpalmer/discord-os",
+        number=2,
+        branch="feat-b",
+        base="feat-a",
+    )
+    link_stacked_pull_request(store, "b")
+    store.create_task(
+        task_id="c", workspace_id="ws", channel_id="ch", intake_text="ship C"
+    )
+    store.create_run(
+        run_id="c-run",
+        task_id="c",
+        model="cursor/grok-4-5",
+        adapter_name="grok-4.5",
+        status=TaskStatus.COMPLETED,
+    )
+    record_node(store, run_id="c-run", task_id="c", step="intake", body="ship C")
+    store.bind_job_pull_request(
+        "c",
+        repo="professorpalmer/discord-os",
+        number=3,
+        branch="feat-c",
+        base="main",
+    )
+    link_stacked_pull_request(store, "c")
+    return store.task_job_code("a"), store.task_job_code("b"), store.task_job_code("c")
+
+
+def test_stacked_pr_is_descendant_unrelated_is_not(tmp_path: Path):
+    store = SQLiteStore(tmp_path / "stack.sqlite3")
+    store.initialize()
+    code_a, code_b, code_c = _stacked_jobs(store)
+    nodes = list_stack(store, "a-run")
+    assert any(node.task_id == "b" and node.step == "stack" for node in nodes)
+    assert not any(node.task_id == "c" for node in nodes)
+    children = child_job_codes(store, nodes, "a")
+    assert code_b in children
+    assert code_c not in children
+    tip = tip_key(list_nodes(store, "a-run"))
+    replay = descendants_to_replay(nodes, tip)
+    assert any(
+        node.node_key in replay and node.task_id == "b" for node in nodes
+    )
+    store.close()
+
+
+def test_cli_lineage_prints_stacked_child(monkeypatch, tmp_path: Path, capsys):
+    from agent_discord.cli import main
+
+    db = tmp_path / "agent_discord.sqlite3"
+    store = SQLiteStore(db)
+    store.initialize()
+    code_a, code_b, _code_c = _stacked_jobs(store)
+    store.close()
+    fake = type("Cfg", (), {"database_path": db})()
+    monkeypatch.setattr("agent_discord.cli.load_config", lambda: fake)
+    monkeypatch.setattr("agent_discord.cli.apply_runtime_secrets", lambda cfg: cfg)
+    assert main(["lineage", code_a]) == 0
+    printed = capsys.readouterr().out
+    assert code_a in printed
+    assert code_b in printed
+    assert "stack" in printed

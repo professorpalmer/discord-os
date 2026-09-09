@@ -455,12 +455,19 @@ def drain_inbound(
     )
     if thread_id is None:
         try:
+            from agent_discord.orchestration.github_rules import admit_github_rules
             from agent_discord.orchestration.github_wake import bot_allowlist, wake_github_jobs
 
             wake_github_jobs(
                 store,
                 discord,
                 snapshotter=getattr(orchestrator, "github_snapshotter", None),
+                allowlisted_bots=bot_allowlist(),
+            )
+            admit_github_rules(
+                store,
+                discord,
+                snapshots=getattr(orchestrator, "github_unbound_snapshots", None),
                 allowlisted_bots=bot_allowlist(),
             )
         except Exception:

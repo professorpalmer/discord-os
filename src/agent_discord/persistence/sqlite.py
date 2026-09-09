@@ -181,6 +181,7 @@ CREATE TABLE IF NOT EXISTS job_pull_requests (
     number INTEGER NOT NULL,
     task_id TEXT NOT NULL,
     branch TEXT NOT NULL DEFAULT '',
+    base TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (repo, number)
 );
 CREATE INDEX IF NOT EXISTS idx_job_pr_task ON job_pull_requests(task_id);
@@ -188,6 +189,19 @@ CREATE INDEX IF NOT EXISTS idx_job_pr_task ON job_pull_requests(task_id);
 CREATE TABLE IF NOT EXISTS github_wake_events (
     event_id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL,
+    created_ms INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS github_rules (
+    rule_id TEXT PRIMARY KEY,
+    prompt TEXT NOT NULL DEFAULT '',
+    destination TEXT NOT NULL DEFAULT 'new',
+    repo TEXT NOT NULL DEFAULT '',
+    branch TEXT NOT NULL DEFAULT '',
+    conclusion TEXT NOT NULL DEFAULT '',
+    channel_id TEXT NOT NULL DEFAULT '',
+    workspace_id TEXT NOT NULL DEFAULT 'default',
+    enabled INTEGER NOT NULL DEFAULT 1,
     created_ms INTEGER NOT NULL
 );
 """
@@ -368,8 +382,28 @@ class SQLiteStore:
                 task_id TEXT NOT NULL,
                 created_ms INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS github_rules (
+                rule_id TEXT PRIMARY KEY,
+                prompt TEXT NOT NULL DEFAULT '',
+                destination TEXT NOT NULL DEFAULT 'new',
+                repo TEXT NOT NULL DEFAULT '',
+                branch TEXT NOT NULL DEFAULT '',
+                conclusion TEXT NOT NULL DEFAULT '',
+                channel_id TEXT NOT NULL DEFAULT '',
+                workspace_id TEXT NOT NULL DEFAULT 'default',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_ms INTEGER NOT NULL
+            );
             """
         )
+        pr_cols = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(job_pull_requests)").fetchall()
+        }
+        if pr_cols and "base" not in pr_cols:
+            conn.execute(
+                "ALTER TABLE job_pull_requests ADD COLUMN base TEXT NOT NULL DEFAULT ''"
+            )
         missing = conn.execute(
             "SELECT task_id FROM tasks WHERE job_code IS NULL OR job_code = ''"
         ).fetchall()
@@ -699,6 +733,7 @@ class SQLiteStore:
         repo: str,
         number: int,
         branch: str = "",
+        base: str = "",
     ) -> None:
         rid = (task_id or "").strip()
         owner_repo = (repo or "").strip().strip("/")
@@ -708,23 +743,34 @@ class SQLiteStore:
             return
         if not rid or not owner_repo or pr_number < 1:
             return
+        head = (branch or "").strip()
+        onto = (base or "").strip()
         conn = self._connection()
         conn.execute(
             """
-            INSERT INTO job_pull_requests (repo, number, task_id, branch)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO job_pull_requests (repo, number, task_id, branch, base)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(repo, number) DO UPDATE SET
                 task_id=excluded.task_id,
-                branch=excluded.branch
+                branch=CASE
+                    WHEN excluded.branch != '' THEN excluded.branch
+                    ELSE job_pull_requests.branch
+                END,
+                base=CASE
+                    WHEN excluded.base != '' THEN excluded.base
+                    ELSE job_pull_requests.base
+                END
             """,
-            (owner_repo, pr_number, rid, (branch or "").strip()),
+            (owner_repo, pr_number, rid, head, onto),
         )
         conn.commit()
         github = self.task_metadata(rid).get("github")
         blob = dict(github) if isinstance(github, dict) else {}
         blob.update({"repo": owner_repo, "number": pr_number})
-        if branch:
-            blob["branch"] = branch
+        if head:
+            blob["branch"] = head
+        if onto:
+            blob["base"] = onto
         self.merge_task_metadata(rid, {"github": blob})
 
     def job_for_pull_request(self, repo: str, number: int) -> Optional[dict[str, Any]]:
@@ -734,7 +780,8 @@ class SQLiteStore:
             return None
         row = self._connection().execute(
             """
-            SELECT p.repo, p.number, p.task_id, p.branch, t.channel_id, t.thread_id
+            SELECT p.repo, p.number, p.task_id, p.branch, p.base,
+                   t.channel_id, t.thread_id
             FROM job_pull_requests p
             JOIN tasks t ON t.task_id = p.task_id
             WHERE p.repo=? AND p.number=?
@@ -743,10 +790,29 @@ class SQLiteStore:
         ).fetchone()
         return dict(row) if row else None
 
+    def job_for_head_branch(self, repo: str, branch: str) -> Optional[dict[str, Any]]:
+        owner_repo = (repo or "").strip().strip("/")
+        head = (branch or "").strip()
+        if not owner_repo or not head:
+            return None
+        row = self._connection().execute(
+            """
+            SELECT p.repo, p.number, p.task_id, p.branch, p.base,
+                   t.channel_id, t.thread_id
+            FROM job_pull_requests p
+            JOIN tasks t ON t.task_id = p.task_id
+            WHERE p.repo=? AND p.branch=?
+            ORDER BY t.updated_at DESC
+            LIMIT 1
+            """,
+            (owner_repo, head),
+        ).fetchone()
+        return dict(row) if row else None
+
     def list_job_pull_requests(self) -> list[dict[str, Any]]:
         rows = self._connection().execute(
             """
-            SELECT p.repo, p.number, p.task_id, p.branch,
+            SELECT p.repo, p.number, p.task_id, p.branch, p.base,
                    t.channel_id, t.thread_id,
                    (
                        SELECT run_id FROM runs
@@ -757,6 +823,52 @@ class SQLiteStore:
             FROM job_pull_requests p
             JOIN tasks t ON t.task_id = p.task_id
             ORDER BY t.updated_at DESC
+            """
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def add_github_rule(
+        self,
+        *,
+        prompt: str = "",
+        destination: str = "new",
+        repo: str = "",
+        branch: str = "",
+        conclusion: str = "",
+        channel_id: str = "",
+        workspace_id: str = "default",
+    ) -> str:
+        rule_id = uuid4().hex
+        dest = (destination or "new").strip().lower() or "new"
+        conn = self._connection()
+        conn.execute(
+            """
+            INSERT INTO github_rules (
+                rule_id, prompt, destination, repo, branch, conclusion,
+                channel_id, workspace_id, enabled, created_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+            """,
+            (
+                rule_id,
+                (prompt or "").strip(),
+                dest,
+                (repo or "").strip().strip("/"),
+                (branch or "").strip(),
+                (conclusion or "").strip().lower(),
+                (channel_id or "").strip(),
+                (workspace_id or "default").strip() or "default",
+                int(time.time() * 1000),
+            ),
+        )
+        conn.commit()
+        return rule_id
+
+    def list_github_rules(self) -> list[dict[str, Any]]:
+        rows = self._connection().execute(
+            """
+            SELECT * FROM github_rules
+            WHERE enabled = 1
+            ORDER BY created_ms ASC
             """
         ).fetchall()
         return [dict(row) for row in rows]
@@ -1393,16 +1505,30 @@ class SQLiteStore:
             """,
             (run_id,),
         ).fetchall()
-        out: list[dict[str, Any]] = []
-        for row in rows:
-            item = dict(row)
-            raw = item.pop("parent_keys_json", "[]")
-            try:
-                item["parent_keys"] = json.loads(raw or "[]")
-            except json.JSONDecodeError:
-                item["parent_keys"] = []
-            out.append(item)
-        return out
+        return [self._decode_lineage_row(row) for row in rows]
+
+    def list_lineage_children(self, parent_key: str) -> Sequence[Mapping[str, Any]]:
+        key = (parent_key or "").strip()
+        if not key:
+            return []
+        rows = self._connection().execute(
+            """
+            SELECT * FROM lineage_nodes
+            WHERE parent_keys_json LIKE ?
+            ORDER BY created_at ASC, node_key ASC
+            """,
+            (f'%"{key}"%',),
+        ).fetchall()
+        return [self._decode_lineage_row(row) for row in rows]
+
+    def _decode_lineage_row(self, row: sqlite3.Row) -> dict[str, Any]:
+        item = dict(row)
+        raw = item.pop("parent_keys_json", "[]")
+        try:
+            item["parent_keys"] = json.loads(raw or "[]")
+        except json.JSONDecodeError:
+            item["parent_keys"] = []
+        return item
 
     def mark_lineage_stale(self, node_keys: Sequence[str]) -> int:
         keys = [str(k) for k in node_keys if str(k or "").strip()]

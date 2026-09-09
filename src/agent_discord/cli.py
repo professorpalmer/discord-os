@@ -514,8 +514,9 @@ def cmd_map(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
 def cmd_lineage(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     out = out or sys.stdout
     from agent_discord.orchestration.lineage import (
+        child_job_codes,
         format_nodes,
-        list_nodes,
+        list_stack,
         node_payload,
         resolve_run_id,
     )
@@ -526,20 +527,24 @@ def cmd_lineage(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     try:
         token = str(getattr(args, "run_id", "") or "").strip()
         run_id = resolve_run_id(store, token)
-        nodes = list_nodes(store, run_id) if run_id else ()
+        nodes = list_stack(store, run_id) if run_id else ()
         job_code = ""
+        root_task = ""
         if run_id:
             get_run = getattr(store, "get_run", None)
             reader = getattr(store, "task_job_code", None)
             if callable(get_run) and callable(reader):
                 run = get_run(run_id) or {}
-                job_code = str(reader(str(run.get("task_id") or "")) or "")
+                root_task = str(run.get("task_id") or "")
+                job_code = str(reader(root_task) or "")
+        children = child_job_codes(store, nodes, root_task)
         if args.json:
             print(
                 json.dumps(
                     {
                         "run_id": run_id,
                         "job_code": job_code,
+                        "children": list(children),
                         "nodes": [node_payload(node) for node in nodes],
                     },
                     indent=2,
@@ -553,6 +558,8 @@ def cmd_lineage(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         print(f"run_id: {run_id}", file=out)
         if job_code:
             print(f"job_code: {job_code}", file=out)
+        if children:
+            print("children: " + ", ".join(children), file=out)
         print(format_nodes(nodes), file=out)
         return 0 if nodes else 1
     finally:
