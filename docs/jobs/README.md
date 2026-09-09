@@ -12,7 +12,7 @@ Cap is 8 live jobs. The listen loop does not block at that cap.
 
 Each run writes a SQLite lineage DAG (`node_key = sha256(step, input, parents)`). Done cites artifact sha256. Retry starts a new run parented at the previous tip. Query: `discord-os lineage [RUN_ID|DOS-10001]`.
 
-A job that opened a GitHub PR (or is bound as last pusher) gets check conclusions and human review comments in **that job thread**. HOST ranks a failing check as Need. In-flight checks are Waiting, which is not failed. Speakable ids are `DOS-` codes next to the Discord snowflake. A stacked PR whose base is another job's head is a child in that lineage DAG (`discord-os lineage DOS-10001` lists the child). Stored GitHub rules mint a job thread when an unbound check matches; bound PRs still wake in place.
+A job that opened a GitHub PR (or is bound as last pusher) gets check conclusions and human review comments in **that job thread**. HOST ranks a failing check as Need. In-flight checks are Waiting, which is not failed. Speakable ids are `DOS-` codes next to the Discord snowflake. A stacked PR whose base is another job's head is a child in that lineage DAG (`discord-os lineage DOS-10001` lists the child). Stored GitHub rules cook a stored prompt: `new` mints a job thread when no bind exists, `single` enqueues into the owning job (steer if live, otherwise a cook in that thread). Bound PRs still wake in place.
 
 ## Code
 

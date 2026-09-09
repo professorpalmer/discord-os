@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.20
+
+GitHub talks back in the job thread. Stacked PRs are lineage children. Unbound checks cook.
+
+- Failing checks and human review wake the owning job thread. HOST ranks Need, then Waiting, then Live, then Last. Speakable ids are `DOS-*`.
+- A PR whose base is another job's head is a child in `discord-os lineage`.
+- Stored GitHub rules: `new` cooks the stored prompt when no bind exists. `single` steers a live job or cooks in that thread. The host bot is the principal. Not a webhook.
+
 ## 0.5.19
 
 More dest is here or host. The panel Gateway reconnects after a peer reset.

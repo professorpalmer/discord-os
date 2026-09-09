@@ -467,7 +467,9 @@ def drain_inbound(
             admit_github_rules(
                 store,
                 discord,
+                orchestrator=orchestrator,
                 snapshots=getattr(orchestrator, "github_unbound_snapshots", None),
+                snapshotter=getattr(orchestrator, "github_snapshotter", None),
                 allowlisted_bots=bot_allowlist(),
             )
         except Exception:

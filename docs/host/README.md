@@ -30,7 +30,7 @@ discord-os host start --channel-id ID
 
 - `/open [here|host] terminal|files|browser` — dest-explicit. `here` lists files or returns a link in Discord. `host` opens a GUI. Browser with a URL defaults to here.
 - `schedule every 1h: run tests` — SQLite cron, listen loop fires it
-- GitHub rules — exact repo/branch/conclusion filters; unbound failures mint a job thread
+- GitHub rules — exact repo/branch/conclusion filters; `new` cooks an unbound match, `single` follows up in the owning job
 - voice memo — local whisper CLI if on PATH
 
 ## Code
