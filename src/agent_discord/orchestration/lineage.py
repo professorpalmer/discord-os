@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Optional, Sequence
 
 LINEAGE_STEPS = frozenset(
-    {"intake", "dispatch", "finding", "diff", "settle", "steer", "replay"}
+    {"intake", "dispatch", "finding", "diff", "settle", "steer", "replay", "wake"}
 )
 
 
@@ -194,3 +194,21 @@ def latest_run_id(store: Any) -> Optional[str]:
         return None
     found = reader()
     return str(found) if found else None
+
+
+def resolve_run_id(store: Any, token: str) -> str:
+    """Run id, speakable job code, or latest."""
+
+    from agent_discord.orchestration.job_briefing import is_job_code, normalize_job_code
+
+    raw = (token or "").strip()
+    if not raw:
+        return latest_run_id(store) or ""
+    if is_job_code(raw):
+        finder = getattr(store, "get_task_by_job_code", None)
+        latest = getattr(store, "latest_run_id_for_task", None)
+        if callable(finder) and callable(latest):
+            task = finder(normalize_job_code(raw))
+            if task:
+                return str(latest(str(task.get("task_id") or "")) or "")
+    return raw

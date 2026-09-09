@@ -453,6 +453,18 @@ def drain_inbound(
             thread_id=thread_id,
         )
     )
+    if thread_id is None:
+        try:
+            from agent_discord.orchestration.github_wake import bot_allowlist, wake_github_jobs
+
+            wake_github_jobs(
+                store,
+                discord,
+                snapshotter=getattr(orchestrator, "github_snapshotter", None),
+                allowlisted_bots=bot_allowlist(),
+            )
+        except Exception:
+            pass
     return receipts
 
 
@@ -812,6 +824,14 @@ def publish_host_card(
             jobs = list(lister(channel_id, limit=5))
         except Exception:
             jobs = []
+    last_job = ""
+    try:
+        from agent_discord.orchestration.job_briefing import briefing_line
+
+        if jobs:
+            last_job = briefing_line(jobs[0])
+    except Exception:
+        last_job = ""
     avatar_url = ""
     token = str(getattr(getattr(discord, "provider", None), "_bot_token", "") or "")
     if token:
@@ -841,6 +861,7 @@ def publish_host_card(
         realm=realm or _realm_name(store, channel_id),
         bank=channel_is_memory(store, channel_id),
         github=github,
+        last_job=last_job,
     )
     control = None
     reader = getattr(store, "get_host_control", None)

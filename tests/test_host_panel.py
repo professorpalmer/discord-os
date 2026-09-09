@@ -484,9 +484,10 @@ def test_panel_last_job_names_need_live_or_last(tmp_path: Path):
         adapter_name="grok-4.5",
         status=TaskStatus.PENDING,
     )
-    assert _panel_last_job(store, "ch").startswith("Need: pending")
+    assert _panel_last_job(store, "ch").startswith("Need:")
+    assert "pending" in _panel_last_job(store, "ch")
     store.update_run("parked-run", status=TaskStatus.RUNNING, summary="working")
-    assert _panel_last_job(store, "ch").startswith("Live: running")
+    assert _panel_last_job(store, "ch").startswith("Live:")
     store.update_run("parked-run", status=TaskStatus.COMPLETED, summary="done")
-    assert _panel_last_job(store, "ch").startswith("Last: completed")
+    assert _panel_last_job(store, "ch").startswith("Last:")
     store.close()

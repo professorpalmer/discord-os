@@ -447,12 +447,20 @@ class AgentOrchestrator:
         if resume_card:
             live.message_id = resume_card
         if self.post_progress_to_discord and self.discord is not None:
+            job_code = ""
+            reader = getattr(self.store, "task_job_code", None)
+            if callable(reader):
+                try:
+                    job_code = str(reader(task_id) or "")
+                except Exception:
+                    job_code = ""
             live.paint(
                 progress_card(
                     stage="start",
                     message="On it.",
                     percent=1,
                     run_id=run_id,
+                    job_code=job_code,
                 ),
                 stage="start",
             )

@@ -19,6 +19,9 @@ class TaskStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+JOB_CODE_PREFIX = "DOS-"
+
+
 class EventKind(str, Enum):
     INTAKE = "intake"
     CONTEXT_SNAPSHOT = "context_snapshot"
