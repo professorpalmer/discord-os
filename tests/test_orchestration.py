@@ -485,6 +485,37 @@ def test_named_repo_sets_worker_cwd(tmp_path: Path):
     store.close()
 
 
+def test_named_repo_associates_github_scan_without_status_ask(tmp_path: Path):
+    from agent_discord.host.repos import HostRepo
+    from agent_discord.puppetmaster.backend import _safe_dispatch_prompt
+
+    repo = tmp_path / "dugout"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    orch, store, _fake, backend = _orch(tmp_path)
+    orch.host_repos = (HostRepo(name="dugout", path=repo, aliases=("dugout",)),)
+    orch.compute_cwd = tmp_path / ".agent-discord"
+    orch.host_github = lambda cwd: "Open PRs:\n#3 smart-swap\n\nOpen issues:\n(none)"
+    orch.run_task(
+        TaskIntake(
+            text="In our dugout service, I'd like to enable smart swap during playoffs.",
+            channel_id="ch",
+            workspace_id="ws",
+        )
+    )
+    meta = backend.last_request.metadata
+    assert meta["cwd"] == str(repo)
+    assert meta["repo"] == "dugout"
+    assert meta["compute_mode"] == "implement"
+    assert "host_github" not in meta
+    assert "#3 smart-swap" in str(meta.get("github_scan"))
+    assert "Associated: dugout" in str(meta.get("association"))
+    prompt = _safe_dispatch_prompt(backend.last_request)
+    assert prompt.startswith("Associated: dugout")
+    assert "Do not hunt for the repository." in prompt
+    store.close()
+
+
 def test_host_github_report_paints_the_live_card(tmp_path: Path):
     orch, store, fake_discord, backend = _orch(tmp_path)
     orch.host_github = lambda cwd: "Open PRs:\n#9 dest\n\nOpen issues:\n(none)"
@@ -1465,6 +1496,76 @@ def test_thinking_fence_keeps_diary_and_done_body_is_spoken(
         if (message.content or "").strip() and getattr(message, "thread_id", None)
     ]
     assert all(diary not in (message.content or "") for message in settles)
+    store.close()
+
+
+def test_done_speaks_finding_not_reasoning_diary(tmp_path: Path, monkeypatch):
+    clock = _Clock()
+    monkeypatch.setattr(
+        "agent_discord.orchestration.orchestrator._monotonic",
+        clock,
+    )
+    diary = (
+        "Narrowing search methods. I need to locate something specific, "
+        "so I'm thinking about refining my search. Could I use read-only "
+        "grep via the terminal?"
+    )
+    finding = (
+        "Smart Swap is explicitly disabled for playoffs by the endpoint's "
+        "phase guard. Allow REGULAR_SEASON and PLAYOFFS."
+    )
+
+    class _FindingBackend(_TokenStreamBackend):
+        def stream(self, request):
+            self.last_request = request
+            clock.advance(TOKEN_CARD_FLUSH_SECONDS + 0.05)
+            yield DispatchEvent(
+                kind=EventKind.PROGRESS,
+                summary=ProgressSummary(
+                    stage="thinking",
+                    message=diary,
+                    details={
+                        "token": True,
+                        "stream_phase": "thinking",
+                        "token_text": diary,
+                    },
+                ),
+            )
+            yield DispatchEvent(
+                kind=EventKind.RECEIPT,
+                summary=ProgressSummary(stage="done", message=finding, percent=100.0),
+            )
+
+    store = SQLiteStore(tmp_path / "finding-done.sqlite3")
+    store.initialize()
+    fake_discord = FakeDiscordMCPProvider()
+    facade = _CountingFacade(
+        DiscordFacade(fake_discord, bot_token_fingerprint="fp", owner_id="test")
+    )
+    orch = AgentOrchestrator(
+        store=store,
+        backend=_FindingBackend(clock),
+        discord=facade,
+        post_progress_to_discord=True,
+        host_repos=(),
+    )
+    receipt = orch.run_task(
+        TaskIntake(
+            text="In our dugout service, I'd like to enable smart swap during playoffs.",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="ask-finding",
+        )
+    )
+    assert "phase guard" in receipt.summary
+    assert "Narrowing search" not in receipt.summary
+    assert "read-only grep" not in receipt.summary
+    settles = [
+        message
+        for message in fake_discord.sent
+        if (message.content or "").strip() and getattr(message, "thread_id", None)
+    ]
+    assert all("Narrowing search" not in (message.content or "") for message in settles)
     store.close()
 
 

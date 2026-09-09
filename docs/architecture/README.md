@@ -11,7 +11,7 @@ CLI / Discord
        → Discord facade → object store → REST (default) | optional SaseQ/BrainDAO | fake
 ```
 
-JobPool runs two Discord threads at once. Implement writes serialize per checkout. Each run writes a lineage DAG (`node_key = sha256(step, input, parents)`). The live Components v2 card is the console. Puppetmaster is compute on this host, not a fleet.
+JobPool runs two Discord threads at once. Implement writes serialize per checkout. The host associates the ask to a named checkout and scans GitHub there before the worker. Each run writes a lineage DAG (`node_key = sha256(step, input, parents)`). The live Components v2 card is the console. Puppetmaster is compute on this host, not a fleet.
 
 Intake is REST. Host opens a Gateway only for buttons. The SQLite gateway row is a one-process lock; a dead pid is stolen.
 

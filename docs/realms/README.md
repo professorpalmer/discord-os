@@ -32,6 +32,8 @@ Repos also auto-discover git roots under `~/Projects` for known names (puppetmas
 2. Else the channel bind
 3. Else `PUPPETMASTER_CWD` (often the Discord OS runtime — not a product repo)
 
+The host scans GitHub on that checkout before dispatch. The worker prompt starts with `Associated: <name> at <path>`. Do not hunt.
+
 `.agent-discord` is never the subject repository.
 
 ## Code

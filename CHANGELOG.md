@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.21
+
+The host associates the ask before the worker hunts. Done speaks the finding.
+
+- Named checkout leads the worker prompt: `Associated: <name> at <path>`. Do not hunt.
+- Host scans GitHub on that cwd for associated asks, not only "list my PRs".
+- Spoken change asks (`enable`, `I'd like to`) are implement.
+- Reasoning stays in the fence. `## Findings` is the Done body.
+
 ## 0.5.20
 
 GitHub talks back in the job thread. Stacked PRs are lineage children. Unbound checks cook.

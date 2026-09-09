@@ -147,7 +147,17 @@ _PROCESS_STARTS = (
     "i'll check",
     "i'll fetch",
     "i'll look",
+    "i'll focus",
+    "i’ll start",
+    "i’ll check",
+    "i’ll fetch",
+    "i’ll look",
+    "i’ll focus",
     "i should ",
+    "i need to",
+    "i'm thinking",
+    "i am thinking",
+    "could i ",
 )
 _PROCESS_VERBS = (
     "fetch",
@@ -162,6 +172,10 @@ _PROCESS_VERBS = (
     "write an exploration",
     "try to find",
     "try to get",
+    "grep",
+    "locate",
+    "refine",
+    "search",
 )
 _PROCESS_ANYWHERE = (
     "the deliverable is",
@@ -175,12 +189,19 @@ _PROCESS_ANYWHERE = (
     "full-edit worker",
     "full-edit mode",
     "captured as a diff",
+    "narrowing search",
+    "read-only grep",
+    "it feels a bit chaotic",
+    "i'm sure i'll figure",
+    "i’m sure i’ll figure",
 )
 _ANSWER_CUT_RE = re.compile(
     r"(?:here's the (?:straight )?answer for discord|let me write the discord answer)\s*:\s*",
     re.IGNORECASE,
 )
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])(?:\s+|\n+)")
+_FINDINGS_HEADING_RE = re.compile(r"(?im)^##\s+findings?\s*$")
+_MARKDOWN_HEADING_RE = re.compile(r"(?im)^##\s+")
 
 
 def cli_supports_flag(cli: str, subcommand: str, flag: str) -> bool:
@@ -527,25 +548,33 @@ def _safe_dispatch_prompt(request: DispatchRequest) -> str:
                 and not _is_scaffolding_memory(content)
             ):
                 memory_bits.append(content[:400])
-    lines = [
-        request.prompt.strip(),
-        "",
-        "Write the answer as visible prose a person can read in Discord.",
-        "Do not repeat task_id, run_id, or model lines.",
-        "",
-        "Internal:",
-        f"task_id={request.task_id}",
-        f"run_id={request.run_id}",
-        f"model={request.model}",
-    ]
-    channel = request.metadata.get("channel_id") if request.metadata else None
-    if channel:
-        lines.append(f"channel_id={channel}")
+    association = ""
     host_github = ""
     reach = ""
     if request.metadata:
+        association = str(request.metadata.get("association") or "").strip()
         host_github = str(request.metadata.get("host_github") or "").strip()
         reach = str(request.metadata.get("host_reach") or "").strip()
+    lines: list[str] = []
+    if association:
+        lines.append(association)
+        lines.append("")
+    lines.extend(
+        [
+            request.prompt.strip(),
+            "",
+            "Write the answer as visible prose a person can read in Discord.",
+            "Do not repeat task_id, run_id, or model lines.",
+            "",
+            "Internal:",
+            f"task_id={request.task_id}",
+            f"run_id={request.run_id}",
+            f"model={request.model}",
+        ]
+    )
+    channel = request.metadata.get("channel_id") if request.metadata else None
+    if channel:
+        lines.append(f"channel_id={channel}")
     if request.metadata and request.metadata.get("steer"):
         lines.append("")
         lines.append(
@@ -970,6 +999,21 @@ def usable_worker_text(text: str, *, limit: int = RECEIPT_TEXT_LIMIT) -> str:
     return _clip_to_limit(body, limit)
 
 
+def spoken_from_summary_markdown(text: str) -> str:
+    """Prefer the Findings section of a Puppetmaster stitch over prompt echo."""
+
+    raw = text or ""
+    match = _FINDINGS_HEADING_RE.search(raw)
+    if match:
+        rest = raw[match.end() :]
+        stop = _MARKDOWN_HEADING_RE.search(rest)
+        body = rest[: stop.start()] if stop else rest
+        spoken = usable_worker_text(body)
+        if spoken:
+            return spoken
+    return usable_worker_text(raw)
+
+
 def _is_skipped_worker_line(raw: str) -> bool:
     lower = (raw or "").strip().lower()
     if not lower:
@@ -1015,7 +1059,7 @@ def _completion_summary(
     buffer: "TokenStreamBuffer",
     cli: str,
 ) -> str:
-    spoken_meta = usable_worker_text(str(safe_meta.get("summary") or ""))
+    spoken_meta = spoken_from_summary_markdown(str(safe_meta.get("summary") or ""))
     if spoken_meta and not _is_placeholder_summary(spoken_meta):
         return spoken_meta
     spoken_buf = usable_worker_text(buffer.text)
@@ -1080,7 +1124,7 @@ def _parse_safe_cli_completion(stdout: str, stderr: str) -> dict[str, Any]:
                             if key == "summary":
                                 break
             elif text.strip():
-                spoken = usable_worker_text(text)
+                spoken = spoken_from_summary_markdown(text)
                 if spoken:
                     meta["summary"] = spoken
 
@@ -1131,10 +1175,11 @@ _STAGE_RE = re.compile(r"stage[:\s]+([a-zA-Z0-9_\-]+)", re.IGNORECASE)
 
 @dataclass
 class TokenStreamBuffer:
-    """Visible token window and current stream phase for one CLI run."""
+    """Visible answer window, reasoning hold, and stream phase for one CLI run."""
 
     phase: str = "thinking"
     text: str = ""
+    thinking: str = ""
 
     def extend(self, chunk: str) -> str:
         if chunk:
@@ -1142,6 +1187,13 @@ class TokenStreamBuffer:
             if len(self.text) > PHASE_TEXT_LIMIT:
                 self.text = self.text[:PHASE_TEXT_LIMIT]
         return self.text
+
+    def extend_thinking(self, chunk: str) -> str:
+        if chunk:
+            self.thinking = self.thinking + chunk
+            if len(self.thinking) > PHASE_TEXT_LIMIT:
+                self.thinking = self.thinking[:PHASE_TEXT_LIMIT]
+        return self.thinking
 
     def set_phase(self, phase: str) -> str:
         next_phase = _normalize_stream_phase(phase, self.phase)
@@ -1248,7 +1300,12 @@ def _parse_token_line(
     chunk = redact_text_markers(_extract_token_text(cleaned, event_type))
     if not chunk.strip():
         return None
-    state.extend(chunk)
+    if event_type == "reasoning":
+        state.extend_thinking(chunk)
+        window = state.thinking
+    else:
+        state.extend(chunk)
+        window = state.text
 
     percent: Optional[float] = None
     if "percent" in cleaned:
@@ -1257,12 +1314,12 @@ def _parse_token_line(
         except (TypeError, ValueError):
             percent = None
     if percent is None:
-        percent = min(92.0, 10.0 + (len(state.text) * 0.04))
+        percent = min(92.0, 10.0 + (len(window) * 0.04))
 
     details: dict[str, Any] = {
         "token": event_type in {"token", "delta"},
         "stream_phase": state.phase,
-        "token_text": state.text,
+        "token_text": window,
     }
     if model:
         details["model"] = model

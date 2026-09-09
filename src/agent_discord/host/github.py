@@ -1,4 +1,4 @@
-"""Host-side GitHub status. Analyze-mode Puppetmaster cannot run ``gh``."""
+"""Host-side GitHub. The worker does not hunt; this Mac scans the associated checkout."""
 
 from __future__ import annotations
 

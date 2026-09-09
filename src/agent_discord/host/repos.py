@@ -78,6 +78,22 @@ def load_host_repos(
     return tuple(sorted(found.values(), key=lambda item: item.name))
 
 
+def association_block(repo: Optional[HostRepo], *, github: str = "") -> str:
+    """Lead the worker with the checkout. GitHub scan is context, not the hunt."""
+
+    if repo is None:
+        return ""
+    lines = [
+        f"Associated: {repo.name} at {repo.path}.",
+        "Start in that checkout. Do not hunt for the repository.",
+    ]
+    scan = (github or "").strip()
+    if scan:
+        lines.append("GitHub on that checkout (host already scanned):")
+        lines.append(scan)
+    return "\n".join(lines)
+
+
 def resolve_host_repo(
     prompt: str,
     repos: Sequence[HostRepo],

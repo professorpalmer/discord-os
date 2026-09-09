@@ -15,6 +15,10 @@ def test_file_work_is_implement():
     assert compute_dispatch_mode("fix the login timeout") == "implement"
     assert compute_dispatch_mode("edit src/cli.py to print version") == "implement"
     assert compute_dispatch_mode("add tests for the panel") == "implement"
+    assert compute_dispatch_mode(
+        "In our dugout service, I'd like to enable smart swap during playoffs."
+    ) == "implement"
+    assert compute_dispatch_mode("please enable that") == "implement"
 
 
 def test_swarm_markers_and_worker_count():

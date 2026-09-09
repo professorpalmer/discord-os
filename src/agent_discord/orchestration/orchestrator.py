@@ -26,7 +26,13 @@ from agent_discord.discord.facade import DiscordFacade
 from agent_discord.discord.object_store import DEFAULT_MAX_OBJECT_BYTES, DiscordObjectStore
 from agent_discord.host.memory import memory_reach_block, recall_think_tank, settle_think_tank
 from agent_discord.host.realms import realm_for_channel
-from agent_discord.host.repos import HostRepo, host_reach_block, load_host_repos, resolve_host_repo
+from agent_discord.host.repos import (
+    HostRepo,
+    association_block,
+    host_reach_block,
+    load_host_repos,
+    resolve_host_repo,
+)
 from agent_discord.host.tools import load_host_tools, tools_reach_block
 from agent_discord.orchestration.cards import (
     edit_card,
@@ -608,22 +614,28 @@ class AgentOrchestrator:
         if chosen is not None:
             extra_meta["repo"] = chosen.name
         from agent_discord.host.github import is_github_status_ask
-
-        host_github = ""
-        if (
-            callable(self.host_github)
-            and is_github_status_ask(intake.text)
-            and run_cwd is not None
-        ):
-            try:
-                host_github = str(self.host_github(Path(run_cwd)) or "").strip()
-            except Exception:
-                host_github = ""
-        if host_github:
-            extra_meta["host_github"] = host_github
         from agent_discord.host.github import is_github_unauthed_report
 
-        if is_github_status_ask(intake.text) and is_github_unauthed_report(host_github):
+        status_ask = is_github_status_ask(intake.text)
+        scan = ""
+        if callable(self.host_github) and run_cwd is not None:
+            if chosen is not None or status_ask:
+                try:
+                    scan = str(self.host_github(Path(run_cwd)) or "").strip()
+                except Exception:
+                    scan = ""
+        host_github = scan if status_ask else ""
+        if host_github:
+            extra_meta["host_github"] = host_github
+        if scan and not is_github_unauthed_report(scan):
+            extra_meta["github_scan"] = scan
+        if chosen is not None:
+            extra_meta["association"] = association_block(
+                chosen,
+                github="" if status_ask or is_github_unauthed_report(scan) else scan,
+            )
+
+        if status_ask and is_github_unauthed_report(host_github):
             receipt = self._close_without_worker(
                 intake,
                 task_id=task_id,
@@ -966,13 +978,17 @@ class AgentOrchestrator:
             for item in progress_items
             if item.stage in {"thinking", "plan", "code", "done"}
         )
+        done_bits = tuple(
+            item.message for item in progress_items if item.stage == "done"
+        )
         if prefer_host_report:
             spoken = public_card_text(host_github) or host_github.strip()
         else:
             spoken = choose_spoken_answer(
+                result.final_summary,
+                *reversed(done_bits),
                 token_text,
                 *reversed(progress_bits),
-                result.final_summary,
             )
             if not spoken:
                 spoken = public_card_text(token_text)
