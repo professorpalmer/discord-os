@@ -4,6 +4,8 @@ Each ask is an OS thread **and** a Discord thread on the user message. That thre
 
 Analyze work overlaps. Implement and swarm writes serialize per resolved realm cwd so two channels do not fight one working tree.
 
+The host associates before the worker thinks: named checkout from the prompt (else the channel bind), then `gh` on that cwd. The worker prompt leads with that association. GitHub status asks still answer from the host scan. Product asks use the scan as context and cook.
+
 Cap is 8 live jobs. The listen loop does not block at that cap.
 
 ## Listen path

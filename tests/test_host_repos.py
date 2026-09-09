@@ -6,6 +6,7 @@ from pathlib import Path
 
 from agent_discord.host.repos import (
     HostRepo,
+    association_block,
     host_reach_block,
     load_host_repos,
     resolve_host_repo,
@@ -51,3 +52,15 @@ def test_host_reach_block_lists_gh_and_checkouts(tmp_path: Path):
     assert "gh pr list" in text
     assert str(pm) in text
     assert ".agent-discord" in text
+
+
+def test_association_block_names_checkout_and_github(tmp_path: Path):
+    dug = _git_repo(tmp_path / "dugout")
+    text = association_block(
+        HostRepo(name="dugout", path=dug),
+        github="Open PRs:\n#3 smart-swap",
+    )
+    assert text.startswith(f"Associated: dugout at {dug}")
+    assert "Do not hunt for the repository." in text
+    assert "#3 smart-swap" in text
+    assert association_block(None) == ""

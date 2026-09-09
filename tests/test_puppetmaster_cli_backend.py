@@ -24,6 +24,7 @@ from agent_discord.puppetmaster.backend import (
     _parse_token_line,
     _safe_dispatch_prompt,
     cursor_write_argv,
+    spoken_from_summary_markdown,
     usable_worker_text,
     usage_from_cli_meta,
 )
@@ -148,6 +149,49 @@ def test_github_ask_prompt_uses_host_gh_output():
     assert "Host already queried GitHub" in text
     assert "#12 docs drift" in text
     assert "Named git checkouts" not in text
+
+
+def test_association_leads_the_worker_prompt():
+    text = _safe_dispatch_prompt(
+        DispatchRequest(
+            task_id="t1",
+            run_id="r1",
+            prompt="enable smart swap during playoffs",
+            model="openrouter/auto",
+            context=ContextSnapshot(task_id="t1", memories=[], bindings={}),
+            metadata={
+                "association": (
+                    "Associated: dugout at /tmp/dugout.\n"
+                    "Start in that checkout. Do not hunt for the repository."
+                ),
+                "host_reach": "Named git checkouts:\n  - dugout: /tmp/dugout",
+            },
+        )
+    )
+    assert text.startswith("Associated: dugout")
+    assert "Do not hunt for the repository." in text
+    assert text.index("Associated: dugout") < text.index("enable smart swap")
+
+
+def test_spoken_from_stitched_findings_not_reasoning_diary():
+    blob = (
+        "# Puppetmaster Stitched Summary\n\n"
+        "Goal: enable smart swap during playoffs.\n\n"
+        "Write the answer as visible prose a person can read in Discord.\n"
+        "**Narrowing search methods**\n\n"
+        "I need to locate something specific, so I'm thinking about refining "
+        "my search. Could I use read-only grep via the terminal?\n\n"
+        "## Findings\n"
+        "- Smart Swap is explicitly disabled for playoffs by the endpoint's "
+        "phase guard. Allow REGULAR_SEASON and PLAYOFFS.\n"
+        "  confidence=0.99; evidence=dugout/api/roster_routes.py:1157\n\n"
+        "## Conflicts\n"
+        "- None\n"
+    )
+    spoken = spoken_from_summary_markdown(blob)
+    assert "phase guard" in spoken
+    assert "Narrowing search" not in spoken
+    assert "read-only grep" not in spoken
 
 
 def test_prose_tokens_join_as_a_paragraph():
@@ -489,6 +533,7 @@ def test_parse_token_line_accepts_token_reasoning_and_delta():
     assert delta.summary.details["token"] is True
     assert "Hello" in str(delta.summary.details["token_text"])
     assert "world" in str(delta.summary.details["token_text"])
+    assert "outline the approach" not in str(delta.summary.details["token_text"])
     assert len(str(delta.summary.details["token_text"])) <= 1500
 
 

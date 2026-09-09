@@ -4,7 +4,7 @@ Not a compute host. Discord OS dispatches Puppetmaster on this Mac. That is the 
 
 `AGENT_DISCORD_COMPUTE=auto` (default): agentic `openrouter/auto` when an OpenRouter key is in env or the workspace vault; otherwise the Cursor pin `cursor/grok-4-5` → adapter `grok-4.5`. No silent model fallback. Requests for any other model fail closed.
 
-Questions: `--mode analyze`. File work: `--mode implement --allow-dirty` on agentic. Cursor CLI omits `--implement --allow-dirty` when `compute_mode` is analyze. Auto writes unless HOST Gate is on.
+Questions: `--mode analyze`. File work: `--mode implement --allow-dirty` on agentic. Spoken change asks (`enable`, `I'd like to`) are implement. Cursor CLI omits `--implement --allow-dirty` when `compute_mode` is analyze. Auto writes unless HOST Gate is on.
 
 ## Keys
 

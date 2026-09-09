@@ -35,6 +35,15 @@ _IMPLEMENT_MARKERS = (
     "apply ",
     "ship ",
     "commit ",
+    "enable ",
+    "enable that",
+    "allow ",
+    "turn on",
+    "turn off",
+    "i'd like to",
+    "id like to",
+    "please enable",
+    "please allow",
 )
 
 
