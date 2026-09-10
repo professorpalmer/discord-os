@@ -12,7 +12,7 @@ The host is the long-running process on this Mac: listen loop, JobPool, SQLite, 
 | Off → Confirm | Disarmed. Helper stays so On still works. |
 | Ask | Prompt into that channel. |
 | Pair | Owner / operators. |
-| Halt | Spend cap. `discord-os spend --resume` clears it. |
+| Halt | Spend cap (OpenRouter usage cost on agentic receipts). `discord-os spend --resume` clears it. |
 
 Work is accepted only while On, and only from a paired operator after the first pair.
 

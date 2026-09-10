@@ -13,7 +13,7 @@ discord-os connect --from-env
 # or /connect in Discord (inherit / ticket / shred)
 ```
 
-Vault: `{workspace}/keys/`. Key goes into the **subprocess env** as `OPENROUTER_API_KEY`, never argv, never logs.
+Vault: `{workspace}/keys/`. Key goes into the **subprocess env** as `OPENROUTER_API_KEY`, never argv, never logs. Agentic usage receipts carry `cost_usd` into Halt spend tracking.
 
 Optional Marionette HTTP: `AGENT_DISCORD_BACKEND=marionette` plus `MARIONETTE_BASE_URL`. Unconfigured Marionette fails closed.
 

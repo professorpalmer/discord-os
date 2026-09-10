@@ -54,6 +54,7 @@ From Discord you can also type `bind puppetmaster` or `bind memory` in that chan
 | `bind puppetmaster` | This channel is that checkout |
 | `bind memory` | This channel is think-tank |
 | a sentence | A task. Up to eight live jobs; two channels cooking is the usual case. |
+| reply in a job thread | Live → steer. Idle/Done → new job in that thread (session). |
 
 ![HOST card and a finished job thread](docs/screenshots/discord-host.png)
 

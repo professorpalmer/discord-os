@@ -9,7 +9,7 @@ Surface README is first run plus this map. Feature pages live in their own folde
 | [setup](setup/README.md) | First run, `add`, why there is no wizard |
 | [host](host/README.md) | On/Off/Ask, Jobs briefing, LaunchAgent, pairing, spend, schedule |
 | [realms](realms/README.md) | Channel = checkout |
-| [jobs](jobs/README.md) | Parallel cooks |
+| [jobs](jobs/README.md) | Parallel cooks + live session threads |
 | [tools](tools/README.md) | Named CLI/HTTP catalog |
 | [wiki](wiki/README.md) | Portable LLM wiki over HTTP |
 | [memory](memory/README.md) | Think-tank channels |

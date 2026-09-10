@@ -8,7 +8,7 @@ SQLite is the database. Up to eight live jobs (two cooks at once in product voic
 pip install discord-os
 ```
 
-Leave the host running. Turn work on and off from Discord.
+Leave the host running. Turn work on and off from Discord. Job threads are live sessions: reply after Done to cook again in-thread.
 
 Workers need [Puppetmaster](https://pypi.org/project/puppetmaster-ai/) too:
 

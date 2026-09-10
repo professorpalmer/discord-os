@@ -533,28 +533,61 @@ class SQLiteStore:
         requester_id: Optional[str] = None,
         metadata: Optional[Mapping[str, Any]] = None,
     ) -> None:
+        """Insert a task with a unique DOS-* job_code.
+
+        Mint+insert under BEGIN IMMEDIATE so parallel JobPool workers cannot
+        both read the same MAX(job_code) and collide on the unique index.
+        """
+
         conn = self._connection()
-        job_code = self._mint_job_code(conn)
-        conn.execute(
-            """
-            INSERT INTO tasks (
-                task_id, workspace_id, channel_id, thread_id, intake_text,
-                status, requester_id, metadata_json, job_code
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                task_id,
-                workspace_id,
-                channel_id,
-                thread_id,
-                intake_text,
-                TaskStatus.PENDING.value,
-                requester_id,
-                json.dumps(dict(metadata or {}), sort_keys=True),
-                job_code,
-            ),
+        meta_json = json.dumps(dict(metadata or {}), sort_keys=True)
+        last_err: Optional[BaseException] = None
+        for attempt in range(12):
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                job_code = self._mint_job_code(conn)
+                conn.execute(
+                    """
+                    INSERT INTO tasks (
+                        task_id, workspace_id, channel_id, thread_id, intake_text,
+                        status, requester_id, metadata_json, job_code
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        task_id,
+                        workspace_id,
+                        channel_id,
+                        thread_id,
+                        intake_text,
+                        TaskStatus.PENDING.value,
+                        requester_id,
+                        meta_json,
+                        job_code,
+                    ),
+                )
+                conn.commit()
+                return
+            except sqlite3.IntegrityError as exc:
+                last_err = exc
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                # Collision on job_code (or task_id); remint on next attempt.
+                continue
+            except sqlite3.OperationalError as exc:
+                last_err = exc
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                if "locked" in str(exc).lower() and attempt < 11:
+                    time.sleep(0.01 * (attempt + 1))
+                    continue
+                raise
+        raise sqlite3.IntegrityError(
+            f"create_task failed after retries: {last_err}"
         )
-        conn.commit()
 
     def create_run(
         self,

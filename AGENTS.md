@@ -16,6 +16,8 @@ Do not crawl the tree first. Each `docs/<feature>/README.md` lists the modules t
 - Host tools are **CLI or HTTP**. There is no MCP bus inside Discord. Wiki MCP results come from `discord-os wiki query`.
 - `bind puppetmaster` / `discord-os add realm` pins a channel to a checkout. Naming a repo in the prompt still overrides.
 - Up to eight live jobs (`JobPool`, product voice: two cooks at once). Implement writes serialize per realm.
+- Discord job threads are live sessions: live follow-ups steer; idle follow-ups cook again in-thread with lineage tip parent.
+- OpenRouter usage cost populates Halt spend receipts (agentic path).
 - `~/Projects/agent-discord` is historical; live checkout is `~/Projects/discord-os`.
 - SQLite holds tasks, runs, events, artifacts, and the execution DAG. Query with `discord-os lineage`.
 - One live card per job. Edit in place. Do not flood the thread.

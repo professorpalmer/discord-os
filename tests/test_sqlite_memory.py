@@ -430,3 +430,43 @@ def test_list_recent_jobs_uses_latest_run_per_task(tmp_path: Path):
     assert [job["run_id"] for job in jobs] == ["ok-run"]
     assert jobs[0]["status"] == "completed"
     store.close()
+
+
+def test_create_task_job_codes_unique_under_threads(tmp_path: Path):
+    """Parallel JobPool workers must not mint the same DOS-* code."""
+
+    import threading
+
+    store = SQLiteStore(tmp_path / "agent_discord.sqlite3")
+    store.initialize()
+    errors: list[BaseException] = []
+    codes: list[str] = []
+    lock = threading.Lock()
+
+    def worker(i: int) -> None:
+        try:
+            tid = f"t-{i}"
+            store.create_task(
+                task_id=tid,
+                workspace_id="ws",
+                channel_id="ch",
+                intake_text=f"ask {i}",
+            )
+            code = store.task_job_code(tid)
+            with lock:
+                codes.append(code)
+        except BaseException as exc:  # noqa: BLE001 — collect for assert
+            with lock:
+                errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(16)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join(timeout=10.0)
+    assert errors == []
+    assert len(codes) == 16
+    assert len(set(codes)) == 16
+    assert all(c.startswith("DOS-") for c in codes)
+    store.close()
+

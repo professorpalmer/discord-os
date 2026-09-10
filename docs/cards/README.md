@@ -10,7 +10,7 @@ Done is the spoken summary after process diary is dropped from the body. The dia
 
 Harness cards (`**Card**`, `**Receipt**`, HOST, NOTE) are skipped on intake so the bot does not dispatch itself. HOST stays the settings analog — do not dump metrics into job cards. The HOST job line is Need / Waiting / Live / Last over the same SQLite jobs. It is not a second board. Dest-remote opens (Browser here, Files here) post a separate OPEN card with a Discord link button or a folder listing. They do not open a GUI on the listen Mac.
 
-A follow-up in the job thread stays there (steer). Do not start a nested thread.
+A follow-up in a **live** job thread steers that worker. A follow-up after Done starts a new job in the same thread (session), parented at the prior tip. Do not start a nested thread.
 
 ![next-level cards](../screenshots/next-level-cards.png)
 
