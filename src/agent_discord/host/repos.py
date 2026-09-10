@@ -33,7 +33,7 @@ _FOLDER_CANDIDATES: dict[str, tuple[str, ...]] = {
     "puppetmaster": ("Puppetmaster", "puppetmaster"),
     "dugout": ("dugout",),
     "marionette": ("marionette",),
-    "discord-os": ("agent-discord", "discord-os"),
+    "discord-os": ("discord-os", "agent-discord"),
     "portable-llm-wiki": ("portable-llm-wiki",),
     "my-portable-llm-wiki": ("my-portable-llm-wiki",),
 }
