@@ -22,6 +22,7 @@ from agent_discord.contracts import (
 )
 from agent_discord.keys.vault import KeyVault
 from agent_discord.puppetmaster.backend import (
+    usage_from_cli_meta,
     _parse_safe_cli_completion,
     _safe_dispatch_prompt,
     cli_supports_flag,
@@ -197,16 +198,7 @@ class AgenticPuppetmasterBackend:
                 ),
             ),
             final_summary=summary,
-            usage=UsageReceipt(
-                model=pin.canonical,
-                adapter_name=pin.adapter_name,
-                metadata={
-                    "backend": "agentic",
-                    "cli": self.cli,
-                    "cli_model": pin.adapter_name,
-                    "job_id": safe_meta.get("job_id"),
-                },
-            ),
+            usage=usage_from_cli_meta(pin, self.cli, safe_meta),
         )
 
     def cancel(self, run_id: str) -> bool:

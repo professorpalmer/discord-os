@@ -80,7 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog=CLI_NAME,
         description=(
             f"{PRODUCT_NAME}: Discord is the screen. This process is the "
-            "computer: SQLite lineage, two jobs at once, Puppetmaster on this "
+            "computer: SQLite lineage, up to eight live jobs (two cooks at once), Puppetmaster on this "
             "Mac. Artifacts are Discord snowflakes plus sha256."
         ),
     )

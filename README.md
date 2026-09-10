@@ -2,11 +2,13 @@
 
 Discord is the screen. This process is the computer. Your phone is the remote.
 
-SQLite is the database (tasks, runs, events, artifacts, execution DAG). Two Discord threads cook at once. Implement writes serialize per checkout. Puppetmaster runs the workers on this Mac. Artifacts are channel / message / attachment plus sha256, never a CDN URL. Intake is REST. Gateway exists so On/Off buttons work. No hosted fleet.
+SQLite is the database (tasks, runs, events, artifacts, execution DAG). Up to eight live jobs (two cooks at once in product voice). Implement writes serialize per checkout. Puppetmaster runs the workers on this Mac. Artifacts are channel / message / attachment plus sha256, never a CDN URL. Intake is REST. Gateway exists so On/Off buttons work. No hosted fleet.
 
 Query the analog map with `discord-os map`. Dump a run with `discord-os lineage`.
 
 Public package is [`discord-os`](https://pypi.org/project/discord-os/). Repo: [`professorpalmer/discord-os`](https://github.com/professorpalmer/discord-os). The `agent-discord` command still works.
+
+`~/Projects/agent-discord` is historical; live checkout is `~/Projects/discord-os`.
 
 ```bash
 pip install discord-os
@@ -51,7 +53,7 @@ From Discord you can also type `bind puppetmaster` or `bind memory` in that chan
 | **More** | Pair, Halt, Gate, Roles, GitHub, Files/Browser here or on host, Terminal on host |
 | `bind puppetmaster` | This channel is that checkout |
 | `bind memory` | This channel is think-tank |
-| a sentence | A task. Two channels cook at once. |
+| a sentence | A task. Up to eight live jobs; two channels cooking is the usual case. |
 
 ![HOST card and a finished job thread](docs/screenshots/discord-host.png)
 
