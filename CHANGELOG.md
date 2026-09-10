@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.23
+
+Parallel cooks no longer collide on DOS-* job codes.
+
+- `create_task` mints under `BEGIN IMMEDIATE` and retries on unique/locked races.
+- Docs: live session threads, per-thread watermarks, spend receipts into Halt.
+
 ## 0.5.22
 
 Idle Discord threads stay live sessions. Spend receipts tell the truth. Folder prefer is discord-os.
