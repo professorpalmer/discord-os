@@ -417,7 +417,35 @@ class AgentOrchestrator:
                 replay_of,
                 parent_keys=(prev_tip,) if prev_tip else (),
             )
-        self._record_lineage(task_id, run_id, "intake", intake.text)
+        session_parents: tuple[str, ...] = ()
+        follow_tid = str(intake.thread_id or "").strip()
+        if follow_tid and not replay_of:
+            prev_reader = getattr(self.store, "latest_run_id_for_thread", None)
+            if callable(prev_reader):
+                try:
+                    prev_run = str(
+                        prev_reader(follow_tid, excluding_run_id=run_id) or ""
+                    ).strip()
+                except TypeError:
+                    try:
+                        prev_run = str(prev_reader(follow_tid) or "").strip()
+                    except Exception:
+                        prev_run = ""
+                except Exception:
+                    prev_run = ""
+                if prev_run and prev_run != run_id:
+                    from agent_discord.orchestration.lineage import list_nodes, tip_key
+
+                    tip = tip_key(list_nodes(self.store, prev_run))
+                    if tip:
+                        session_parents = (tip,)
+        self._record_lineage(
+            task_id,
+            run_id,
+            "intake",
+            intake.text,
+            parent_keys=session_parents,
+        )
 
         job_thread_id = intake.thread_id
         if (

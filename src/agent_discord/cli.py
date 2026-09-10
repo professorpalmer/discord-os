@@ -1453,18 +1453,44 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                 workspace_id=args.workspace_id,
                 repos=host_repos,
             )
-            dests = listen_destinations(listen_ids, job_pool, orch)
+            session_ids: tuple[str, ...] = ()
+            lister = getattr(store, "list_session_thread_ids", None)
+            if callable(lister):
+                try:
+                    session_ids = tuple(lister(limit=32) or ())
+                except Exception:
+                    session_ids = ()
+            dests = listen_destinations(
+                listen_ids, job_pool, orch, session_thread_ids=session_ids
+            )
+            primary = {str(cid or "").strip() for cid in listen_ids if str(cid or "").strip()}
             receipts: list[Any] = []
             for listen_id in dests:
                 try:
+                    if listen_id in primary:
+                        drain_channel = listen_id
+                        drain_thread = (
+                            args.thread_id if listen_id == args.channel_id else None
+                        )
+                    else:
+                        # Job thread dest: read the thread, bind realm via parent channel.
+                        parent = ""
+                        finder = getattr(store, "parent_channel_for_thread", None)
+                        if callable(finder):
+                            try:
+                                parent = str(finder(listen_id) or "").strip()
+                            except Exception:
+                                parent = ""
+                        drain_channel = parent or args.channel_id
+                        drain_thread = listen_id
                     receipts.extend(
                         drain_inbound(
                             orch,
                             discord,
-                            channel_id=listen_id,
+                            channel_id=drain_channel,
                             workspace_id=args.workspace_id,
                             guild_id=args.guild_id,
-                            thread_id=args.thread_id if listen_id == args.channel_id else None,
+                            thread_id=drain_thread,
                             limit=args.limit,
                             workspace=config.workspace,
                             since_ms=ignore_history_before_ms,

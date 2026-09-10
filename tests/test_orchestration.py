@@ -1762,6 +1762,19 @@ def test_listen_destinations_unions_live_job_threads():
     assert dests == ["ch", "realm", "job-thread"]
 
 
+def test_listen_destinations_keeps_idle_session_threads():
+    class _Live:
+        def live_thread_ids(self):
+            return ()
+
+    dests = listen_destinations(
+        ["ch"],
+        _Live(),
+        session_thread_ids=("idle-a", "ch", "idle-b", "idle-a"),
+    )
+    assert dests == ["ch", "idle-a", "idle-b"]
+
+
 class _OrderStore(SQLiteStore):
     def __init__(self, path: Path):
         super().__init__(path)
@@ -1817,4 +1830,84 @@ def test_claim_happens_before_watermark_and_duplicate_is_dropped(tmp_path: Path)
     )
     pool.wait(timeout=2.0)
     assert len(orch.jobs) == 1
+    store.close()
+
+
+def test_session_thread_ids_survive_done(tmp_path: Path):
+    store = SQLiteStore(tmp_path / "session.sqlite3")
+    store.initialize()
+    store.create_task(
+        task_id="t1",
+        workspace_id="ws",
+        channel_id="parent-ch",
+        intake_text="first",
+        thread_id="job-thread-1",
+    )
+    store.create_run(
+        run_id="r1",
+        task_id="t1",
+        model="m",
+        adapter_name="a",
+        status=TaskStatus.COMPLETED,
+    )
+    assert store.list_session_thread_ids(limit=8) == ("job-thread-1",)
+    assert store.parent_channel_for_thread("job-thread-1") == "parent-ch"
+    assert store.latest_run_id_for_thread("job-thread-1") == "r1"
+    store.create_task(
+        task_id="t2",
+        workspace_id="ws",
+        channel_id="parent-ch",
+        intake_text="follow up",
+        thread_id="job-thread-1",
+    )
+    store.create_run(
+        run_id="r2",
+        task_id="t2",
+        model="m",
+        adapter_name="a",
+        status=TaskStatus.RUNNING,
+    )
+    assert store.latest_run_id_for_thread("job-thread-1", excluding_run_id="r2") == "r1"
+    store.close()
+
+
+def test_idle_session_thread_drain_keeps_parent_channel(tmp_path: Path):
+    """Follow-ups in an idle job thread stay on the parent channel for realm bind."""
+
+    store = _armed_store(tmp_path, channel_id="parent-ch")
+    store.create_task(
+        task_id="prior",
+        workspace_id="ws",
+        channel_id="parent-ch",
+        intake_text="first ask",
+        thread_id="job-thread",
+        requester_id="human-1",
+    )
+    orch = _FakeSteerOrch(store)
+    fake = FakeDiscordMCPProvider()
+    facade = DiscordFacade(fake, bot_token_fingerprint="fp", owner_id="test")
+    fake.inbox.append(
+        DiscordMessage(
+            channel_id="parent-ch",
+            content="SSH and deploy please",
+            message_id="902",
+            author_id="human-1",
+            thread_id="job-thread",
+        )
+    )
+    pool = JobPool()
+    drain_inbound(
+        orch,
+        facade,
+        channel_id="parent-ch",
+        workspace_id="ws",
+        thread_id="job-thread",
+        since_ms=0,
+        job_pool=pool,
+    )
+    pool.wait(timeout=2.0)
+    assert len(orch.jobs) == 1
+    assert orch.jobs[0].channel_id == "parent-ch"
+    assert orch.jobs[0].thread_id == "job-thread"
+    assert orch.steer_calls == []
     store.close()

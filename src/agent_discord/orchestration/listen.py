@@ -54,8 +54,13 @@ def snowflake_created_ms(message_id: str) -> Optional[int]:
 def listen_destinations(
     channel_ids: Sequence[str],
     *live_sources: Any,
+    session_thread_ids: Sequence[str] = (),
 ) -> list[str]:
-    """Primary listen ids plus live job-thread dests. REST polls those too."""
+    """Primary listen ids plus live and recent idle job-thread dests.
+
+    Idle sessions stay listenable after Done so a later reply in the same
+    Discord thread starts a new job instead of going silent.
+    """
 
     dests: list[str] = []
     seen: set[str] = set()
@@ -77,6 +82,11 @@ def listen_destinations(
             if value and value not in seen:
                 dests.append(value)
                 seen.add(value)
+    for tid in session_thread_ids or ():
+        value = str(tid or "").strip()
+        if value and value not in seen:
+            dests.append(value)
+            seen.add(value)
     return dests
 
 

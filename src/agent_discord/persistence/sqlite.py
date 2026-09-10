@@ -646,6 +646,71 @@ class SQLiteStore:
         ).fetchone()
         return dict(row) if row else None
 
+    def list_session_thread_ids(self, *, limit: int = 32) -> tuple[str, ...]:
+        """Recent job-thread ids so idle follow-ups stay REST-listenable after Done."""
+
+        capped = max(1, min(int(limit), 64))
+        rows = self._connection().execute(
+            """
+            SELECT thread_id FROM tasks
+            WHERE thread_id IS NOT NULL AND thread_id != ''
+            ORDER BY updated_at DESC, task_id DESC
+            LIMIT ?
+            """,
+            (max(capped * 4, 64),),
+        ).fetchall()
+        out: list[str] = []
+        seen: set[str] = set()
+        for row in rows:
+            tid = str(row["thread_id"] or "").strip()
+            if not tid or tid in seen:
+                continue
+            seen.add(tid)
+            out.append(tid)
+            if len(out) >= capped:
+                break
+        return tuple(out)
+
+    def parent_channel_for_thread(self, thread_id: str) -> str:
+        """Parent channel that opened this job thread (realm bind key)."""
+
+        tid = (thread_id or "").strip()
+        if not tid:
+            return ""
+        row = self._connection().execute(
+            """
+            SELECT channel_id FROM tasks
+            WHERE thread_id=?
+            ORDER BY updated_at DESC, task_id DESC
+            LIMIT 1
+            """,
+            (tid,),
+        ).fetchone()
+        return str(row["channel_id"] or "").strip() if row else ""
+
+    def latest_run_id_for_thread(
+        self, thread_id: str, *, excluding_run_id: str = ""
+    ) -> str:
+        """Most recent prior run in this job thread (for lineage tip parenting)."""
+
+        tid = (thread_id or "").strip()
+        if not tid:
+            return ""
+        exclude = (excluding_run_id or "").strip()
+        row = self._connection().execute(
+            """
+            SELECT r.run_id
+            FROM tasks t
+            JOIN runs r ON r.task_id = t.task_id
+            WHERE t.thread_id=?
+              AND (? = '' OR r.run_id != ?)
+            ORDER BY r.created_at DESC, r.run_id DESC
+            LIMIT 1
+            """,
+            (tid, exclude, exclude),
+        ).fetchone()
+        return str(row["run_id"] or "") if row else ""
+
     def list_recent_jobs(
         self, channel_id: str, *, limit: int = 5
     ) -> list[dict[str, Any]]:
