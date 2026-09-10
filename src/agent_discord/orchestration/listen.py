@@ -255,11 +255,14 @@ def drain_inbound(
         seed_spend_cap_from_env(store, env)
         seed_write_gate_from_env(store, env)
     seed_ms = since_ms if since_ms is not None else default_listen_since_ms()
+    # Session/job threads keep their own watermark key. Parent tip advances on
+    # HOST panel paints and must not hide older-but-unseen thread follow-ups.
+    watermark_key = (str(thread_id or "").strip() or str(channel_id or "").strip())
     seeder = getattr(store, "seed_listen_watermark", None)
     if callable(seeder):
-        watermark = seeder(channel_id, seed_ms)
+        watermark = seeder(watermark_key, seed_ms)
     else:
-        watermark = {"channel_id": channel_id, "last_created_ms": seed_ms, "last_message_id": ""}
+        watermark = {"channel_id": watermark_key, "last_created_ms": seed_ms, "last_message_id": ""}
     snapshot = dict(watermark)
     pending: list[DiscordMessage] = []
     for message in messages:
@@ -281,7 +284,7 @@ def drain_inbound(
                 env=env,
             )
             watermark = _advance_listen_watermark(
-                store, channel_id, created_ms, message.message_id, watermark
+                store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
         if is_bind_command(message.content or ""):
@@ -291,7 +294,7 @@ def drain_inbound(
                 role_ids=_author_role_ids(message),
             ):
                 watermark = _advance_listen_watermark(
-                    store, channel_id, created_ms, message.message_id, watermark
+                    store, watermark_key, created_ms, message.message_id, watermark
                 )
                 continue
             _absorb_bind(
@@ -303,7 +306,7 @@ def drain_inbound(
                 thread_id=message.thread_id or thread_id,
             )
             watermark = _advance_listen_watermark(
-                store, channel_id, created_ms, message.message_id, watermark
+                store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
         if is_power_command(message.content or ""):
@@ -315,7 +318,7 @@ def drain_inbound(
                 thread_id=message.thread_id or thread_id,
             )
             watermark = _advance_listen_watermark(
-                store, channel_id, created_ms, message.message_id, watermark
+                store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
         if is_open_command(message.content or ""):
@@ -325,7 +328,7 @@ def drain_inbound(
                 role_ids=_author_role_ids(message),
             ):
                 watermark = _advance_listen_watermark(
-                    store, channel_id, created_ms, message.message_id, watermark
+                    store, watermark_key, created_ms, message.message_id, watermark
                 )
                 continue
             if not _channel_is_armed(store, channel_id):
@@ -337,7 +340,7 @@ def drain_inbound(
                     thread_id=message.thread_id or thread_id,
                 )
                 watermark = _advance_listen_watermark(
-                    store, channel_id, created_ms, message.message_id, watermark
+                    store, watermark_key, created_ms, message.message_id, watermark
                 )
                 continue
             _absorb_open(
@@ -351,13 +354,13 @@ def drain_inbound(
                 browser_open=browser_open,
             )
             watermark = _advance_listen_watermark(
-                store, channel_id, created_ms, message.message_id, watermark
+                store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
         intake_text, intake_meta, skip_voice = _collab_intake(message, discord)
         if skip_voice:
             watermark = _advance_listen_watermark(
-                store, channel_id, created_ms, message.message_id, watermark
+                store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
         scheduled = parse_schedule_command(intake_text or (message.content or ""))
@@ -373,28 +376,28 @@ def drain_inbound(
                 thread_id=message.thread_id or thread_id,
             )
             watermark = _advance_listen_watermark(
-                store, channel_id, created_ms, message.message_id, watermark
+                store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
         if not intake_text and not should_dispatch_inbound(message):
             watermark = _advance_listen_watermark(
-                store, channel_id, created_ms, message.message_id, watermark
+                store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
         if not _channel_is_armed(store, channel_id):
             watermark = _advance_listen_watermark(
-                store, channel_id, created_ms, message.message_id, watermark
+                store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
         text = intake_text or (message.content or "").strip()
         if not text:
             watermark = _advance_listen_watermark(
-                store, channel_id, created_ms, message.message_id, watermark
+                store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
         if is_spend_halted(store, workspace_id):
             watermark = _advance_listen_watermark(
-                store, channel_id, created_ms, message.message_id, watermark
+                store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
         if not author_may_dispatch(
@@ -403,14 +406,14 @@ def drain_inbound(
             role_ids=_author_role_ids(message),
         ):
             watermark = _advance_listen_watermark(
-                store, channel_id, created_ms, message.message_id, watermark
+                store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
         follow_thread = _follow_thread_id(message, thread_id, orchestrator, job_pool)
         if follow_thread and _thread_has_running_job(orchestrator, job_pool, follow_thread):
             if not _claim_inbound(store, discord, message, channel_id):
                 watermark = _advance_listen_watermark(
-                    store, channel_id, created_ms, message.message_id, watermark
+                    store, watermark_key, created_ms, message.message_id, watermark
                 )
                 continue
             _steer_running_job(
@@ -422,13 +425,13 @@ def drain_inbound(
                 thread_id=follow_thread,
             )
             watermark = _advance_listen_watermark(
-                store, channel_id, created_ms, message.message_id, watermark
+                store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
         extra_meta = dict(intake_meta or {})
         if not _claim_inbound(store, discord, message, channel_id):
             watermark = _advance_listen_watermark(
-                store, channel_id, created_ms, message.message_id, watermark
+                store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
         extra_meta["inbound_claimed"] = True
@@ -451,7 +454,7 @@ def drain_inbound(
         else:
             receipts.append(orchestrator.run_task(intake))
         watermark = _advance_listen_watermark(
-            store, channel_id, created_ms, message.message_id, watermark
+            store, watermark_key, created_ms, message.message_id, watermark
         )
     receipts.extend(
         _fire_due_schedules(

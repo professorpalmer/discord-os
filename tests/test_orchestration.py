@@ -1911,3 +1911,46 @@ def test_idle_session_thread_drain_keeps_parent_channel(tmp_path: Path):
     assert orch.jobs[0].thread_id == "job-thread"
     assert orch.steer_calls == []
     store.close()
+
+
+def test_idle_session_thread_uses_thread_watermark_not_parent(tmp_path: Path):
+    """Parent tip newer than a thread follow-up must not hide the follow-up."""
+
+    store = _armed_store(tmp_path, channel_id="parent-ch")
+    thread_tip = "1174109840998400000"
+    follow_id = "1174109845192704000"
+    parent_tip = "1174109849387008000"
+    store.set_listen_watermark("job-thread", created_ms=1_700_000_000_000, message_id=thread_tip)
+    store.set_listen_watermark("parent-ch", created_ms=1_700_000_002_000, message_id=parent_tip)
+    orch = _FakeSteerOrch(store)
+    fake = FakeDiscordMCPProvider()
+    facade = DiscordFacade(fake, bot_token_fingerprint="fp", owner_id="test")
+    fake.inbox.append(
+        DiscordMessage(
+            channel_id="parent-ch",
+            content="SSH and deploy please",
+            message_id=follow_id,
+            author_id="human-1",
+            thread_id="job-thread",
+        )
+    )
+    pool = JobPool()
+    drain_inbound(
+        orch,
+        facade,
+        channel_id="parent-ch",
+        workspace_id="ws",
+        thread_id="job-thread",
+        since_ms=0,
+        job_pool=pool,
+    )
+    pool.wait(timeout=2.0)
+    assert len(orch.jobs) == 1
+    assert orch.jobs[0].channel_id == "parent-ch"
+    assert orch.jobs[0].thread_id == "job-thread"
+    thread_wm = store.get_listen_watermark("job-thread")
+    parent_wm = store.get_listen_watermark("parent-ch")
+    assert thread_wm["last_message_id"] == follow_id
+    assert parent_wm["last_message_id"] == parent_tip
+    store.close()
+
