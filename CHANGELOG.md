@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.22
+
+Idle Discord threads stay live sessions. Spend receipts tell the truth. Folder prefer is discord-os.
+
+- After Done, follow-ups in the same thread start a new job (parented at the prior tip). Running threads still steer.
+- Session-thread drains watermark by thread id so HOST panel tips cannot hide unread follow-ups.
+- JobPool cap is eight cooks; product copy matches. OpenRouter usage cost reaches Halt.
+- Repo discovery prefers `~/Projects/discord-os` over the historical `agent-discord` folder.
+
 ## 0.5.21
 
 The host associates the ask before the worker hunts. Done speaks the finding.
