@@ -263,6 +263,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="On FAIL, post a thin host-status digest to the host channel (phone-visible)",
     )
+    p_host_doctor.add_argument(
+        "--install-watchdog",
+        action="store_true",
+        help="Install listen-dead doctor --notify LaunchAgent for real (not example-only)",
+    )
     p_host_doctor.add_argument("--json", action="store_true")
     p_host_dash = host_sub.add_parser(
         "dashboard",
@@ -1657,6 +1662,13 @@ def _start_panel_gateway(
     orch: Any = None,
     host_roots: tuple[Any, ...] = (),
 ) -> None:
+    # Panel gateway is expected — never-READY past grace becomes Need.
+    try:
+        from agent_discord.discord.gateway_health import note_gateway_expected
+
+        note_gateway_expected()
+    except Exception:
+        pass
     presence: list[Any] = []
 
     def set_presence(armed: bool) -> None:
@@ -1870,19 +1882,27 @@ def cmd_setup(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                 "(recommended when the bot is shared; default off keeps single-user Mac UX)",
                 file=out,
             )
-        # Write listen-dead notify example into workspace for LaunchAgent/cron.
+        # Install listen-dead doctor --notify watchdog for real (LaunchAgent).
         try:
             from agent_discord.host.install import (
                 doctor_notify_cron_example,
-                write_doctor_notify_example,
+                install_doctor_notify_watchdog,
             )
 
-            example = write_doctor_notify_example(workspace=config.workspace)
-            print(
-                f"watchdog: example LaunchAgent at {example} "
-                f"(or cron: {doctor_notify_cron_example()})",
-                file=out,
+            installed = install_doctor_notify_watchdog(
+                workspace=config.workspace,
+                cwd=Path.cwd(),
             )
+            kind = installed.get("kind") or ""
+            path = installed.get("path") or ""
+            if kind == "launchd":
+                print(f"watchdog: installed LaunchAgent at {path}", file=out)
+            else:
+                cron = installed.get("cron") or doctor_notify_cron_example()
+                print(
+                    f"watchdog: wrote {path} (install cron: {cron})",
+                    file=out,
+                )
         except Exception:
             pass
     return code
@@ -1930,6 +1950,15 @@ def cmd_host_start(args: argparse.Namespace, *, out: TextIO | None = None) -> in
         workspace=config.workspace,
         cwd=Path.cwd(),
     )
+    try:
+        from agent_discord.host.install import install_doctor_notify_watchdog
+
+        install_doctor_notify_watchdog(
+            workspace=config.workspace,
+            cwd=Path.cwd(),
+        )
+    except Exception:
+        pass
     live = running_host_pid(config.workspace)
     if live is not None:
         print(f"host: already running pid={live}", file=sys.stderr)
@@ -2036,6 +2065,31 @@ def cmd_host_status(args: argparse.Namespace, *, out: TextIO | None = None) -> i
 def cmd_host_doctor(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     out = out or sys.stdout
     from agent_discord.host.doctor import run_doctor
+
+    if getattr(args, "install_watchdog", False):
+        from agent_discord.config import apply_runtime_secrets, load_config
+        from agent_discord.host.install import (
+            doctor_notify_cron_example,
+            install_doctor_notify_watchdog,
+        )
+
+        config = apply_runtime_secrets(load_config())
+        config.workspace.mkdir(parents=True, exist_ok=True)
+        installed = install_doctor_notify_watchdog(
+            workspace=config.workspace,
+            cwd=Path.cwd(),
+        )
+        kind = installed.get("kind") or ""
+        path = installed.get("path") or ""
+        if getattr(args, "json", False):
+            print(json.dumps({"ok": True, "watchdog": installed}, indent=2), file=out)
+        elif kind == "launchd":
+            print(f"watchdog: installed LaunchAgent at {path}", file=out)
+        else:
+            cron = installed.get("cron") or doctor_notify_cron_example()
+            print(f"watchdog: wrote {path}", file=out)
+            print(f"watchdog: cron hint: {cron}", file=out)
+        # Fall through to doctor check after install.
 
     code, lines = run_doctor(fix=bool(getattr(args, "fix", False)))
     notify_body = None

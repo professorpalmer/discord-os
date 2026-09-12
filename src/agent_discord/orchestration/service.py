@@ -18,6 +18,7 @@ WRITE_SESSION_ALLOW_PREFIX = "write_session_allow:"
 # Always-allow lasts this many seconds, or until HOST Off clears it.
 WRITE_SESSION_ALLOW_TTL_SECONDS = 4 * 3600
 TOOL_CLASS_ALLOW_PREFIX = "tool_class_allow:"
+TOOL_EXACT_ALLOW_PREFIX = "tool_exact_allow:"
 TOOL_CLASS_ALLOW_TTL_SECONDS = WRITE_SESSION_ALLOW_TTL_SECONDS
 DEFAULT_APPROVAL_TIMEOUT_MINUTES = 20
 MAX_APPROVAL_TIMEOUT_SECONDS = 24 * 3600
@@ -280,7 +281,7 @@ def clear_write_session_allows(store: Any) -> None:
             key = str(getattr(row, "key", "") or "")
         if key.startswith(WRITE_SESSION_ALLOW_PREFIX) or key.startswith(
             TOOL_CLASS_ALLOW_PREFIX
-        ):
+        ) or key.startswith(TOOL_EXACT_ALLOW_PREFIX):
             try:
                 writer(HOST_PREFS_WORKSPACE, key, "0")
             except Exception:
@@ -364,6 +365,85 @@ def clear_tool_class_session_allow(store: Any, tool_class: str, scope_id: str) -
     if not klass or not scope:
         return
     writer(HOST_PREFS_WORKSPACE, tool_class_allow_key(klass, scope), "0")
+
+
+def normalize_exact_tool_name(raw: str) -> Optional[str]:
+    """Canonical exact tool name for Always. Reject wildcards / empty.
+
+    Always must match one concrete tool (e.g. ``Write``), never ``*`` /
+    ``shell*`` / class-wide globs that would wrongly blanket a class.
+    """
+
+    text = (raw or "").strip()
+    if not text:
+        return None
+    # Reject glob / wildcard shapes (fnmatch-style or trailing stars).
+    if any(ch in text for ch in "*?[") or text.endswith("/"):
+        return None
+    # Keep original casing for display keys but compare casefold.
+    return text
+
+
+def tool_exact_allow_key(tool_name: str, scope_id: str) -> str:
+    name = normalize_exact_tool_name(tool_name) or ""
+    scope = (scope_id or "").strip()
+    return f"{TOOL_EXACT_ALLOW_PREFIX}{name.casefold()}:{scope}"
+
+
+def set_tool_exact_session_allow(
+    store: Any,
+    tool_name: str,
+    scope_id: str,
+    *,
+    ttl_seconds: int = TOOL_CLASS_ALLOW_TTL_SECONDS,
+) -> bool:
+    """Always-allow one exact tool name for this scope until TTL or HOST Off.
+
+    Returns False when the name is empty or a wildcard (fail closed).
+    """
+
+    name = normalize_exact_tool_name(tool_name)
+    scope = (scope_id or "").strip()
+    if not name or not scope:
+        return False
+    writer = getattr(store, "set_preference", None)
+    if not callable(writer):
+        return False
+    ttl = max(60, int(ttl_seconds or TOOL_CLASS_ALLOW_TTL_SECONDS))
+    expires = int(time.time()) + ttl
+    writer(HOST_PREFS_WORKSPACE, tool_exact_allow_key(name, scope), str(expires))
+    return True
+
+
+def tool_exact_session_allows(store: Any, tool_name: str, scope_id: str) -> bool:
+    """True when Always-allow for this exact tool name is still live."""
+
+    name = normalize_exact_tool_name(tool_name)
+    scope = (scope_id or "").strip()
+    if not name or not scope:
+        return False
+    raw = _host_pref(store, tool_exact_allow_key(name, scope))
+    if raw is None:
+        return False
+    try:
+        expires = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return False
+    if expires <= int(time.time()):
+        clear_tool_exact_session_allow(store, name, scope)
+        return False
+    return True
+
+
+def clear_tool_exact_session_allow(store: Any, tool_name: str, scope_id: str) -> None:
+    writer = getattr(store, "set_preference", None)
+    if not callable(writer):
+        return
+    name = normalize_exact_tool_name(tool_name)
+    scope = (scope_id or "").strip()
+    if not name or not scope:
+        return
+    writer(HOST_PREFS_WORKSPACE, tool_exact_allow_key(name, scope), "0")
 
 
 def approval_timeout_seconds(env: Optional[Mapping[str, str]] = None) -> int:
@@ -491,6 +571,14 @@ REQUIRE_OPERATORS_ENV = "DISCORD_OS_REQUIRE_OPERATORS"
 REQUIRE_ALLOWLIST_ENV = "DISCORD_OS_REQUIRE_ALLOWLIST"
 
 
+def interactions_public(env: Optional[Mapping[str, str]] = None) -> bool:
+    """True when slash Interactions endpoint is opted in (public HTTPS path)."""
+
+    source = env if env is not None else os.environ
+    raw = str(source.get("AGENT_DISCORD_INTERACTIONS") or "").strip().lower()
+    return raw in {"http", "https", "public", "on", "1", "true", "yes"}
+
+
 def require_operators(env: Optional[Mapping[str, str]] = None) -> bool:
     """True when operator allowlist must be non-empty before dispatch.
 
@@ -498,12 +586,18 @@ def require_operators(env: Optional[Mapping[str, str]] = None) -> bool:
     Set ``DISCORD_OS_REQUIRE_OPERATORS=1`` (or ``DISCORD_OS_REQUIRE_ALLOWLIST=1``)
     to refuse silent first-armed-human seed until Pair / ``discord-os pair`` /
     ``DISCORD_OWNER_ID`` has paired an owner.
+
+    When Interactions are public (``AGENT_DISCORD_INTERACTIONS=http`` / …),
+    operators are **required** even if the flag is unset — harden the exposed
+    path (phone-visible slash) so strangers cannot silently seed owner.
     """
 
     source = env if env is not None else os.environ
     if _truthy(str(source.get(REQUIRE_OPERATORS_ENV) or "")):
         return True
     if _truthy(str(source.get(REQUIRE_ALLOWLIST_ENV) or "")):
+        return True
+    if interactions_public(source):
         return True
     return False
 

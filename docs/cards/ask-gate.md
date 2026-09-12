@@ -111,10 +111,13 @@ resolver instead of resuming an implement.
   `sitecustomize.py`, which wraps `AgenticAdapter._execute_tool` and runs
   `discord-os gate-hook` before each tool. Deny / timeout → tool does not run.
   Write-gate off / session Always still auto-allow via listen drain (no card).
-- **Path A SSH gap (P1 — gates across SSH)**: remote `puppetmaster agentic`
-  over SSH does **not** share this Mac's `DISCORD_OS_GATE_*` file queue. Tool
-  asks do not hold across SSH yet; document honestly, do not pretend.
-- Per-tool (exact tool name) allowlists beyond class
+- **Path A SSH gates**: live Discord hold still does **not** share this Mac's
+  `DISCORD_OS_GATE_*` file queue (`DISCORD_OS_SSH_GATES=bridge` reserved).
+  When write-gate is on, Path A speaks **Need** and fail-closes remote
+  write/edit/shell tools (sitecustomize inject) instead of silent ungated
+  writes. Analyze/read SSH cooks unchanged.
+- ~~Per-tool (exact tool name) allowlists beyond class~~ — Always remembers
+  the exact tool (`gate_tool` / `tool_exact_allow:`); wildcards rejected
 - Multi-select AskUserQuestion confirm row
 
 ## Code

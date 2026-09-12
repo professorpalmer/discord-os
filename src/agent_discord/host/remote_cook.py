@@ -158,6 +158,14 @@ def spoken_ssh_cook_disabled(host_id: str) -> str:
     )
 
 
+def spoken_ssh_gates_need(host_id: str) -> str:
+    """Spoken Need when write-gate holds cannot cross Path A SSH."""
+
+    from agent_discord.orchestration.ssh_gate import spoken_ssh_gates_need as _need
+
+    return _need(host_id)
+
+
 def spoken_ssh_probe_deny(host_id: str, result: "SshProbeResult") -> str:
     """Spoken Deny from a failed remote readiness probe (honest Need)."""
 
@@ -572,7 +580,29 @@ class SshRemoteCookBackend:
                 summary=ProgressSummary(stage="deny", message=spoken),
             )
             return
-        wrapped = wrap_remote_command_with_pid_echo(handoff.argv)
+        from agent_discord.orchestration.ssh_gate import (
+            ssh_gates_cross,
+            wrap_remote_argv_with_ssh_gate,
+        )
+
+        meta = request.metadata or {}
+        gate_block = (not ssh_gates_cross()) and bool(
+            meta.get("ssh_write_gate") or meta.get("write_gate")
+        )
+        remote_argv = wrap_remote_argv_with_ssh_gate(
+            list(handoff.argv), enabled=bool(gate_block)
+        )
+        if gate_block:
+            yield DispatchEvent(
+                kind=EventKind.PROGRESS,
+                summary=ProgressSummary(
+                    stage="need",
+                    message=spoken_ssh_gates_need(self.host.id),
+                    percent=1.0,
+                    details={"host_id": self.host.id, "ssh_gates": "gap"},
+                ),
+            )
+        wrapped = wrap_remote_command_with_pid_echo(remote_argv)
         try:
             proc = self._spawn_ssh_cook(wrapped, stdin_data=handoff.stdin_data)
         except (OSError, subprocess.TimeoutExpired) as exc:

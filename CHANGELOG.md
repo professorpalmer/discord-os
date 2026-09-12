@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Round-4 P1 pack
+
+- **Watchdog real install**: `install_doctor_notify_watchdog` + `host doctor
+  --install-watchdog` / setup / host start write the live LaunchAgent (not
+  example-only). Docs: liveness.
+- **Never-READY Need**: panel gateway marks `note_gateway_expected`; quiet
+  forever past grace → HOST Need / doctor FAIL. Cold start still quiet.
+- **Exact-tool Always**: Always remembers the concrete tool (`tool_exact_allow:` /
+  `gate_tool`); wildcards rejected; class-wide Always no longer from exact.
+- **Plan hold without ExitPlanMode**: `is_plan_ready_signal` parks Approve on
+  PresentPlan / plan_ready / `plan_status=ready` body — not ExitPlanMode-only.
+- **REQUIRE_OPERATORS when exposed**: public Interactions auto-require
+  operators (dispatch + doctor harden).
+- **Gates across SSH**: live Discord hold still local-only; write-gate on →
+  spoken Need + remote write/edit/shell Deny inject (honest Path A). Bridge
+  reserved (`DISCORD_OS_SSH_GATES=bridge`).
+
 ## 0.5.47
 
 Remote SSH doctor probe — completes Round-4 P0 (Cancel, Path A progress, gate-hook, ARG_MAX).

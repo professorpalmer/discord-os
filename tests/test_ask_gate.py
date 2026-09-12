@@ -39,6 +39,7 @@ from agent_discord.orchestration.service import (
     set_tool_class_session_allow,
     set_write_gate,
     tool_class_session_allows,
+    tool_exact_session_allows,
 )
 from agent_discord.persistence.sqlite import SQLiteStore
 from agent_discord.puppetmaster.fake import FakePuppetmasterBackend
@@ -159,13 +160,19 @@ def test_raise_tool_gate_allow_always_deny(tmp_path: Path):
     assert parked2["status"] == "parked"
     always = orch.apply_job_action("always", second.run_id)
     assert always["gate_result"] == "always"
-    assert tool_class_session_allows(store, "git", thread_id) or tool_class_session_allows(
+    # Exact-tool Always: remember concrete tool token, not class-wide wildcard.
+    assert tool_exact_session_allows(store, "git", thread_id) or tool_exact_session_allows(
         store, "git", "ch"
     )
+    assert not (
+        tool_class_session_allows(store, "git", thread_id)
+        or tool_class_session_allows(store, "git", "ch")
+    )
     decision = tool_class_decision(
-        store, "git", channel_id="ch", thread_id=thread_id
+        store, "git", channel_id="ch", thread_id=thread_id, tool_name="git"
     )
     assert decision.decision == "allow"
+    assert "exact" in decision.reason
     store.close()
 
 
@@ -734,4 +741,92 @@ def test_live_hook_cli_fires_enqueue_then_drain_parks(tmp_path: Path):
     assert box.get("code") == 0
     assert box["payload"]["permissionDecision"] == "allow"
     assert box["payload"]["continue"] is True
+    store.close()
+
+
+def test_exact_tool_always_not_class_wildcard(tmp_path: Path):
+    """Always remembers the exact tool; wildcards do not blanket a class."""
+
+    from agent_discord.orchestration.ask_gate import tool_class_decision
+    from agent_discord.orchestration.service import (
+        normalize_exact_tool_name,
+        set_tool_exact_session_allow,
+        tool_exact_session_allows,
+    )
+    from agent_discord.persistence.sqlite import SQLiteStore
+
+    store = SQLiteStore(tmp_path / "exact.sqlite3")
+    store.initialize()
+    assert normalize_exact_tool_name("Write") == "Write"
+    assert normalize_exact_tool_name("*") is None
+    assert normalize_exact_tool_name("shell*") is None
+    assert normalize_exact_tool_name("Write?") is None
+    assert set_tool_exact_session_allow(store, "Write", "ch-1") is True
+    assert set_tool_exact_session_allow(store, "*", "ch-1") is False
+    assert tool_exact_session_allows(store, "Write", "ch-1") is True
+    assert tool_exact_session_allows(store, "write", "ch-1") is True  # casefold
+    # Same class (write) different tool must still ask.
+    assert tool_exact_session_allows(store, "Delete", "ch-1") is False
+    hit = tool_class_decision(
+        store, "write", channel_id="ch-1", tool_name="Write", write_gate_on=True
+    )
+    assert hit.decision == "allow"
+    assert "exact" in hit.reason
+    miss = tool_class_decision(
+        store, "write", channel_id="ch-1", tool_name="Delete", write_gate_on=True
+    )
+    assert miss.decision == "ask"
+    store.close()
+
+
+def test_raise_tool_gate_always_stores_exact_tool(tmp_path: Path):
+    from agent_discord.contracts import DiscordMessage, TaskIntake
+    from agent_discord.discord.facade import DiscordFacade
+    from agent_discord.discord.providers.fake import FakeDiscordMCPProvider
+    from agent_discord.orchestration.orchestrator import AgentOrchestrator
+    from agent_discord.orchestration.service import (
+        set_write_gate,
+        tool_exact_session_allows,
+    )
+    from agent_discord.persistence.sqlite import SQLiteStore
+    from agent_discord.puppetmaster.fake import FakePuppetmasterBackend
+
+    store = SQLiteStore(tmp_path / "gate.sqlite3")
+    store.initialize()
+    set_write_gate(store, True)
+    fake = FakeDiscordMCPProvider()
+    facade = DiscordFacade(fake, bot_token_fingerprint="fp", owner_id="o")
+    orch = AgentOrchestrator(
+        store=store,
+        backend=FakePuppetmasterBackend(),
+        discord=facade,
+        post_progress_to_discord=True,
+    )
+    intake = TaskIntake(
+        text="edit something",
+        channel_id="ch",
+        workspace_id="ws",
+        requester_id="o",
+    )
+    # Seed a run via fake dispatch
+    store.add_operator("o", role="owner")
+    store.set_host_control("ch", armed=True)
+    receipt = orch.run_task(intake)
+    parked = orch.raise_tool_gate(
+        receipt.run_id,
+        tool_class="write",
+        tool_name="Write",
+        detail="path.txt",
+        live=True,
+    )
+    assert parked.get("status") in {"parked", "waiting", "pending", "ok"} or parked.get(
+        "action"
+    ) == "raise_tool_gate"
+    always = orch.apply_job_action("always", receipt.run_id)
+    assert always.get("gate_result") == "always" or always.get("action") == "always"
+    assert tool_exact_session_allows(store, "Write", "ch") is True
+    # Class-wide write must NOT be auto-allowed from exact Always.
+    from agent_discord.orchestration.service import tool_class_session_allows
+
+    assert tool_class_session_allows(store, "write", "ch") is False
     store.close()

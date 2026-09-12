@@ -38,6 +38,7 @@ from agent_discord.orchestration.plan_approve import (
     GATE_KIND_PLAN,
     is_exit_plan_tool,
     plan_text_from_tool_input,
+    is_plan_ready_signal,
 )
 from agent_discord.redaction import redact_text_markers
 
@@ -408,7 +409,7 @@ def build_request(
     request_id: str = "",
     created_at_ms: Optional[int] = None,
 ) -> GateRequest:
-    if is_exit_plan_tool(tool_name):
+    if is_plan_ready_signal(tool_name, tool_input) or is_exit_plan_tool(tool_name):
         plan_body = plan_text_from_tool_input(tool_input) or detail_from_input(tool_input)
         ts = int(created_at_ms if created_at_ms is not None else time.time() * 1000)
         return GateRequest(
@@ -571,9 +572,10 @@ def hold_tool_decision(
 
     decision = tool_class_decision(
         store,
-        req.tool_name or req.tool_class,
+        req.tool_class or req.tool_name,
         channel_id=channel_id,
         thread_id=thread_id,
+        tool_name=req.tool_name,
     )
     if decision.decision == "deny":
         return deny_result(req.request_id, decision.reason or "denied", decision.tool_class)
@@ -615,6 +617,7 @@ def hold_tool_decision(
                     detail=req.detail,
                     live=True,
                     request_id=req.request_id,
+                    tool_name=req.tool_name,
                 )
         if isinstance(parked, dict) and parked.get("status") == "denied":
             denied = deny_result(
@@ -847,7 +850,7 @@ def drain_gate_queue(
                 continue
             # File-queue hook always enqueues; honor write-gate off / session
             # Always here so the blocked worker unblocks without a Discord card.
-            if req.kind not in {GATE_KIND_ASK, GATE_KIND_PLAN} and not is_exit_plan_tool(
+            if req.kind not in {GATE_KIND_ASK, GATE_KIND_PLAN} and not is_plan_ready_signal(
                 req.tool_name
             ):
                 channel_id = ""
@@ -879,6 +882,7 @@ def drain_gate_queue(
                         req.tool_class or req.tool_name,
                         channel_id=channel_id,
                         thread_id=thread_id,
+                        tool_name=req.tool_name,
                     )
                 except Exception:
                     decided = None
@@ -918,7 +922,7 @@ def drain_gate_queue(
                         live=True,
                         request_id=req.request_id,
                     )
-                elif req.kind == GATE_KIND_PLAN or is_exit_plan_tool(req.tool_name):
+                elif req.kind == GATE_KIND_PLAN or is_plan_ready_signal(req.tool_name) or is_exit_plan_tool(req.tool_name):
                     orchestrator.raise_plan_approve(
                         req.run_id,
                         plan_text=req.detail,
@@ -942,6 +946,7 @@ def drain_gate_queue(
                         detail=req.detail,
                         live=True,
                         request_id=req.request_id,
+                        tool_name=req.tool_name,
                     )
                 acted.append(
                     {
@@ -1008,7 +1013,7 @@ def run_hook(
         req = build_request(run_id=run_id, tool_name=tool_name, tool_input=tool_input)
         if not req.run_id or not tool_name:
             result = deny_result(req.request_id or "unknown", "missing run_id or tool")
-        elif req.kind == GATE_KIND_PLAN or is_exit_plan_tool(tool_name):
+        elif req.kind == GATE_KIND_PLAN or is_plan_ready_signal(tool_name, tool_input) or is_exit_plan_tool(tool_name):
             if not (req.detail or "").strip():
                 result = deny_result(req.request_id, "unknown plan", "plan")
             else:

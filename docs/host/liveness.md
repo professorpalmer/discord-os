@@ -57,25 +57,32 @@ Example crontab (every 2 minutes):
 */2 * * * * discord-os host doctor --notify >>/tmp/discord-os-doctor-notify.log 2>&1
 ```
 
-Example LaunchAgent (StartInterval, **not** KeepAlive — intentional Off stays
-quiet once `host.pid` is cleared). `setup` writes
-`com.discord-os.doctor-notify.plist.example` into the workspace; or:
+Real install (not example-only): `setup`, `host start`, and
+`discord-os host doctor --install-watchdog` call
+`install_doctor_notify_watchdog` — writes
+`~/Library/LaunchAgents/com.discord-os.doctor-notify.plist` and best-effort
+`launchctl bootstrap` (StartInterval, **not** KeepAlive — intentional Off
+stays quiet once `host.pid` is cleared). Also keeps a workspace
+`.plist.example` for operators who prefer cron:
 
 ```bash
-# After editing paths, bootstrap:
-# cp …/com.discord-os.doctor-notify.plist.example ~/Library/LaunchAgents/com.discord-os.doctor-notify.plist
-# launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.discord-os.doctor-notify.plist
+discord-os host doctor --install-watchdog
+# or cron:
+# */2 * * * * discord-os host doctor --notify >>/tmp/discord-os-doctor-notify.log 2>&1
 ```
 
-Helpers: `render_doctor_notify_plist` / `write_doctor_notify_example` /
-`doctor_notify_cron_example` in `src/agent_discord/host/install.py`.
+Helpers: `install_doctor_notify_watchdog` / `render_doctor_notify_plist` /
+`write_doctor_notify_example` / `doctor_notify_cron_example` in
+`src/agent_discord/host/install.py`.
 
 ## Gateway WS ACK liveness
 
 On/Off buttons need the Discord Gateway heartbeat ACK path. REST-up ≠
 receiving. Discord OS tracks READY + last op-11 ACK age (Hermes-shaped).
 Unhealthy ACK age / closed socket ranks as HOST **Need** (`gateway BAD`) and
-doctor **FAIL**. Cold start / never-READY stays quiet (low false-positive).
+doctor **FAIL**. Cold start / intentional REST-only stays quiet (low FP).
+Once the panel gateway is **expected** (`note_gateway_expected` on listen
+start), never-READY past grace → spoken Need (quiet forever is a fault).
 
 Code: `src/agent_discord/discord/gateway_health.py` + listen digest / doctor.
 

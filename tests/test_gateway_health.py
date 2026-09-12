@@ -8,6 +8,7 @@ from agent_discord.discord.gateway_health import (
     gateway_need_fragment,
     load_gateway_health,
     note_closed,
+    note_gateway_expected,
     note_heartbeat_ack,
     note_ready,
     persist_gateway_health,
@@ -75,3 +76,25 @@ def test_persist_and_need_line(tmp_path: Path) -> None:
     line = host_need_line(digest)
     assert line is not None
     assert "gateway BAD" in line
+
+
+def test_never_ready_after_expected_is_need() -> None:
+    """Gateway quiet forever after panel start → spoken Need (not cold-start quiet)."""
+
+    note_gateway_expected(now=1000.0)
+    still_grace = snapshot_gateway_health(now=1050.0, never_ready_grace_s=90.0)
+    assert still_grace.ready is False
+    assert still_grace.ok is True
+    late = snapshot_gateway_health(now=1000.0 + 120.0, never_ready_grace_s=90.0)
+    assert late.ready is False
+    assert late.ok is False
+    assert "never READY" in late.reason
+    frag = gateway_need_fragment(late)
+    assert frag is not None
+    assert "gateway" in frag
+
+
+def test_cold_start_without_expected_stays_quiet() -> None:
+    health = snapshot_gateway_health(now=10_000.0, never_ready_grace_s=1.0)
+    assert health.ok is True
+    assert gateway_need_fragment(health) is None

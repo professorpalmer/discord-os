@@ -50,7 +50,7 @@ Peer to gjc-remote `REQUIRE_ALLOWLIST`. Soft first-message-as-owner is convenien
 | Rule | Behavior |
 |---|---|
 | Default (unset / `0`) | Current UX. First armed human / On / first dispatch may seed owner. |
-| `DISCORD_OS_REQUIRE_OPERATORS=1` | **Fail closed** — no silent seed. Dispatch refuses until an operator exists. |
+| `DISCORD_OS_REQUIRE_OPERATORS=1` | **Fail closed** — no silent seed. Dispatch refuses until an operator exists. Auto-on when `AGENT_DISCORD_INTERACTIONS` is public. |
 | Public interactions (`AGENT_DISCORD_INTERACTIONS=http`) | Doctor **FAIL**s if operators empty even when require is unset — pair first. Desk/single-user Mac (interactions off) stays workable: doctor **WARN**s and recommends the flag. |
 | Alias | `DISCORD_OS_REQUIRE_ALLOWLIST=1` same effect. |
 | Intentional bootstrap | HOST **Pair**, `discord-os pair --user-id ID`, or `DISCORD_OWNER_ID` / `DISCORD_OPERATOR_ROLE_IDS` at process start. |

@@ -5,10 +5,12 @@ Approve** is safer phone cowork in the c-lord ExitPlanMode shape: the worker
 finishes a plan, Discord parks with **Approve / Cancel**, and the phone
 greenlights implement. No **Always** on this card — that stays write-gate only.
 
-Live path (not docs-only): agentic PreToolUse / `ExitPlanMode` (file-queue hook)
-or in-process `request_plan_hold` parks via `raise_plan_approve` and **blocks
-implement** until Allow / Deny / approval timeout. Fail closed when plan text or
-status is unknown.
+Live path (not docs-only): agentic PreToolUse / `ExitPlanMode` **or**
+`PresentPlan` / `plan_ready` / tool input with `plan_status=ready` + plan body
+(file-queue hook), or in-process `request_plan_hold`, parks via
+`raise_plan_approve` and **blocks implement** until Allow / Deny / approval
+timeout. Plan Approve does **not** rely solely on ExitPlanMode. Fail closed
+when plan text or status is unknown.
 
 ## What shipped
 

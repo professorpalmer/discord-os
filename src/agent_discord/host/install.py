@@ -152,26 +152,7 @@ def install_login_host(
 
 
 def _best_effort_launchctl(plist: Path) -> None:
-    uid = os.getuid()
-    target = f"gui/{uid}/{SERVICE_LABEL}"
-    try:
-        subprocess.run(
-            ["launchctl", "bootout", target],
-            check=False,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["launchctl", "bootstrap", f"gui/{uid}", str(plist)],
-            check=False,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["launchctl", "kickstart", "-k", target],
-            check=False,
-            capture_output=True,
-        )
-    except OSError:
-        return
+    _best_effort_launchctl_label(plist, SERVICE_LABEL)
 
 
 def _best_effort_systemctl() -> None:
@@ -303,3 +284,75 @@ def write_doctor_notify_example(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body, encoding="utf-8")
     return path
+
+
+def install_doctor_notify_watchdog(
+    *,
+    workspace: Path,
+    cwd: Optional[Path] = None,
+    python_exe: str = "",
+    start_interval_s: int = 120,
+) -> dict[str, str]:
+    """Install listen-dead doctor --notify for real (LaunchAgent / cron hint).
+
+    Unlike ``write_doctor_notify_example``, this writes the live LaunchAgents
+    plist and best-effort bootstraps launchctl so phone notify works when
+    listen/host KeepAlive is already dead. StartInterval (not KeepAlive).
+    """
+
+    workspace = Path(workspace)
+    here = Path(cwd) if cwd is not None else Path.cwd()
+    exe = python_exe or sys.executable
+    argv = [exe, "-m", "agent_discord", "host", "doctor", "--notify"]
+    log = workspace / "doctor-notify.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    # Also keep an example copy in the workspace for operators who prefer cron.
+    write_doctor_notify_example(workspace=workspace, python_exe=exe)
+    if sys.platform == "darwin":
+        path = doctor_notify_plist_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            render_doctor_notify_plist(
+                argv=argv,
+                workspace=workspace,
+                cwd=here,
+                log=log,
+                start_interval_s=start_interval_s,
+            ),
+            encoding="utf-8",
+        )
+        _best_effort_launchctl_label(path, DOCTOR_NOTIFY_LABEL)
+        return {"kind": "launchd", "path": str(path), "label": DOCTOR_NOTIFY_LABEL}
+    # Non-Darwin: write example + return cron line (no fake systemd KeepAlive).
+    example = write_doctor_notify_example(workspace=workspace, python_exe=exe)
+    return {
+        "kind": "cron",
+        "path": str(example),
+        "cron": doctor_notify_cron_example(python=exe),
+    }
+
+
+def _best_effort_launchctl_label(plist: Path, label: str) -> None:
+    """Bootstrap/kickstart one LaunchAgent label. Best-effort (no-op in CI)."""
+
+    uid = os.getuid()
+    target = f"gui/{uid}/{label}"
+    try:
+        subprocess.run(
+            ["launchctl", "bootout", target],
+            check=False,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["launchctl", "bootstrap", f"gui/{uid}", str(plist)],
+            check=False,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["launchctl", "kickstart", "-k", target],
+            check=False,
+            capture_output=True,
+        )
+    except OSError:
+        return
+

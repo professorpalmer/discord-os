@@ -98,7 +98,7 @@ EXPIRED_TOOL_SPOKEN = "Expired. Tool was not allowed."
 DENIED_ASK_SPOKEN = "Denied. Question was not answered."
 EXPIRED_ASK_SPOKEN = "Expired. Question was not answered."
 ALLOWED_TOOL_SPOKEN = "Allowed."
-ALWAYS_TOOL_SPOKEN = "Always allowed for this class this session."
+ALWAYS_TOOL_SPOKEN = "Always allowed for this tool this session."
 
 _SPOKEN_ALLOW = frozenset({"allow", "allowed", "approve", "yes", "y", "ok", "okay"})
 _SPOKEN_DENY = frozenset({"deny", "denied", "no", "n", "reject", "block", "cancel", "cancelled", "canceled"})
@@ -164,18 +164,35 @@ def tool_class_decision(
     channel_id: str = "",
     thread_id: str = "",
     write_gate_on: Optional[bool] = None,
+    tool_name: str = "",
 ) -> ToolClassDecision:
-    """Decide allow / ask / deny for a tool class.
+    """Decide allow / ask / deny for a tool class / exact tool.
 
     Fail closed: unknown class → deny. When the coarse write-gate is off,
     known classes allow (surgical gate is opt-in on top of write-gate).
-    Session Always for that class skips the card.
+    Session Always matches the **exact tool name** (not broad wildcards /
+    class globs). Legacy class-scoped Always still honored when no exact
+    tool was recorded.
     """
 
     from agent_discord.orchestration.service import (
         tool_class_session_allows,
+        tool_exact_session_allows,
         writes_need_approval,
     )
+
+    exact = (tool_name or "").strip() or (tool_class or "").strip()
+    # Exact Always wins — and never treats wildcards as a match.
+    if exact and (
+        tool_exact_session_allows(store, exact, thread_id)
+        or tool_exact_session_allows(store, exact, channel_id)
+    ):
+        canonical_hit = normalize_tool_class(tool_class) or normalize_tool_class(exact)
+        return ToolClassDecision(
+            decision="allow",
+            tool_class=canonical_hit or (exact or "").strip(),
+            reason="session always allow exact tool",
+        )
 
     canonical = normalize_tool_class(tool_class)
     if canonical is None:
@@ -352,6 +369,7 @@ def gate_meta_payload(
     *,
     kind: str,
     tool_class: str = "",
+    tool_name: str = "",
     detail: str = "",
     question: str = "",
     options: Sequence[AskOption | Mapping[str, Any] | str] = (),
@@ -362,11 +380,13 @@ def gate_meta_payload(
     """Task metadata patch for a parked tool / ask gate."""
 
     parsed = _coerce_options(options)
+    exact = (tool_name or "").strip()
     return {
         "awaiting_approval": True,
         "awaiting_gate": True,
         "gate_kind": kind,
         "gate_class": normalize_tool_class(tool_class) or (tool_class or "").strip(),
+        "gate_tool": exact,
         "gate_detail": redact_text_markers(detail or "")[:500],
         "gate_question": redact_text_markers(question or "")[:500],
         "gate_options": [

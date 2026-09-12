@@ -120,8 +120,9 @@ def run_doctor(
 def _interactions_public() -> bool:
     """True when slash Interactions endpoint is opted in (public HTTPS path)."""
 
-    raw = str(os.environ.get("AGENT_DISCORD_INTERACTIONS") or "").strip().lower()
-    return raw in {"http", "https", "public", "on", "1", "true", "yes"}
+    from agent_discord.orchestration.service import interactions_public
+
+    return interactions_public()
 
 
 def _check_operators(db: Optional[Path], lines: list[str]) -> int:
@@ -173,6 +174,22 @@ def _check_operators(db: Optional[Path], lines: list[str]) -> int:
 
     # Empty operators
     if required:
+        if public and not _truthy_env(REQUIRE_OPERATORS_ENV) and not _truthy_env(
+            REQUIRE_ALLOWLIST_ENV
+        ):
+            # Auto-required because interactions are exposed.
+            if db is None or not db.is_file():
+                lines.append(
+                    "FAIL operators empty while AGENT_DISCORD_INTERACTIONS is "
+                    "public (no sqlite)"
+                )
+            else:
+                lines.append(
+                    "FAIL operators empty while AGENT_DISCORD_INTERACTIONS is "
+                    f"public — pair via Pair / discord-os pair / DISCORD_OWNER_ID "
+                    f"before slash dispatch (or set {REQUIRE_OPERATORS_ENV}=1)"
+                )
+            return 1
         if db is None or not db.is_file():
             lines.append(f"FAIL operators empty while {flag}=1 (no sqlite)")
         else:
@@ -251,6 +268,14 @@ def _check_host_allowlist(lines: list[str]) -> int:
                     lines.append(
                         f"OK host ssh {host.id}: cook-capable ({result.summary})"
                     )
+                    from agent_discord.orchestration.ssh_gate import ssh_gates_cross
+
+                    if not ssh_gates_cross():
+                        lines.append(
+                            f"WARN host ssh {host.id}: gates do not cross SSH yet "
+                            "(write-gate holds local-only; remote writes Deny when "
+                            "write-gate on)"
+                        )
                 else:
                     # Honest Need/WARN before cook-time Deny — never print secrets.
                     reason = result.reason or SSH_COOK_UNREACHABLE

@@ -9,7 +9,8 @@ the WS heartbeat ACK path. This module tracks:
 
 HOST Need + doctor + optional channel post when unhealthy. Fail closed with
 low false-positives: cold start / intentional REST-only stays quiet until
-the panel gateway has been READY at least once this process.
+the panel gateway is *expected* (``note_gateway_expected``). Once expected,
+never-READY past grace → spoken Need (quiet forever is a real fault).
 """
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ STATE_NAME = "gateway_health.json"
 DEFAULT_ACK_STALE_S = 120.0
 # After READY, require first ACK within this window (low FP).
 DEFAULT_READY_GRACE_S = 90.0
+# Panel gateway started but never READY → Need after this grace (low FP).
+DEFAULT_NEVER_READY_GRACE_S = 90.0
 
 _lock = threading.Lock()
 _state: dict[str, Any] = {
@@ -37,6 +40,8 @@ _state: dict[str, Any] = {
     "ready_at": 0.0,
     "closed_at": 0.0,
     "close_reason": "",
+    "expected": False,
+    "expected_at": 0.0,
 }
 
 
@@ -71,6 +76,21 @@ def note_connected() -> None:
         _state["connected"] = True
         _state["closed_at"] = 0.0
         _state["close_reason"] = ""
+
+
+def note_gateway_expected(*, now: Optional[float] = None) -> None:
+    """Mark that this process intends a panel Gateway (not REST-only).
+
+    Cold start without this stays quiet (low FP). After expected, never-READY
+    past grace → Need on phone/status.
+    """
+
+    ts = float(now if now is not None else time.time())
+    with _lock:
+        if not _state["expected"]:
+            _state["expected"] = True
+            _state["expected_at"] = ts
+        _state["connected"] = True
 
 
 def note_ready(*, now: Optional[float] = None) -> None:
@@ -127,6 +147,8 @@ def reset_gateway_health_for_tests() -> None:
                 "ready_at": 0.0,
                 "closed_at": 0.0,
                 "close_reason": "",
+                "expected": False,
+                "expected_at": 0.0,
             }
         )
 
@@ -136,10 +158,12 @@ def snapshot_gateway_health(
     now: Optional[float] = None,
     ack_stale_s: float = DEFAULT_ACK_STALE_S,
     ready_grace_s: float = DEFAULT_READY_GRACE_S,
+    never_ready_grace_s: float = DEFAULT_NEVER_READY_GRACE_S,
 ) -> GatewayHealth:
     """Compute health from in-process state.
 
-    Never READY this process → ok=True (REST-only / pre-gateway; low FP).
+    REST-only / never expected → ok=True (low FP).
+    Expected but never READY past grace → Need (quiet forever is a fault).
     After READY: missing ACK past stale window or socket closed → not ok.
     """
 
@@ -151,6 +175,8 @@ def snapshot_gateway_health(
         ready_at = float(_state["ready_at"] or 0.0)
         interval_ms = int(_state["heartbeat_interval_ms"] or 41250)
         close_reason = str(_state["close_reason"] or "")
+        expected = bool(_state["expected"])
+        expected_at = float(_state["expected_at"] or 0.0)
 
     # Scale stale threshold with heartbeat interval (Hermes-shaped).
     scaled = max(float(ack_stale_s), (interval_ms / 1000.0) * 2.5)
@@ -159,6 +185,15 @@ def snapshot_gateway_health(
         ack_age = max(0.0, ts - last_ack)
 
     if not ready:
+        if expected and expected_at and (ts - expected_at) >= float(never_ready_grace_s):
+            return GatewayHealth(
+                ready=False,
+                connected=connected,
+                ack_age_s=ack_age,
+                ok=False,
+                reason="gateway never READY",
+                checked_at=ts,
+            )
         return GatewayHealth(
             ready=False,
             connected=connected,
@@ -219,6 +254,8 @@ def persist_gateway_health(workspace: Path, health: Optional[GatewayHealth] = No
         payload["heartbeat_interval_ms"] = int(_state["heartbeat_interval_ms"] or 0)
         payload["last_ack_at"] = float(_state["last_ack_at"] or 0.0)
         payload["ready_at"] = float(_state["ready_at"] or 0.0)
+        payload["expected"] = bool(_state["expected"])
+        payload["expected_at"] = float(_state["expected_at"] or 0.0)
     gateway_health_path(ws).write_text(
         json.dumps(payload, indent=2) + "\n", encoding="utf-8"
     )

@@ -420,3 +420,14 @@ def test_store_usable_from_another_thread(tmp_path: Path):
     assert errors == []
     assert store.is_operator("u-thread")
     store.close()
+
+
+def test_require_operators_when_interactions_public(monkeypatch):
+    """Public interactions auto-require operators (harden exposed path)."""
+
+    monkeypatch.delenv("DISCORD_OS_REQUIRE_OPERATORS", raising=False)
+    monkeypatch.delenv("DISCORD_OS_REQUIRE_ALLOWLIST", raising=False)
+    monkeypatch.setenv("AGENT_DISCORD_INTERACTIONS", "http")
+    assert require_operators() is True
+    monkeypatch.setenv("AGENT_DISCORD_INTERACTIONS", "off")
+    assert require_operators() is False

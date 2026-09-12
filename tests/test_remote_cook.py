@@ -282,3 +282,66 @@ def test_ssh_stream_progress_pipe_before_receipt() -> None:
     assert "remote live done" in receipt.summary.message
     assert backend.status("r1") == TaskStatus.COMPLETED
     assert backend._remote_pids.get("r1") in {None, 4242}  # cleared after unregister
+
+
+def test_ssh_gates_need_and_wrap(monkeypatch):
+    from agent_discord.host.remote_cook import spoken_ssh_gates_need
+    from agent_discord.orchestration.ssh_gate import (
+        remote_gate_inject_script,
+        ssh_gates_cross,
+        spoken_ssh_gates_need as need,
+        wrap_remote_argv_with_ssh_gate,
+    )
+
+    assert "gates do not cross SSH" in need("box-1")
+    assert "gates do not cross SSH" in spoken_ssh_gates_need("box-1")
+    assert ssh_gates_cross() is False
+    monkeypatch.delenv("DISCORD_OS_SSH_GATES", raising=False)
+    plain = ["puppetmaster", "agentic", "hi"]
+    assert wrap_remote_argv_with_ssh_gate(plain, enabled=False) == plain
+    wrapped = wrap_remote_argv_with_ssh_gate(plain, enabled=True)
+    assert wrapped[0] == "bash"
+    assert "DISCORD_OS_SSH_WRITE_GATE=1" in wrapped[-1]
+    assert "AgenticAdapter" in remote_gate_inject_script()
+    assert "_execute_tool" in remote_gate_inject_script()
+
+
+def test_ssh_stream_emits_gates_need(monkeypatch):
+    """Write-gate on + SSH → PROGRESS Need before cook (honest gap)."""
+
+    from agent_discord.contracts import EventKind
+    from agent_discord.host.remote_cook import SshRemoteCookBackend
+    from agent_discord.host.runners import RemoteHost
+
+    host = RemoteHost(id="lab", kind="ssh", target="lab.example", label="lab")
+    backend = SshRemoteCookBackend(host=host, probe_first=False)
+
+    class _Child:
+        stdout = None
+        stderr = None
+        returncode = 0
+
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+        def communicate(self, timeout=None):
+            return ('{"type":"result","result":"ok"}\n', "")
+
+    backend.popen_fn = lambda argv, stdin_data=None: _Child()
+    monkeypatch.setattr(
+        backend,
+        "_preflight_deny",
+        lambda: None,
+    )
+    req = _req(ssh_write_gate=True, compute_mode="analyze")
+    events = list(backend.stream(req))
+    need_msgs = [
+        e.summary.message
+        for e in events
+        if getattr(e, "kind", None) == EventKind.PROGRESS
+        and "gates" in (e.summary.message or "")
+    ]
+    assert need_msgs, f"expected Need progress, got {[getattr(e.summary,'message',e) for e in events]}"

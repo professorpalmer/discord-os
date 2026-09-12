@@ -316,3 +316,33 @@ def test_gate_hook_exit_plan_enqueues_plan_kind(tmp_path: Path, monkeypatch):
     assert payload.get("permissionDecision") in {"allow", "deny"} or payload.get(
         "decision"
     ) in {"allow", "deny"}
+
+
+def test_plan_ready_without_exit_plan_mode():
+    """Plan Approve parks on plan_status / PresentPlan — not ExitPlanMode-only."""
+
+    from agent_discord.orchestration.gate_hook import build_request
+    from agent_discord.orchestration.plan_approve import (
+        GATE_KIND_PLAN,
+        is_exit_plan_tool,
+        is_plan_ready_signal,
+    )
+
+    assert is_exit_plan_tool("PresentPlan")
+    assert is_plan_ready_signal("PresentPlan", {"plan": "1. a\n2. b"})
+    assert is_plan_ready_signal(
+        "SomeOtherTool",
+        {"plan": "1. a\n2. b", "plan_status": "ready"},
+    )
+    assert not is_plan_ready_signal("Write", {"path": "x"})
+    assert not is_plan_ready_signal(
+        "Write",
+        {"plan": "1. a", "plan_status": "totally-novel"},
+    )
+    req = build_request(
+        run_id="r1",
+        tool_name="helper",
+        tool_input={"plan": "1. edit cards\n2. flush", "plan_status": "ready"},
+    )
+    assert req.kind == GATE_KIND_PLAN
+    assert "edit cards" in req.detail

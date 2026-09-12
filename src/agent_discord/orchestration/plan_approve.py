@@ -4,9 +4,11 @@ Implement Gate (write-gate) is binary Allow / Always / Deny for writes.
 Plan → Approve is safer phone cowork: park when a plan is ready, greenlight
 implement with **Approve / Cancel** (no Always).
 
-Live path: agentic PreToolUse / ExitPlanMode (or in-process
-``request_plan_hold``) calls ``plan_ready_decision`` then parks via
-``raise_plan_approve`` and **blocks implement** until Allow / Deny / timeout.
+Live path: agentic PreToolUse / ExitPlanMode **or** plan_status-ready
+signals / PresentPlan (or in-process ``request_plan_hold``) calls
+``plan_ready_decision`` then parks via ``raise_plan_approve`` and **blocks
+implement** until Allow / Deny / timeout. Plan Approve does not rely solely
+on ExitPlanMode.
 Reuse approval timeout; never Always on this card. Fail closed when plan
 text or status is unknown. Docs: ``docs/cards/plan-approve.md``.
 """
@@ -27,6 +29,7 @@ from agent_discord.redaction import redact_text_markers
 GATE_KIND_PLAN = "plan_approve"
 
 # PreToolUse / agentic tool names that mean "plan ready — park Approve".
+# Not limited to ExitPlanMode — PresentPlan / plan_ready / SubmitPlan also park.
 _EXIT_PLAN_ALIASES = frozenset(
     {
         "exitplanmode",
@@ -37,12 +40,20 @@ _EXIT_PLAN_ALIASES = frozenset(
         "plan_approve",
         "planapprove",
         "raise_plan_approve",
+        "presentplan",
+        "present_plan",
+        "submitplan",
+        "submit_plan",
+        "plan_ready",
+        "planready",
+        "ready_plan",
+        "readyplan",
     }
 )
 
 
 def is_exit_plan_tool(tool_name: str) -> bool:
-    """True when the tool is ExitPlanMode / plan-ready (not a write tool)."""
+    """True when the tool name itself is a plan-ready / ExitPlanMode alias."""
 
     text = (tool_name or "").strip()
     if not text:
@@ -54,10 +65,53 @@ def is_exit_plan_tool(tool_name: str) -> bool:
         tail = compact.rsplit("__", 1)[-1]
         if tail in _EXIT_PLAN_ALIASES:
             return True
-    # CamelCase ExitPlanMode
-    if text.replace("_", "").replace("-", "").lower() == "exitplanmode":
+    folded = text.replace("_", "").replace("-", "").lower()
+    if folded in {
+        "exitplanmode",
+        "presentplan",
+        "submitplan",
+        "planready",
+        "readyplan",
+    }:
         return True
     return False
+
+
+def plan_status_from_tool_input(tool_input: Any) -> str:
+    """Pull plan_status / status from tool input when adapters signal plan-ready."""
+
+    if not isinstance(tool_input, Mapping):
+        return ""
+    for key in ("plan_status", "planStatus", "status", "state"):
+        value = tool_input.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def is_plan_ready_signal(tool_name: str = "", tool_input: Any = None) -> bool:
+    """True when plan Approve should park — ExitPlanMode *or* plan_status body.
+
+    Plan hold must not rely solely on ExitPlanMode. Adapters may pass
+    ``plan_status=ready`` (with plan text) on any tool, or use PresentPlan /
+    plan_ready names. Empty / unknown status still fail closed via
+    ``plan_ready_decision``.
+    """
+
+    if is_exit_plan_tool(tool_name):
+        return True
+    status = plan_status_from_tool_input(tool_input)
+    if not status:
+        return False
+    normalized = normalize_plan_status(status)
+    if normalized is None:
+        return False
+    # Empty status token is only "ready" when body present — defer to decision.
+    body = plan_text_from_tool_input(tool_input)
+    if not body.strip():
+        return False
+    # Known ready-ish statuses (including "" which normalize keeps).
+    return True
 
 
 def plan_text_from_tool_input(tool_input: Any) -> str:

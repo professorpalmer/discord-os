@@ -682,6 +682,17 @@ class AgentOrchestrator:
             extra_meta["host_kind"] = remote_host.kind
             if remote_host.workdir:
                 extra_meta["host_workdir"] = remote_host.workdir
+            # Path A: stamp write-gate so SSH cook can speak Need + fail-close
+            # remote writes when Discord gate holds cannot cross SSH yet.
+            if (remote_host.kind or "").strip().lower() == "ssh":
+                try:
+                    from agent_discord.orchestration.service import writes_need_approval
+                    from agent_discord.orchestration.ssh_gate import ssh_gates_cross
+
+                    if writes_need_approval(self.store) and not ssh_gates_cross():
+                        extra_meta["ssh_write_gate"] = True
+                except Exception:
+                    pass
             # Local path-root hosts may supply the run cwd. ssh uses remote
             # workdir via Path A (SshRemoteCookBackend) — never local cook.
             if remote_host.kind == "local" and remote_host.target:
@@ -1603,12 +1614,14 @@ class AgentOrchestrator:
         message: str = "",
         live: bool = False,
         request_id: str = "",
+        tool_name: str = "",
     ) -> dict[str, Any]:
-        """Park mid-run for a tool-class Allow / Always / Deny card.
+        """Park mid-run for a tool Allow / Always / Deny card.
 
         Adapters call this when ``tool_class_decision`` returns ``ask``.
         Unknown classes should be denied by the adapter before calling.
         ``live=True`` keeps the worker blocked until ``gate_result_for``.
+        Always remembers the **exact** tool name when provided.
         """
 
         import time
@@ -1639,9 +1652,11 @@ class AgentOrchestrator:
         if not isinstance(meta, dict):
             meta = {}
         parked_ms = int(time.time() * 1000)
+        exact = (tool_name or "").strip() or (tool_class or "").strip()
         patch = gate_meta_payload(
             kind=GATE_KIND_TOOL,
             tool_class=klass,
+            tool_name=exact,
             detail=detail,
             parked_at_ms=parked_ms,
             live=live,
@@ -2067,7 +2082,10 @@ class AgentOrchestrator:
             DENIED_TOOL_SPOKEN,
             GATE_KIND_ASK,
         )
-        from agent_discord.orchestration.service import set_tool_class_session_allow
+        from agent_discord.orchestration.service import (
+            set_tool_class_session_allow,
+            set_tool_exact_session_allow,
+        )
 
         run = self.store.get_run(run_id) or {}
         task_id = str(run.get("task_id") or "")
@@ -2077,21 +2095,29 @@ class AgentOrchestrator:
             return {"action": verb, "run_id": run_id, "status": "missing"}
         kind = str(meta.get("gate_kind") or "")
         klass = str(meta.get("gate_class") or "").strip()
+        exact = str(meta.get("gate_tool") or "").strip() or klass
         task = self.store.get_task(task_id) or {}
         scope = (
             str(task.get("thread_id") or meta.get("thread_id") or "").strip()
             or str(task.get("channel_id") or meta.get("channel_id") or "").strip()
         )
         if verb == "always":
-            if klass and scope:
+            # Exact-tool Always: remember the concrete tool, never a wildcard.
+            remembered = False
+            if exact and scope:
+                remembered = set_tool_exact_session_allow(self.store, exact, scope)
+            # Fail closed on wildcards — do not fall back to class-wide Always.
+            if not remembered and klass and scope and exact == klass:
+                # Only when the parked tool *is* the class token itself.
                 set_tool_class_session_allow(self.store, klass, scope)
+                remembered = True
             return self._finish_gate(
                 run_id,
                 result="always",
                 answer="",
                 spoken=spoken or ALWAYS_TOOL_SPOKEN,
                 action="always",
-                session_allow=scope,
+                session_allow=scope if remembered else "",
             )
         if verb == "approve":
             return self._finish_gate(
