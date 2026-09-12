@@ -10,7 +10,11 @@ Cap is 8 live jobs. The listen loop does not block at that cap.
 
 ## Listen path
 
-`drain_inbound` claims the inbound message, submits, then advances the watermark. An inbound message in a live job thread calls `orchestrator.steer` (flush into the running worker) instead of submitting a sibling. The host loop REST-polls live thread ids and recent idle session threads (from SQLite) too. Idle-thread follow-ups start a new job in that thread, parented at the prior tip. Each session thread keeps its own listen watermark so parent-channel tips (HOST panel paints) cannot hide older unread thread messages. `--once` waits the pool. The host loop reaps finished receipts without blocking the next channel.
+`drain_inbound` claims the inbound message, submits, then advances the watermark. An inbound message in a live job thread calls `orchestrator.steer` (flush into the running worker) instead of submitting a sibling. If steer cannot take it, the text is stored in SQLite `inbound_queue` and applied later (retry steer while live, else a tip-parented follow-up in the same thread). Parent-channel asks are not stolen onto a random live cook. Default on; `DISCORD_OS_INBOUND_QUEUE=0` restores steer-or-spoken-miss. The live v2 card shows **Cancel** for a phone interrupt.
+
+The host loop REST-polls live thread ids and recent idle session threads (from SQLite) too. Idle-thread follow-ups start a new job in that thread, parented at the prior tip. Each session thread keeps its own listen watermark so parent-channel tips (HOST panel paints) cannot hide older unread thread messages. `--once` waits the pool. The host loop reaps finished receipts without blocking the next channel.
+
+Parked write-gate Allow auto-denies after `DISCORD_OS_APPROVAL_TIMEOUT_MINUTES` (default 20).
 
 Each run writes a SQLite lineage DAG (`node_key = sha256(step, input, parents)`). Done cites artifact sha256. Retry starts a new run parented at the previous tip. Query: `discord-os lineage [RUN_ID|DOS-10001]`.
 

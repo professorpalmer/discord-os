@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import time
+from datetime import datetime, timezone
 from typing import Any, Mapping, Optional, Sequence
 
 from agent_discord.contracts import UsageReceipt
@@ -16,6 +17,10 @@ WRITE_GATE_KEY = "write_gate"
 WRITE_SESSION_ALLOW_PREFIX = "write_session_allow:"
 # Always-allow lasts this many seconds, or until HOST Off clears it.
 WRITE_SESSION_ALLOW_TTL_SECONDS = 4 * 3600
+DEFAULT_APPROVAL_TIMEOUT_MINUTES = 20
+MAX_APPROVAL_TIMEOUT_SECONDS = 24 * 3600
+DENIED_WRITE_SPOKEN = "Denied. Write was not started."
+EXPIRED_WRITE_SPOKEN = "Expired. Write was not started."
 DEFAULT_SPEND_CAP_USD = 10.0
 _INPUT_USD_PER_MTOK = 0.50
 _OUTPUT_USD_PER_MTOK = 1.50
@@ -241,6 +246,109 @@ def writes_need_approval_for(
     if write_session_allows_writes(store, channel_id):
         return False
     return True
+
+
+def approval_timeout_seconds(env: Optional[Mapping[str, str]] = None) -> int:
+    """Parked write-gate auto-deny after this many seconds. 0 disables."""
+
+    raw = str((env or os.environ).get("DISCORD_OS_APPROVAL_TIMEOUT_MINUTES") or "").strip()
+    if not raw:
+        return DEFAULT_APPROVAL_TIMEOUT_MINUTES * 60
+    lowered = raw.lower()
+    if lowered in {"0", "off", "never", "false", "no", "disabled"}:
+        return 0
+    try:
+        minutes = float(raw)
+    except ValueError:
+        return DEFAULT_APPROVAL_TIMEOUT_MINUTES * 60
+    if minutes <= 0:
+        return 0
+    seconds = int(minutes * 60)
+    return min(max(seconds, 1), MAX_APPROVAL_TIMEOUT_SECONDS)
+
+
+def inbound_queue_enabled(env: Optional[Mapping[str, str]] = None) -> bool:
+    """Live-thread texts queue in SQLite. Default on. 0/off disables."""
+
+    raw = str((env or os.environ).get("DISCORD_OS_INBOUND_QUEUE") or "").strip()
+    if not raw:
+        return True
+    return raw.lower() not in {"0", "off", "false", "no", "disabled"}
+
+
+def parked_at_ms_from_row(row: Mapping[str, Any]) -> Optional[int]:
+    """Epoch ms when the write parked. None if unparsable (fail closed)."""
+
+    raw_ms = row.get("parked_at_ms") if isinstance(row, Mapping) else None
+    if raw_ms is not None and str(raw_ms).strip() != "":
+        try:
+            return int(raw_ms)
+        except (TypeError, ValueError):
+            return None
+    created = str(row.get("created_at") or "") if isinstance(row, Mapping) else ""
+    return _parse_sqlite_utc_ms(created)
+
+
+def expire_parked_approvals(
+    orchestrator: Any,
+    *,
+    now_ms: Optional[int] = None,
+    env: Optional[Mapping[str, str]] = None,
+) -> list[dict[str, Any]]:
+    """Auto-deny parked write-gates older than the approval timeout."""
+
+    timeout_s = approval_timeout_seconds(env)
+    if timeout_s <= 0:
+        return []
+    store = getattr(orchestrator, "store", None)
+    if store is None:
+        return []
+    lister = getattr(store, "list_parked_approvals", None)
+    if not callable(lister):
+        return []
+    now = int(now_ms if now_ms is not None else time.time() * 1000)
+    try:
+        rows = list(lister())
+    except Exception:
+        return []
+    expirer = getattr(orchestrator, "expire_parked_run", None)
+    denier = getattr(orchestrator, "_deny_parked_run", None)
+    expired: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        parked_ms = parked_at_ms_from_row(row)
+        if parked_ms is None:
+            pass  # fail closed: unparsable age expires
+        elif now - parked_ms < timeout_s * 1000:
+            continue
+        run_id = str(row.get("run_id") or "").strip()
+        if not run_id:
+            continue
+        result = None
+        try:
+            if callable(expirer):
+                result = expirer(run_id)
+            elif callable(denier):
+                result = denier(run_id, spoken=EXPIRED_WRITE_SPOKEN)
+        except Exception:
+            continue
+        if isinstance(result, dict):
+            expired.append(result)
+    return expired
+
+
+def _parse_sqlite_utc_ms(raw: str) -> Optional[int]:
+    text = (raw or "").strip().replace("Z", "")
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S.%f"):
+        try:
+            dt = datetime.strptime(text, fmt).replace(tzinfo=timezone.utc)
+            return int(dt.timestamp() * 1000)
+        except ValueError:
+            continue
+    return None
 
 
 def set_spend_cap_usd(store: Any, cap: float) -> None:

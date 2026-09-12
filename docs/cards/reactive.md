@@ -11,13 +11,15 @@ The live card is a `FLAG_COMPONENTS_V2` container edited in the job thread (`sen
 | State | How we get there | Buttons | Accent | Stage |
 |---|---|---|---|---|
 | parked | write-gate implement, HOST Jobs on `pending` | Allow / Always allow / Deny | work gold | Allow write |
-| running | live cook | Cancel | work gold | Working |
+| running | live cook | **Cancel** (phone interrupt on the live v2 card) | work gold | Working |
 | idle | Done / Failed / Cancelled **and** a job thread | Continue | live / fail / idle | Done / Failed / Cancelled |
 | done | settled receipt without a session thread | Continue + Retry | receipt chrome | receipt title |
 
 `progress` without a live-running flag still paints **done** (Continue + Retry). Live flushes pass `actions="running"` explicitly. That split is honest, not a bug to "fix" in this spike.
 
-Custom ids stay `discord-os:job:<verb>:<run_id>`. Verbs are approve / always / deny / cancel / retry / continue. They never toggle HOST power and they never dispatch Puppetmaster by themselves — `apply_job_action` does that.
+Custom ids stay `discord-os:job:<verb>:<run_id>`. Verbs are approve / always / deny / cancel / retry / continue. They never toggle HOST power and they never dispatch Puppetmaster by themselves — `apply_job_action` does that. Cancel is the phone interrupt for a live cook — tap the job-thread card, not HOST Off.
+
+Parked Allow expires after `DISCORD_OS_APPROVAL_TIMEOUT_MINUTES` (default 20) with spoken `Expired. Write was not started.`
 
 ## Proposed framework (the seam)
 

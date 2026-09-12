@@ -1721,7 +1721,11 @@ def test_steer_failure_does_not_spawn_sibling(tmp_path: Path):
     )
     assert orch.jobs == []
     assert pool.live_count() == 0
-    assert any("Could not steer" in (m.content or "") for m in fake.sent)
+    queued = store.list_queued_inbound("job-thread")
+    assert len(queued) == 1
+    assert queued[0]["text"] == "please steer"
+    assert any("Queued" in (m.content or "") for m in fake.sent)
+    assert not any("Could not steer" in (m.content or "") for m in fake.sent)
     store.close()
 
 

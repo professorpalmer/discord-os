@@ -56,6 +56,12 @@ discord-os host stop
 discord-os host start --channel-id ID
 ```
 
+## Approval timeout (P0.3)
+
+Parked write-gate Allow / Always allow / Deny does not sit forever. After
+`DISCORD_OS_APPROVAL_TIMEOUT_MINUTES` (default 20) the listen tick auto-denies
+with spoken `Expired. Write was not started.` Set `0` or `off` to disable.
+
 ## Phone-visible host liveness (P0.2)
 
 Desk doctor + loopback dashboard do not wake the phone when LaunchAgent / pid

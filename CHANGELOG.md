@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+P0.3 Approval timeout + Cancel clarity + inbound queue while RUNNING.
+
+- Parked write-gate auto-denies after `DISCORD_OS_APPROVAL_TIMEOUT_MINUTES` (default 20). Spoken expire. `0` / `off` disables.
+- Live Components v2 cook cards keep **Cancel** (`discord-os:job:cancel:<run_id>`). Phone interrupt is that button on the job-thread card, not HOST Off.
+- Phone texts in a live job thread are not dropped: durable SQLite `inbound_queue`, mid-cook steer when possible, else follow-up in the same thread after the cook. Default on; `DISCORD_OS_INBOUND_QUEUE=0` restores steer-or-miss. Fail closed if the target thread is ambiguous.
+
 ## 0.5.31
 
 P0.2 Phone-visible host liveness / status Need.

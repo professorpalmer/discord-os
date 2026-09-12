@@ -30,6 +30,8 @@ from agent_discord.orchestration.cards import (
 from agent_discord.orchestration.jobs import resolved_write_key
 from agent_discord.orchestration.service import (
     author_may_dispatch,
+    expire_parked_approvals,
+    inbound_queue_enabled,
     is_spend_halted,
     operators_configured,
     parse_schedule_command,
@@ -422,13 +424,17 @@ def drain_inbound(
                     store, watermark_key, created_ms, message.message_id, watermark
                 )
                 continue
-            _steer_running_job(
+            _handle_live_thread_followup(
                 orchestrator,
                 discord,
+                store,
                 job_pool,
+                message=message,
                 text=text,
                 channel_id=channel_id,
                 thread_id=follow_thread,
+                workspace_id=workspace_id,
+                env=env,
             )
             watermark = _advance_listen_watermark(
                 store, watermark_key, created_ms, message.message_id, watermark
@@ -472,6 +478,17 @@ def drain_inbound(
             thread_id=thread_id,
         )
     )
+    receipts.extend(
+        _flush_inbound_queue(
+            orchestrator,
+            discord,
+            store,
+            job_pool,
+            workspace_id=workspace_id,
+            env=env,
+        )
+    )
+    _tick_approval_timeout_best_effort(orchestrator, env)
     if thread_id is None:
         try:
             from agent_discord.orchestration.github_rules import admit_github_rules
@@ -504,6 +521,158 @@ def drain_inbound(
 
 
 
+
+
+def _tick_approval_timeout_best_effort(
+    orchestrator: Any, env: Optional[Mapping[str, str]]
+) -> None:
+    """Auto-deny stale parked write-gates. Best-effort."""
+
+    try:
+        expire_parked_approvals(orchestrator, env=env)
+    except Exception:
+        pass
+
+
+def _handle_live_thread_followup(
+    orchestrator: Any,
+    discord: Any,
+    store: Any,
+    job_pool: Optional[Any],
+    *,
+    message: DiscordMessage,
+    text: str,
+    channel_id: str,
+    thread_id: str,
+    workspace_id: str,
+    env: Optional[Mapping[str, str]],
+) -> None:
+    """Steer if we can; otherwise durable-queue. Never mint a sibling write."""
+
+    run_id = _running_run_id(orchestrator, job_pool, thread_id) or ""
+    queue_id = None
+    if inbound_queue_enabled(env):
+        enqueuer = getattr(store, "enqueue_inbound", None)
+        if callable(enqueuer):
+            try:
+                queue_id = enqueuer(
+                    message_id=message.message_id or "",
+                    channel_id=channel_id,
+                    thread_id=thread_id,
+                    text=text,
+                    run_id=run_id,
+                    workspace_id=workspace_id,
+                    author_id=str(message.author_id or ""),
+                )
+            except Exception:
+                queue_id = None
+    steered = _steer_running_job(
+        orchestrator,
+        discord,
+        job_pool,
+        text=text,
+        channel_id=channel_id,
+        thread_id=thread_id,
+        notify_miss=False,
+    )
+    if steered:
+        if queue_id:
+            _mark_queue(store, queue_id, applied=True)
+        return
+    if queue_id:
+        _post_queued_ack(discord, channel_id, thread_id)
+        return
+    _post_steer_miss(discord, channel_id, thread_id)
+
+
+def _flush_inbound_queue(
+    orchestrator: Any,
+    discord: Any,
+    store: Any,
+    job_pool: Optional[Any],
+    *,
+    workspace_id: str,
+    env: Optional[Mapping[str, str]],
+) -> list[RunReceipt]:
+    if store is None or not inbound_queue_enabled(env):
+        return []
+    lister = getattr(store, "list_queued_inbound", None)
+    if not callable(lister):
+        return []
+    try:
+        rows = list(lister("", limit=20))
+    except Exception:
+        return []
+    receipts: list[RunReceipt] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        qid = str(row.get("queue_id") or "").strip()
+        dest_thread = str(row.get("thread_id") or "").strip()
+        dest_channel = str(row.get("channel_id") or "").strip()
+        body = str(row.get("text") or "").strip()
+        if not dest_thread or not dest_channel or not body:
+            _mark_queue(store, qid, applied=False)
+            continue
+        if _thread_has_running_job(orchestrator, job_pool, dest_thread):
+            steered = _steer_running_job(
+                orchestrator,
+                discord,
+                job_pool,
+                text=body,
+                channel_id=dest_channel,
+                thread_id=dest_thread,
+                notify_miss=False,
+            )
+            if steered:
+                _mark_queue(store, qid, applied=True)
+            continue
+        intake = TaskIntake(
+            text=body,
+            channel_id=dest_channel,
+            workspace_id=str(row.get("workspace_id") or workspace_id or "default"),
+            thread_id=dest_thread,
+            requester_id=str(row.get("author_id") or "") or None,
+            metadata={"inbound_queued": True, "inbound_claimed": True},
+        )
+        try:
+            if job_pool is not None:
+                job_pool.submit(
+                    orchestrator.run_task,
+                    intake,
+                    write_key=resolved_write_key(intake, orchestrator),
+                )
+            else:
+                receipts.append(orchestrator.run_task(intake))
+            _mark_queue(store, qid, applied=True)
+        except Exception:
+            continue
+    return receipts
+
+
+def _mark_queue(store: Any, queue_id: str, *, applied: bool) -> None:
+    qid = (queue_id or "").strip()
+    if not qid or store is None:
+        return
+    writer = getattr(store, "mark_inbound_applied" if applied else "mark_inbound_dropped", None)
+    if callable(writer):
+        try:
+            writer(qid)
+        except Exception:
+            pass
+
+
+def _post_queued_ack(discord: Any, channel_id: str, thread_id: Optional[str]) -> None:
+    try:
+        send = getattr(discord, "send_message", None)
+        if callable(send):
+            send(
+                channel_id,
+                "Queued. Will apply when this cook can take it.",
+                thread_id=thread_id,
+            )
+    except Exception:
+        pass
 
 
 def _tick_host_liveness_best_effort(
@@ -668,6 +837,7 @@ def _steer_running_job(
     text: str,
     channel_id: str,
     thread_id: str,
+    notify_miss: bool = True,
 ) -> bool:
     """Join the live worker. Never submit a sibling job."""
 
@@ -679,7 +849,7 @@ def _steer_running_job(
             ok = bool(steerer(run_id, text))
         except Exception:
             ok = False
-    if not ok:
+    if not ok and notify_miss:
         _post_steer_miss(discord, channel_id, thread_id)
     return ok
 

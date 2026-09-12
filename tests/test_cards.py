@@ -281,6 +281,15 @@ def test_job_receipt_progress_cards_emit_v2():
     assert TYPE_TEXT in kinds
     assert TYPE_ACTION_ROW in kinds
     assert _button_custom_ids(progress) == ["discord-os:job:cancel:r1"]
+    # Phone-reachable: Cancel rides the live v2 action row, not HOST Off.
+    blob = str(p)
+    assert "discord-os:job:cancel:r1" in blob
+    assert any(
+        item.get("label") == "Cancel"
+        for row in p["components"][0]["components"]
+        if row.get("type") == TYPE_ACTION_ROW
+        for item in row.get("components") or ()
+    )
 
     done = receipt_card(
         RunReceipt(

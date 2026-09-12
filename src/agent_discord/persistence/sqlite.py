@@ -204,6 +204,20 @@ CREATE TABLE IF NOT EXISTS github_rules (
     enabled INTEGER NOT NULL DEFAULT 1,
     created_ms INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS inbound_queue (
+    queue_id TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL UNIQUE,
+    channel_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    run_id TEXT NOT NULL DEFAULT '',
+    workspace_id TEXT NOT NULL DEFAULT 'default',
+    author_id TEXT,
+    text TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    created_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_inbound_queue_open ON inbound_queue(thread_id, status);
 """
 
 PREFERENCE_KINDS = frozenset({"preference", "style", "failure"})
@@ -230,6 +244,7 @@ class SQLiteStore:
         self._migrate_service_tables(conn)
         self._migrate_lineage_nodes(conn)
         self._migrate_job_queue(conn)
+        self._migrate_inbound_queue(conn)
         self._fts_enabled = self._try_enable_fts(conn)
         conn.commit()
 
@@ -412,6 +427,26 @@ class SQLiteStore:
                 "UPDATE tasks SET job_code=? WHERE task_id=?",
                 (self._mint_job_code(conn), row["task_id"]),
             )
+
+    def _migrate_inbound_queue(self, conn: sqlite3.Connection) -> None:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS inbound_queue (
+                queue_id TEXT PRIMARY KEY,
+                message_id TEXT NOT NULL UNIQUE,
+                channel_id TEXT NOT NULL,
+                thread_id TEXT NOT NULL,
+                run_id TEXT NOT NULL DEFAULT '',
+                workspace_id TEXT NOT NULL DEFAULT 'default',
+                author_id TEXT,
+                text TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                created_ms INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_inbound_queue_open
+            ON inbound_queue(thread_id, status);
+            """
+        )
 
     def _mint_job_code(self, conn: sqlite3.Connection) -> str:
         row = conn.execute(
@@ -795,6 +830,45 @@ class SQLiteStore:
             ranked.append((_job_rank(status, attention), item))
         ranked.sort(key=lambda pair: pair[0])
         return [item for _rank, item in ranked][:capped]
+
+    def list_parked_approvals(self) -> list[dict[str, Any]]:
+        """Pending runs still awaiting write-gate Allow."""
+
+        rows = self._connection().execute(
+            """
+            SELECT r.run_id, r.task_id, r.created_at, r.status,
+                   t.channel_id, t.thread_id, t.metadata_json
+            FROM runs r
+            JOIN tasks t ON t.task_id = r.task_id
+            WHERE r.status = 'pending'
+            ORDER BY r.created_at ASC, r.run_id ASC
+            """
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                meta = json.loads(row["metadata_json"] or "{}")
+            except json.JSONDecodeError:
+                meta = {}
+            if not isinstance(meta, dict) or not meta.get("awaiting_approval"):
+                continue
+            raw_ms = meta.get("parked_at_ms")
+            parked_ms: Optional[int]
+            try:
+                parked_ms = int(raw_ms) if raw_ms is not None and str(raw_ms).strip() != "" else None
+            except (TypeError, ValueError):
+                parked_ms = None
+            out.append(
+                {
+                    "run_id": str(row["run_id"] or ""),
+                    "task_id": str(row["task_id"] or ""),
+                    "created_at": str(row["created_at"] or ""),
+                    "parked_at_ms": parked_ms,
+                    "channel_id": str(row["channel_id"] or ""),
+                    "thread_id": str(row["thread_id"] or meta.get("thread_id") or ""),
+                }
+            )
+        return out
 
     def task_job_code(self, task_id: str) -> str:
         row = self.get_task(task_id)
@@ -1743,6 +1817,114 @@ class SQLiteStore:
             "SELECT * FROM seen_messages WHERE message_id=?", (message_id,)
         ).fetchone()
         return dict(row) if row else None
+
+    def enqueue_inbound(
+        self,
+        *,
+        message_id: str,
+        channel_id: str,
+        thread_id: str,
+        text: str,
+        run_id: str = "",
+        workspace_id: str = "default",
+        author_id: str = "",
+        queue_id: str = "",
+        created_ms: Optional[int] = None,
+    ) -> Optional[str]:
+        """Durable live-thread follow-up. None if duplicate or incomplete."""
+
+        mid = (message_id or "").strip()
+        tid = (thread_id or "").strip()
+        cid = (channel_id or "").strip()
+        body = (text or "").strip()
+        if not mid or not tid or not cid or not body:
+            return None
+        qid = (queue_id or "").strip() or str(uuid4())
+        now = int(created_ms if created_ms is not None else time.time() * 1000)
+        conn = self._connection()
+        try:
+            conn.execute(
+                """
+                INSERT INTO inbound_queue (
+                    queue_id, message_id, channel_id, thread_id, run_id,
+                    workspace_id, author_id, text, status, created_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)
+                """,
+                (
+                    qid,
+                    mid,
+                    cid,
+                    tid,
+                    (run_id or "").strip(),
+                    (workspace_id or "default").strip() or "default",
+                    (author_id or "").strip(),
+                    body,
+                    now,
+                ),
+            )
+            conn.commit()
+            return qid
+        except sqlite3.IntegrityError:
+            conn.rollback()
+            return None
+
+    def list_queued_inbound(
+        self, thread_id: str = "", *, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        capped = max(1, min(int(limit), 50))
+        tid = (thread_id or "").strip()
+        conn = self._connection()
+        if tid:
+            rows = conn.execute(
+                """
+                SELECT * FROM inbound_queue
+                WHERE status='queued' AND thread_id=?
+                ORDER BY created_ms ASC, queue_id ASC
+                LIMIT ?
+                """,
+                (tid, capped),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT * FROM inbound_queue
+                WHERE status='queued'
+                ORDER BY created_ms ASC, queue_id ASC
+                LIMIT ?
+                """,
+                (capped,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def mark_inbound_applied(
+        self, queue_id: str = "", *, message_id: str = ""
+    ) -> None:
+        self._mark_inbound_status(queue_id, "applied", message_id=message_id)
+
+    def mark_inbound_dropped(
+        self, queue_id: str = "", *, message_id: str = ""
+    ) -> None:
+        self._mark_inbound_status(queue_id, "dropped", message_id=message_id)
+
+    def _mark_inbound_status(
+        self, queue_id: str, status: str, *, message_id: str = ""
+    ) -> None:
+        qid = (queue_id or "").strip()
+        mid = (message_id or "").strip()
+        if not qid and not mid:
+            return
+        conn = self._connection()
+        if qid:
+            conn.execute(
+                "UPDATE inbound_queue SET status=? WHERE queue_id=?",
+                (status, qid),
+            )
+        else:
+            conn.execute(
+                "UPDATE inbound_queue SET status=? WHERE message_id=?",
+                (status, mid),
+            )
+        conn.commit()
 
     def mark_message_seen(self, message_id: str, channel_id: Optional[str] = None) -> bool:
         """Return True if newly seen, False if duplicate. Compatibility helper."""

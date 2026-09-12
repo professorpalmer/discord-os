@@ -495,6 +495,7 @@ class AgentOrchestrator:
                     percent=1,
                     run_id=run_id,
                     job_code=job_code,
+                    actions="running",
                 ),
                 stage="start",
             )
@@ -1321,6 +1322,8 @@ class AgentOrchestrator:
             return self._always_allow_parked_run(run_id)
         if verb == "deny":
             return self._deny_parked_run(run_id)
+        if verb == "expire":
+            return self.expire_parked_run(run_id)
         if verb == "continue":
             return self._continue_idle_run(run_id, prompt=prompt)
         return {"action": verb, "run_id": run_id, "status": "ignored"}
@@ -1394,14 +1397,23 @@ class AgentOrchestrator:
         result["session_allow"] = scope
         return result
 
-    def _deny_parked_run(self, run_id: str) -> dict[str, Any]:
+    def expire_parked_run(self, run_id: str) -> dict[str, Any]:
+        from agent_discord.orchestration.service import EXPIRED_WRITE_SPOKEN
+
+        result = self._deny_parked_run(run_id, spoken=EXPIRED_WRITE_SPOKEN)
+        result["action"] = "expire"
+        return result
+
+    def _deny_parked_run(
+        self, run_id: str, *, spoken: str = "Denied. Write was not started."
+    ) -> dict[str, Any]:
         run = self.store.get_run(run_id) or {}
         task_id = str(run.get("task_id") or "")
         reader = getattr(self.store, "task_metadata", None)
         meta = reader(task_id) if callable(reader) and task_id else {}
         if not isinstance(meta, dict):
             meta = {}
-        spoken = "Denied. Write was not started."
+        spoken = (spoken or "Denied. Write was not started.").strip() or "Denied. Write was not started."
         merger = getattr(self.store, "merge_task_metadata", None)
         if callable(merger) and task_id:
             try:
@@ -1511,6 +1523,7 @@ class AgentOrchestrator:
                 task_id,
                 {
                     "awaiting_approval": True,
+                    "parked_at_ms": int(time.time() * 1000),
                     "text": intake.text,
                     "channel_id": intake.channel_id,
                     "workspace_id": intake.workspace_id,
