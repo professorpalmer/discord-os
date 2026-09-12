@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.5.47
+
+Remote SSH doctor probe — completes Round-4 P0 (Cancel, Path A progress, gate-hook, ARG_MAX).
+
 ### P0.5 Remote OpenRouter/CLI doctor probe
 
 Allowlisted `kind=ssh` hosts are doctor-probed for **remote** readiness, not
@@ -12,6 +16,9 @@ missing OpenRouter so phone/doctor speaks honest Need before cook-time Deny.
 Path A preflight / `assert_ssh_remote_cook_ready` still fail closed. Keys never
 on argv. Tests mock SSH (`tests/test_remote_cook.py`,
 `tests/test_host_runners.py`). Docs: host README.
+
+With Cancel honesty (0.5.43), Path A progress (0.5.44), live gate-hook (0.5.45),
+and ARG_MAX handoff (0.5.46), this closes Round-4 P0.
 
 ## 0.5.46
 
