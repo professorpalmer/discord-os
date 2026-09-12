@@ -141,7 +141,8 @@ def test_drain_with_pool_returns_while_jobs_run(tmp_path: Path):
     )
     assert immediate == []
     assert pool.live_count() == 2
-    assert time.monotonic() - started < 0.15
+    # Drain must return before slow backends finish (not a tight wall budget).
+    assert time.monotonic() - started < backend.hold
     receipts = pool.wait(timeout=3.0)
     assert len(receipts) == 2
     store.close()

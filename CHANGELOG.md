@@ -12,6 +12,9 @@ prose) and yields live `PROGRESS` events to Discord before the final receipt.
 missing remote CLI still fail closed (spoken Deny; never silent local cook).
 Tests: `tests/test_remote_cook.py` (mocked SSH popen). Docs: host README.
 
+Also: drain+JobPool timing assert uses `backend.hold` instead of a tight
+0.15s wall budget (CI load flake on 3.12).
+
 ## 0.5.43
 
 CI green after OpenRouter fail-closed, concurrency honesty, Cancel honesty docs.
