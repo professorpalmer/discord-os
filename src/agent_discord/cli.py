@@ -259,6 +259,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Clear gateway_owners rows whose embedded pid is dead",
     )
+    p_host_doctor.add_argument(
+        "--notify",
+        action="store_true",
+        help="On FAIL, post a thin host-status digest to the host channel (phone-visible)",
+    )
     p_host_doctor.add_argument("--json", action="store_true")
     p_host_dash = host_sub.add_parser(
         "dashboard",
@@ -1983,12 +1988,66 @@ def cmd_host_doctor(args: argparse.Namespace, *, out: TextIO | None = None) -> i
     from agent_discord.host.doctor import run_doctor
 
     code, lines = run_doctor(fix=bool(getattr(args, "fix", False)))
+    notify_body = None
+    if getattr(args, "notify", False):
+        notify_body = _doctor_notify(code, lines)
     if getattr(args, "json", False):
-        print(json.dumps({"ok": code == 0, "lines": lines}, indent=2), file=out)
+        payload: dict[str, Any] = {"ok": code == 0, "lines": lines}
+        if notify_body is not None:
+            payload["notified"] = notify_body
+        print(json.dumps(payload, indent=2), file=out)
     else:
         for line in lines:
             print(line, file=out)
+        if notify_body:
+            print(f"notified: {notify_body}", file=out)
     return code
+
+
+def _doctor_notify(code: int, lines: list[str]) -> Optional[str]:
+    """Post phone-visible FAIL digest to the host channel. Best-effort."""
+
+    from agent_discord.config import apply_runtime_secrets, load_config
+    from agent_discord.discord.facade import DiscordFacade
+    from agent_discord.discord.providers import select_provider
+    from agent_discord.host.liveness import notify_doctor_failure
+    from agent_discord.host.service import read_host_meta
+    from agent_discord.persistence.sqlite import SQLiteStore
+
+    config = apply_runtime_secrets(load_config())
+    meta = read_host_meta(config.workspace)
+    channel_id = str(meta.get("channel_id") or "").strip()
+    store = SQLiteStore(config.database_path)
+    store.initialize()
+    try:
+        token = (config.discord_bot_token or "").strip()
+        if not token:
+            print("doctor --notify: no discord token; skip post", file=sys.stderr)
+            return notify_doctor_failure(
+                None,
+                workspace=config.workspace,
+                channel_id=channel_id,
+                store=store,
+                doctor_lines=lines,
+                doctor_code=code,
+            )
+        provider = select_provider(config)
+        discord = DiscordFacade(provider)
+        try:
+            return notify_doctor_failure(
+                discord,
+                workspace=config.workspace,
+                channel_id=channel_id,
+                store=store,
+                doctor_lines=lines,
+                doctor_code=code,
+            )
+        finally:
+            closer = getattr(discord, "close", None)
+            if callable(closer):
+                closer()
+    finally:
+        store.close()
 
 
 def cmd_host_dashboard(args: argparse.Namespace, *, out: TextIO | None = None) -> int:

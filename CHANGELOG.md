@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+P0.2 Phone-visible host liveness / status Need.
+
+- Thin digest (`power` / `pid` / `doctor`) ranks as a HOST **Need** line on Jobs / HOST card.
+- Listen loop posts an on-change spoken status line in the host channel (debounced; Discord mobile push).
+- `discord-os host doctor --notify` posts FAIL digests from the desk when the listen process is down.
+- No tokens in posts; dashboard stays read-only. Docs: [docs/host/liveness.md](docs/host/liveness.md).
+
+
 ## 0.5.30
 
 P0.1 SSH cook-or-Deny (honesty). Fail closed.

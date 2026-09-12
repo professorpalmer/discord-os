@@ -166,6 +166,24 @@ def build_status_snapshot(
             doctor = {"ok": code == 0, "lines": [_redact_line(line) for line in lines]}
         else:
             doctor = {"ok": True, "lines": []}
+        try:
+            from agent_discord.host.liveness import last_digest_from_state, resolve_digest_for_panel
+
+            digest = resolve_digest_for_panel(
+                workspace=ws, store=db, channel_id=channel_id
+            )
+            if digest is None:
+                digest = last_digest_from_state(ws)
+            liveness = digest.to_public_dict() if digest is not None else {
+                "ok": True,
+                "power": "OFF",
+                "pid": "NONE",
+                "doctor": "OK",
+                "fail_summary": "",
+                "signature": "",
+            }
+        except Exception:
+            liveness = {"ok": True, "power": "OFF", "pid": "NONE", "doctor": "OK"}
         payload: dict[str, Any] = {
             "product": PRODUCT_NAME,
             "version": __version__,
@@ -184,6 +202,7 @@ def build_status_snapshot(
             },
             "jobs": jobs,
             "doctor": doctor,
+            "liveness": liveness,
             "hosts": allowlist,
         }
         return _strip_secrets(payload)

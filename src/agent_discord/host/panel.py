@@ -1001,12 +1001,35 @@ def _panel_paired(store: Any) -> bool:
 
 def _panel_jobs(store: Any, channel_id: str) -> list[dict[str, Any]]:
     reader = getattr(store, "list_recent_jobs", None)
-    if not callable(reader):
-        return []
+    jobs: list[dict[str, Any]] = []
+    if callable(reader):
+        try:
+            jobs = list(reader(channel_id, limit=5))
+        except Exception:
+            jobs = []
     try:
-        return list(reader(channel_id, limit=5))
+        from pathlib import Path as _Path
+
+        from agent_discord.host.liveness import (
+            last_digest_from_state,
+            merge_host_need_jobs,
+            resolve_digest_for_panel,
+        )
+
+        ws = None
+        db = getattr(store, "path", None)
+        if db is not None:
+            ws = _Path(db).parent
+        digest = None
+        if ws is not None:
+            digest = resolve_digest_for_panel(
+                workspace=ws, store=store, channel_id=channel_id
+            )
+            if digest is None:
+                digest = last_digest_from_state(ws)
+        return merge_host_need_jobs(jobs, digest)
     except Exception:
-        return []
+        return jobs
 
 
 def _paint_after_ack(

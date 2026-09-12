@@ -493,9 +493,43 @@ def drain_inbound(
             )
         except Exception:
             pass
+        _tick_host_liveness_best_effort(
+            discord,
+            store,
+            channel_id=channel_id,
+            workspace_id=workspace_id,
+            workspace=ws,
+        )
     return receipts
 
 
+
+
+
+def _tick_host_liveness_best_effort(
+    discord: Any,
+    store: Any,
+    *,
+    channel_id: str,
+    workspace_id: str,
+    workspace: Optional[Path],
+) -> None:
+    """Phone-visible host digest on listen poll (debounced). Best-effort."""
+
+    if workspace is None:
+        return
+    try:
+        from agent_discord.host.liveness import tick_host_liveness
+
+        tick_host_liveness(
+            discord,
+            workspace=Path(workspace),
+            channel_id=channel_id,
+            store=store,
+            workspace_id=workspace_id,
+        )
+    except Exception:
+        pass
 
 
 def _follow_thread_id(
@@ -896,6 +930,27 @@ def _realm_name(store: Any, channel_id: str, workspace_id: str = "default") -> s
         return ""
 
 
+
+def _workspace_from_store_or_meta(store: Any, discord: Any = None) -> Optional[Path]:
+    """Best-effort workspace Path for HOST Need ranking."""
+
+    _ = discord
+    for attr in ("workspace", "_workspace"):
+        raw = getattr(store, attr, None) if store is not None else None
+        if raw:
+            try:
+                return Path(raw)
+            except Exception:
+                pass
+    db = getattr(store, "path", None) or getattr(store, "db_path", None)
+    if db:
+        try:
+            return Path(db).parent
+        except Exception:
+            pass
+    return None
+
+
 def publish_host_card(
     discord: Any,
     store: Any,
@@ -930,6 +985,24 @@ def publish_host_card(
             jobs = list(lister(channel_id, limit=5))
         except Exception:
             jobs = []
+    try:
+        from agent_discord.host.liveness import (
+            last_digest_from_state,
+            merge_host_need_jobs,
+            resolve_digest_for_panel,
+        )
+
+        ws = _workspace_from_store_or_meta(store, discord)
+        digest = None
+        if ws is not None:
+            digest = resolve_digest_for_panel(
+                workspace=ws, store=store, channel_id=channel_id
+            )
+            if digest is None:
+                digest = last_digest_from_state(ws)
+        jobs = merge_host_need_jobs(jobs, digest)
+    except Exception:
+        pass
     last_job = ""
     try:
         from agent_discord.orchestration.job_briefing import briefing_line

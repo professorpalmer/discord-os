@@ -50,10 +50,18 @@ macOS LaunchAgent (`com.discord-os.host`) or the Windows equivalent from `host/i
 discord-os host status
 discord-os host doctor          # LaunchAgent / workspace / pid / gateway
 discord-os host doctor --fix   # clear dead-pid gateway locks only
+discord-os host doctor --notify # on FAIL, post thin digest to host channel (phone)
 discord-os host dashboard       # read-only companion at http://127.0.0.1:8765/
 discord-os host stop
 discord-os host start --channel-id ID
 ```
+
+## Phone-visible host liveness (P0.2)
+
+Desk doctor + loopback dashboard do not wake the phone when LaunchAgent / pid
+dies mid-cowork. A thin digest (`power` / `pid` / `doctor`) ranks as a HOST
+**Need** line and posts to the host channel **on change** (debounced). See
+[liveness.md](liveness.md).
 
 ## Companion dashboard (read-only)
 
@@ -101,6 +109,7 @@ Opt-in local spoken Done on this Mac. Discord voice-channel join is stubbed
 - `src/agent_discord/host/power.py` — armed / pid
 - `src/agent_discord/host/runners.py` — multi-host allowlist (fail-closed)
 - `src/agent_discord/host/dashboard.py` — read-only companion web dashboard
+- `src/agent_discord/host/liveness.py` — phone-visible digest / HOST Need (P0.2)
 - `src/agent_discord/discord/tts.py` — local TTS + voice-join stub (P2.13)
 - `src/agent_discord/host/install.py` — login item
 - `src/agent_discord/host/actions.py` — Terminal / files / browser
