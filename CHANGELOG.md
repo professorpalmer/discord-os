@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.5.45
+
+Live gate-hook inject for local agentic PreToolUse (sitecustomize / PreToolUse wrap; Ask park; SSH gates still not crossed).
+
 ### P0.3 Gate-hook really fires
 
 - Local OpenRouter/agentic cooks no longer only *stamp* `DISCORD_OS_GATE_*`.
@@ -13,7 +17,7 @@
 - Path A SSH: gate file-queue does **not** cross SSH yet — residual P1
   "gates across SSH". Docs: [docs/cards/ask-gate.md](docs/cards/ask-gate.md).
 - Tests prove inject arms + patched `_execute_tool` invokes the hook (not
-  install-only). No version bump / tag / PyPI in this commit.
+  install-only).
 
 ## 0.5.44
 
