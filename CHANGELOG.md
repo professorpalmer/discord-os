@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.5.43
+
+CI green after OpenRouter fail-closed, concurrency honesty, Cancel honesty docs.
+
 ### CI: OpenRouter fail-closed check tests
 
 Happy-path CLI `check` tests set a dummy `OPENROUTER_API_KEY` so offline check
@@ -36,8 +40,6 @@ OpenRouter (local or SSH remote) could keep cooking.
   [docs/jobs/README.md](docs/jobs/README.md),
   [docs/host/README.md](docs/host/README.md),
   [docs/compute/README.md](docs/compute/README.md).
-
-No version bump (parent cuts).
 
 ## 0.5.42
 
