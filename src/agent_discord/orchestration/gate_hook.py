@@ -69,6 +69,7 @@ class GateRequest:
     kind: str = GATE_KIND_TOOL
     question: str = ""
     options: tuple[Any, ...] = ()
+    allow_multiple: bool = False
     created_at_ms: int = 0
 
     def to_payload(self) -> dict[str, Any]:
@@ -82,6 +83,7 @@ class GateRequest:
             "kind": self.kind,
             "question": self.question,
             "options": list(self.options),
+            "allow_multiple": bool(self.allow_multiple),
             "created_at_ms": int(self.created_at_ms),
         }
 
@@ -244,6 +246,7 @@ def request_from_payload(data: Mapping[str, Any]) -> Optional[GateRequest]:
         kind=str(data.get("kind") or GATE_KIND_TOOL),
         question=str(data.get("question") or ""),
         options=tuple(options),
+        allow_multiple=bool(data.get("allow_multiple")),
         created_at_ms=created_ms,
     )
 
@@ -378,9 +381,9 @@ def detail_from_input(tool_input: Any) -> str:
     return redact_text_markers(str(tool_input or ""))[:500]
 
 
-def ask_fields_from_input(tool_input: Any) -> tuple[str, tuple[Any, ...]]:
+def ask_fields_from_input(tool_input: Any) -> tuple[str, tuple[Any, ...], bool]:
     if not isinstance(tool_input, Mapping):
-        return "", ()
+        return "", (), False
     question = str(
         tool_input.get("question")
         or tool_input.get("prompt")
@@ -394,7 +397,20 @@ def ask_fields_from_input(tool_input: Any) -> tuple[str, tuple[Any, ...]]:
         options = tuple(raw)
     else:
         options = ()
-    return question, options
+    multi_raw = (
+        tool_input.get("allow_multiple")
+        if "allow_multiple" in tool_input
+        else tool_input.get("allowMultiple")
+        if "allowMultiple" in tool_input
+        else tool_input.get("multiSelect")
+        if "multiSelect" in tool_input
+        else tool_input.get("multi")
+    )
+    if isinstance(multi_raw, str):
+        allow_multiple = multi_raw.strip().lower() in {"1", "true", "yes", "on"}
+    else:
+        allow_multiple = bool(multi_raw)
+    return question, options, allow_multiple
 
 
 def new_request_id() -> str:
@@ -426,7 +442,7 @@ def build_request(
     klass = normalize_tool_class(tool_name) or (tool_name or "").strip()
     detail = detail_from_input(tool_input)
     kind = GATE_KIND_ASK if klass == "ask" else GATE_KIND_TOOL
-    question, options = ask_fields_from_input(tool_input) if kind == GATE_KIND_ASK else ("", ())
+    question, options, allow_multiple = ask_fields_from_input(tool_input) if kind == GATE_KIND_ASK else ("", (), False)
     ts = int(created_at_ms if created_at_ms is not None else time.time() * 1000)
     return GateRequest(
         request_id=(request_id or new_request_id()).strip() or new_request_id(),
@@ -437,6 +453,7 @@ def build_request(
         kind=kind,
         question=question,
         options=options,
+        allow_multiple=bool(allow_multiple),
         created_at_ms=ts,
     )
 
@@ -545,6 +562,7 @@ def hold_tool_decision(
             kind=req.kind,
             question=req.question,
             options=req.options,
+            allow_multiple=bool(getattr(req, "allow_multiple", False)),
             created_at_ms=req.created_at_ms,
         )
     if not req.run_id:
@@ -607,6 +625,7 @@ def hold_tool_decision(
                     options=req.options or ("Yes", "No"),
                     live=True,
                     request_id=req.request_id,
+                    allow_multiple=bool(getattr(req, "allow_multiple", False)),
                 )
         else:
             raiser = getattr(orch, "raise_tool_gate", None)
@@ -921,6 +940,7 @@ def drain_gate_queue(
                         options=req.options or ("Yes", "No"),
                         live=True,
                         request_id=req.request_id,
+                        allow_multiple=bool(getattr(req, "allow_multiple", False)),
                     )
                 elif req.kind == GATE_KIND_PLAN or is_plan_ready_signal(req.tool_name) or is_exit_plan_tool(req.tool_name):
                     orchestrator.raise_plan_approve(

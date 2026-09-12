@@ -1364,6 +1364,8 @@ class AgentOrchestrator:
                     "replay_of": run_id,
                 }
             return {"action": verb, "run_id": run_id, "status": "missing"}
+        if verb in {"ask-confirm", "ask_confirm"}:
+            return self._confirm_ask_multi(run_id)
         if verb == "ask":
             # custom_id path packs run_id#option_index
             rid, sep, idx_raw = (run_id or "").partition("#")
@@ -1707,10 +1709,13 @@ class AgentOrchestrator:
         header: str = "Need input",
         live: bool = False,
         request_id: str = "",
+        allow_multiple: bool = False,
     ) -> dict[str, Any]:
         """Park mid-run for an AskUserQuestion Discord card.
 
         ``live=True`` keeps the worker blocked until an option or Deny.
+        ``allow_multiple=True`` parks a multi-select Confirm row (toggle
+        options, then Confirm) instead of resolving on the first tap.
         """
 
         import time
@@ -1747,6 +1752,7 @@ class AgentOrchestrator:
             parked_at_ms=parked_ms,
             live=live,
             request_id=request_id,
+            allow_multiple=bool(allow_multiple),
         )
         channel_id = str(task.get("channel_id") or meta.get("channel_id") or "").strip()
         thread_id = str(task.get("thread_id") or meta.get("thread_id") or "").strip() or None
@@ -1762,7 +1768,12 @@ class AgentOrchestrator:
             pass
         self._run_status[run_id] = TaskStatus.PENDING
         card = ask_user_question_card(
-            run_id, question=question, options=opts, header=header
+            run_id,
+            question=question,
+            options=opts,
+            header=header,
+            allow_multiple=bool(allow_multiple),
+            selected=(),
         )
         self._paint_gate_card(
             card,
@@ -1779,6 +1790,7 @@ class AgentOrchestrator:
             "status": "parked",
             "gate_kind": GATE_KIND_ASK,
             "gate_live": bool(live),
+            "gate_multi": bool(allow_multiple),
             "gate_request_id": (request_id or "").strip(),
             "summary": summary,
         }
@@ -2045,7 +2057,7 @@ class AgentOrchestrator:
         return str(meta.get("gate_kind") or "")
 
     def _resolve_ask_option(self, run_id: str, option_index: int) -> dict[str, Any]:
-        from agent_discord.orchestration.ask_gate import ALLOWED_TOOL_SPOKEN, GATE_KIND_ASK
+        from agent_discord.orchestration.ask_gate import GATE_KIND_ASK
 
         run = self.store.get_run(run_id) or {}
         task_id = str(run.get("task_id") or "")
@@ -2055,6 +2067,8 @@ class AgentOrchestrator:
             return {"action": "ask", "run_id": run_id, "status": "missing"}
         if str(meta.get("gate_kind") or "") != GATE_KIND_ASK:
             return {"action": "ask", "run_id": run_id, "status": "ignored"}
+        if meta.get("gate_multi"):
+            return self._toggle_ask_option(run_id, option_index)
         options = meta.get("gate_options") if isinstance(meta.get("gate_options"), list) else []
         if option_index < 0 or option_index >= len(options):
             return {"action": "ask", "run_id": run_id, "status": "missing"}
@@ -2066,6 +2080,114 @@ class AgentOrchestrator:
             answer=answer,
             spoken=f"Answered: {answer}",
             action="ask",
+        )
+
+    def _toggle_ask_option(self, run_id: str, option_index: int) -> dict[str, Any]:
+        """Multi-select: toggle one option and re-paint; do not resolve yet."""
+
+        from agent_discord.orchestration.ask_gate import (
+            GATE_KIND_ASK,
+            ask_user_question_card,
+            coerce_selected_indices,
+            format_ask_answer,
+        )
+        from agent_discord.orchestration.reactive import reactive_paint
+
+        run = self.store.get_run(run_id) or {}
+        task_id = str(run.get("task_id") or "")
+        reader = getattr(self.store, "task_metadata", None)
+        meta = reader(task_id) if callable(reader) and task_id else {}
+        if not isinstance(meta, dict) or not meta.get("awaiting_gate"):
+            return {"action": "ask", "run_id": run_id, "status": "missing"}
+        if str(meta.get("gate_kind") or "") != GATE_KIND_ASK or not meta.get("gate_multi"):
+            return {"action": "ask", "run_id": run_id, "status": "ignored"}
+        options = meta.get("gate_options") if isinstance(meta.get("gate_options"), list) else []
+        if option_index < 0 or option_index >= len(options):
+            return {"action": "ask", "run_id": run_id, "status": "missing"}
+        chosen = coerce_selected_indices(meta.get("gate_selected"), option_count=len(options))
+        if option_index in chosen:
+            chosen = [i for i in chosen if i != option_index]
+        else:
+            chosen = sorted([*chosen, option_index])
+        merger = getattr(self.store, "merge_task_metadata", None)
+        if callable(merger) and task_id:
+            try:
+                merger(task_id, {"gate_selected": chosen})
+            except Exception:
+                pass
+        meta = dict(meta)
+        meta["gate_selected"] = chosen
+        channel_id = str(meta.get("channel_id") or "").strip()
+        thread_id = str(meta.get("thread_id") or "").strip() or None
+        question = str(meta.get("gate_question") or "Choose one.")
+        card = ask_user_question_card(
+            run_id,
+            question=question,
+            options=options,
+            allow_multiple=True,
+            selected=chosen,
+        )
+        self._paint_gate_card(
+            card,
+            channel_id=channel_id,
+            thread_id=thread_id,
+            task_id=task_id,
+            meta=meta,
+            stage=reactive_paint(awaiting_approval=True).stage,
+        )
+        answer_preview = format_ask_answer(options, chosen)
+        return {
+            "action": "ask",
+            "run_id": run_id,
+            "status": "toggled",
+            "gate_selected": chosen,
+            "gate_answer": answer_preview,
+            "summary": (
+                f"Selected: {answer_preview}" if answer_preview else "Select options, then Confirm."
+            ),
+        }
+
+    def _confirm_ask_multi(self, run_id: str) -> dict[str, Any]:
+        """Multi-select Confirm — finish with joined labels, or stay parked if empty."""
+
+        from agent_discord.orchestration.ask_gate import (
+            GATE_KIND_ASK,
+            coerce_selected_indices,
+            format_ask_answer,
+        )
+
+        rid = (run_id or "").strip()
+        run = self.store.get_run(rid) or {}
+        task_id = str(run.get("task_id") or "")
+        reader = getattr(self.store, "task_metadata", None)
+        meta = reader(task_id) if callable(reader) and task_id else {}
+        if not isinstance(meta, dict) or not meta.get("awaiting_gate"):
+            return {"action": "ask-confirm", "run_id": rid, "status": "missing"}
+        if str(meta.get("gate_kind") or "") != GATE_KIND_ASK or not meta.get("gate_multi"):
+            return {"action": "ask-confirm", "run_id": rid, "status": "ignored"}
+        options = meta.get("gate_options") if isinstance(meta.get("gate_options"), list) else []
+        chosen = coerce_selected_indices(meta.get("gate_selected"), option_count=len(options))
+        if not chosen:
+            return {
+                "action": "ask-confirm",
+                "run_id": rid,
+                "status": "ignored",
+                "summary": "Need: select at least one option, then Confirm.",
+            }
+        answer = format_ask_answer(options, chosen)
+        if not answer:
+            return {
+                "action": "ask-confirm",
+                "run_id": rid,
+                "status": "ignored",
+                "summary": "Need: select at least one option, then Confirm.",
+            }
+        return self._finish_gate(
+            rid,
+            result="allow",
+            answer=answer,
+            spoken=f"Answered: {answer}",
+            action="ask-confirm",
         )
 
     def _resolve_tool_gate(

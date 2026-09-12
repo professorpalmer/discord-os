@@ -4,7 +4,7 @@ Coarse Always-allow is a footgun on a shared Mac; the phone needs
 surgical approve. This module is the zebbern / DisCode-shaped seam:
 
 - tool-class Allow / Always allow / Deny cards mid-run
-- AskUserQuestion option buttons
+- AskUserQuestion option buttons (single) or multi-select + Confirm row
 - fail closed when the tool class is unknown
 
 Live hold: adapters and the agentic hook call ``tool_class_decision``
@@ -28,6 +28,7 @@ from agent_discord.orchestration.reactive import reactive_paint
 from agent_discord.redaction import redact_text_markers
 
 ASK_ID_PREFIX = "discord-os:ask:"
+ASK_CONFIRM_ID_PREFIX = "discord-os:ask-confirm:"
 GATE_KIND_TOOL = "tool_class"
 GATE_KIND_ASK = "ask_user"
 
@@ -127,6 +128,13 @@ class AskAction:
 
     run_id: str
     option_index: int
+
+
+@dataclass(frozen=True)
+class AskConfirmAction:
+    """Parsed multi-select AskUserQuestion Confirm button intent."""
+
+    run_id: str
 
 
 @dataclass(frozen=True)
@@ -233,6 +241,9 @@ def ask_action_from_custom_id(custom_id: str) -> Optional[AskAction]:
     raw = (custom_id or "").strip()
     if not raw.startswith(ASK_ID_PREFIX):
         return None
+    # Confirm uses a different prefix; do not misparse as option  index.
+    if raw.startswith(ASK_CONFIRM_ID_PREFIX):
+        return None
     rest = raw[len(ASK_ID_PREFIX) :]
     run_id, sep, idx_raw = rest.rpartition(":")
     if not sep or not run_id.strip():
@@ -244,6 +255,68 @@ def ask_action_from_custom_id(custom_id: str) -> Optional[AskAction]:
     if option_index < 0:
         return None
     return AskAction(run_id=run_id.strip(), option_index=option_index)
+
+
+def ask_confirm_custom_id(run_id: str) -> str:
+    rid = (run_id or "").strip()
+    prefix = ASK_CONFIRM_ID_PREFIX
+    budget = max(0, CUSTOM_ID_MAX - len(prefix))
+    return prefix + rid[:budget]
+
+
+def ask_confirm_action_from_custom_id(custom_id: str) -> Optional[AskConfirmAction]:
+    raw = (custom_id or "").strip()
+    if not raw.startswith(ASK_CONFIRM_ID_PREFIX):
+        return None
+    rid = raw[len(ASK_CONFIRM_ID_PREFIX) :].strip()
+    if not rid:
+        return None
+    return AskConfirmAction(run_id=rid)
+
+
+def coerce_selected_indices(
+    raw: Any,
+    *,
+    option_count: int,
+) -> list[int]:
+    """Normalize stored / incoming multi-select indices. Fail closed on junk."""
+
+    out: list[int] = []
+    if option_count <= 0:
+        return out
+    if isinstance(raw, (list, tuple)):
+        seq = raw
+    elif raw is None or raw == "":
+        seq = ()
+    else:
+        seq = (raw,)
+    seen: set[int] = set()
+    for item in seq:
+        try:
+            idx = int(item)
+        except (TypeError, ValueError):
+            continue
+        if idx < 0 or idx >= option_count or idx in seen:
+            continue
+        seen.add(idx)
+        out.append(idx)
+    out.sort()
+    return out
+
+
+def format_ask_answer(
+    options: Sequence[AskOption | Mapping[str, Any] | str],
+    selected: Sequence[int],
+) -> str:
+    """Join selected option labels. Empty selection → empty string."""
+
+    parsed = _coerce_options(options)
+    labels: list[str] = []
+    for idx in coerce_selected_indices(selected, option_count=len(parsed)):
+        label = (parsed[idx].label or f"option-{idx}").strip()
+        if label:
+            labels.append(label)
+    return ", ".join(labels)
 
 
 def parse_spoken_gate_verb(text: str) -> Optional[str]:
@@ -303,10 +376,27 @@ def ask_user_question_card(
     question: str,
     options: Sequence[AskOption | Mapping[str, Any] | str],
     header: str = "Need input",
+    allow_multiple: bool = False,
+    selected: Sequence[int] = (),
 ) -> CardMessage:
-    """AskUserQuestion Discord card — option buttons, fail closed if empty."""
+    """AskUserQuestion Discord card — option buttons, fail closed if empty.
 
-    from agent_discord.discord.layout import STYLE_PRIMARY, action_row, button
+    Single-select: tapping an option resolves immediately (Deny on a spare
+    row when five options would truncate it).
+
+    Multi-select: options toggle selection; phone must tap **Confirm**
+    (or Deny). Empty Confirm stays parked (fail closed).
+    """
+
+    from agent_discord.discord.layout import (
+        STYLE_DANGER,
+        STYLE_PRIMARY,
+        STYLE_SECONDARY,
+        STYLE_SUCCESS,
+        action_row,
+        button,
+    )
+    from agent_discord.host.actions import job_custom_id
 
     q = redact_text_markers((question or "").strip() or "Choose one.")
     parsed = _coerce_options(options)
@@ -318,27 +408,59 @@ def ask_user_question_card(
             color=COLOR_WORK,
             rows=(job_action_row(run_id, actions=reactive_paint(awaiting_approval=True).actions),),
         )
-    items = []
+    multi = bool(allow_multiple)
+    chosen = coerce_selected_indices(selected, option_count=len(parsed))
+    chosen_set = set(chosen)
+    option_buttons = []
     fields: list[tuple[str, str, bool]] = []
     for idx, opt in enumerate(parsed[:5]):
         label = (opt.label or f"Option {idx + 1}")[:80]
-        items.append(
-            button(label, ask_custom_id(run_id, idx), style=STYLE_PRIMARY)
-        )
-        desc = opt.description or label
-        fields.append((f"{idx + 1}. {label}", redact_text_markers(desc)[:200], True))
-    # Also offer Deny so the phone can bail without picking.
-    from agent_discord.host.actions import job_custom_id
-    from agent_discord.discord.layout import STYLE_DANGER
+        if multi:
+            mark = "✓ " if idx in chosen_set else ""
+            style = STYLE_SUCCESS if idx in chosen_set else STYLE_SECONDARY
+            option_buttons.append(
+                button(f"{mark}{label}"[:80], ask_custom_id(run_id, idx), style=style)
+            )
+            state = "selected" if idx in chosen_set else "tap to select"
+            desc = opt.description or label
+            fields.append(
+                (f"{idx + 1}. {label}", redact_text_markers(f"{state} — {desc}")[:200], True)
+            )
+        else:
+            option_buttons.append(
+                button(label, ask_custom_id(run_id, idx), style=STYLE_PRIMARY)
+            )
+            desc = opt.description or label
+            fields.append((f"{idx + 1}. {label}", redact_text_markers(desc)[:200], True))
 
-    items.append(button("Deny", job_custom_id("deny", run_id), style=STYLE_DANGER))
+    deny = button("Deny", job_custom_id("deny", run_id), style=STYLE_DANGER)
+    if multi:
+        body = q + "\n\nSelect one or more, then Confirm."
+        if chosen:
+            body += f"\nSelected: {format_ask_answer(parsed, chosen)}"
+        confirm = button("Confirm", ask_confirm_custom_id(run_id), style=STYLE_PRIMARY)
+        rows = (action_row(option_buttons), action_row([confirm, deny]))
+        return CardMessage(
+            kind="ASK",
+            title=header or "Need input",
+            description=body,
+            color=COLOR_WORK,
+            fields=tuple(fields),
+            rows=rows,
+        )
+
+    # Single-select: keep Deny reachable when five options fill the row.
+    if len(option_buttons) >= 5:
+        rows = (action_row(option_buttons[:5]), action_row([deny]))
+    else:
+        rows = (action_row([*option_buttons, deny]),)
     return CardMessage(
         kind="ASK",
         title=header or "Need input",
         description=q,
         color=COLOR_WORK,
         fields=tuple(fields),
-        rows=(action_row(items),),
+        rows=rows,
     )
 
 
@@ -376,11 +498,15 @@ def gate_meta_payload(
     parked_at_ms: int,
     live: bool = False,
     request_id: str = "",
+    allow_multiple: bool = False,
+    selected: Sequence[int] = (),
 ) -> dict[str, Any]:
     """Task metadata patch for a parked tool / ask gate."""
 
     parsed = _coerce_options(options)
     exact = (tool_name or "").strip()
+    multi = bool(allow_multiple)
+    chosen = coerce_selected_indices(selected, option_count=len(parsed)) if multi else []
     return {
         "awaiting_approval": True,
         "awaiting_gate": True,
@@ -392,6 +518,8 @@ def gate_meta_payload(
         "gate_options": [
             {"label": opt.label, "description": opt.description} for opt in parsed
         ],
+        "gate_multi": multi,
+        "gate_selected": chosen,
         "gate_result": "",
         "gate_answer": "",
         "gate_live": bool(live),

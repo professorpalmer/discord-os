@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Round-4 P2 (scoped)
+
+- **AskUserQuestion multi-select Confirm row**: `raise_ask_user(..., allow_multiple=True)`
+  parks toggle option buttons + **Confirm** / Deny. Empty Confirm stays parked
+  (Need). Single-select unchanged (immediate option resolve); five options keep
+  Deny on a second row. Gate-hook reads `allow_multiple` / `allowMultiple` /
+  `multiSelect` from ask tool input. Docs: [ask-gate](docs/cards/ask-gate.md).
+- **SSH gate bridge**: still deferred (not M-sized / not honest as phone cards).
+  Need + remote write Deny inject remain the Path A contract;
+  `DISCORD_OS_SSH_GATES=bridge` reserved.
+- Daemon/mux/queue + voice: no Round-4 honesty leftover beyond shipped spikes
+  (Cancel / inbound queue / voice Deny stubs already honest).
+
 ## 0.5.48
 
 Round-4 P1 pack: watchdog real install, never-READY Need, exact-tool Always, plan hold without ExitPlanMode, REQUIRE_OPERATORS when Interactions exposed, SSH gates honesty.

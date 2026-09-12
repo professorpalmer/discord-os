@@ -13,6 +13,7 @@ zebbern / c-lord permission + AskUserQuestion button patterns — not Activities
 | Unknown class | **Fail closed** (`deny`, reason `unknown tool class`) |
 | Discord tool card | `tool_gate_card` / `raise_tool_gate` — Allow / Always allow / Deny |
 | AskUserQuestion card | `ask_user_question_card` / `raise_ask_user` — option buttons + Deny |
+| Multi-select Confirm | `allow_multiple=True` — toggle options, then **Confirm** (or Deny); empty Confirm stays parked |
 | Prefs | `tool_class_allow:<class>:<scope>` TTL (4h), cleared on HOST Off with write Always |
 | Timeout | Same `DISCORD_OS_APPROVAL_TIMEOUT_MINUTES` auto-deny as write-gate |
 | Spoken | Exact `Allow` / `Deny` / `Always allow` in the parked thread resolves the gate |
@@ -85,6 +86,14 @@ orch.raise_ask_user(
     options=["Yes", "Later", "No"],
 )
 # option button → gate_answer label; Deny → gate_result deny
+
+orch.raise_ask_user(
+    run_id,
+    question="Which topics?",
+    options=["Auth", "Billing", "Docs"],
+    allow_multiple=True,
+)
+# toggle options → Confirm → gate_answer "Auth, Billing"; empty Confirm ignored
 ```
 
 Do **not** invent a tool class. If `normalize_tool_class` returns `None`, deny.
@@ -99,6 +108,7 @@ in `ask_gate.py`.
 |---|---|
 | Allow / Always / Deny (tool or write park) | `discord-os:job:approve\|always\|deny:<run_id>` |
 | Ask option N | `discord-os:ask:<run_id>:<N>` |
+| Ask multi Confirm | `discord-os:ask-confirm:<run_id>` |
 
 Write-gate park (whole implement) and tool-class park share the job button
 prefix. Metadata `awaiting_gate` routes approve/always/deny to the tool/ask
@@ -112,13 +122,15 @@ resolver instead of resuming an implement.
   `discord-os gate-hook` before each tool. Deny / timeout → tool does not run.
   Write-gate off / session Always still auto-allow via listen drain (no card).
 - **Path A SSH gates**: live Discord hold still does **not** share this Mac's
-  `DISCORD_OS_GATE_*` file queue (`DISCORD_OS_SSH_GATES=bridge` reserved).
+  `DISCORD_OS_GATE_*` file queue. `DISCORD_OS_SSH_GATES=bridge` stays reserved
+  until a real reverse hold ships (larger than M — do not fake phone cards).
   When write-gate is on, Path A speaks **Need** and fail-closes remote
   write/edit/shell tools (sitecustomize inject) instead of silent ungated
   writes. Analyze/read SSH cooks unchanged.
 - ~~Per-tool (exact tool name) allowlists beyond class~~ — Always remembers
   the exact tool (`gate_tool` / `tool_exact_allow:`); wildcards rejected
-- Multi-select AskUserQuestion confirm row
+- ~~Multi-select AskUserQuestion confirm row~~ — `allow_multiple=True` toggles
+  + Confirm; empty Confirm fail-closed
 
 ## Code
 

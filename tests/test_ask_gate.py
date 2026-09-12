@@ -26,6 +26,8 @@ from agent_discord.host.panel import handle_gateway_interaction
 from agent_discord.orchestration.ask_gate import (
     AskOption,
     ask_action_from_custom_id,
+    ask_confirm_action_from_custom_id,
+    ask_confirm_custom_id,
     ask_custom_id,
     ask_user_question_card,
     normalize_tool_class,
@@ -830,3 +832,144 @@ def test_raise_tool_gate_always_stores_exact_tool(tmp_path: Path):
 
     assert tool_class_session_allows(store, "write", "ch") is False
     store.close()
+
+
+def test_ask_multi_select_card_has_confirm_row():
+    from agent_discord.orchestration.ask_gate import ask_confirm_custom_id, ask_custom_id
+    from agent_discord.host.actions import job_custom_id
+
+    card = ask_user_question_card(
+        "run-m1",
+        question="Pick topics",
+        options=["Alpha", "Beta", "Gamma"],
+        allow_multiple=True,
+        selected=[1],
+    )
+    assert card.kind == "ASK"
+    assert "Confirm" in (card.description or "")
+    assert len(card.rows) == 2
+    opt_ids = [c["custom_id"] for c in card.rows[0]["components"]]
+    assert ask_custom_id("run-m1", 0) in opt_ids
+    assert ask_custom_id("run-m1", 1) in opt_ids
+    # selected option uses success style
+    styles = {c["custom_id"]: c["style"] for c in card.rows[0]["components"]}
+    assert styles[ask_custom_id("run-m1", 1)] == 3  # STYLE_SUCCESS
+    assert styles[ask_custom_id("run-m1", 0)] == 2  # STYLE_SECONDARY
+    confirm_ids = [c["custom_id"] for c in card.rows[1]["components"]]
+    assert ask_confirm_custom_id("run-m1") in confirm_ids
+    assert job_custom_id("deny", "run-m1") in confirm_ids
+    parsed = ask_confirm_action_from_custom_id(ask_confirm_custom_id("run-m1"))
+    assert parsed is not None
+    assert parsed.run_id == "run-m1"
+
+
+def test_ask_single_five_options_keeps_deny_row():
+    from agent_discord.host.actions import job_custom_id
+
+    card = ask_user_question_card(
+        "run-5",
+        question="Pick one",
+        options=["A", "B", "C", "D", "E"],
+    )
+    assert len(card.rows) == 2
+    deny_ids = [c["custom_id"] for c in card.rows[1]["components"]]
+    assert job_custom_id("deny", "run-5") in deny_ids
+
+
+def test_raise_ask_user_multi_toggle_then_confirm(tmp_path: Path):
+    orch, store, fake, backend = _orch(tmp_path)
+    receipt = orch.run_task(
+        TaskIntake(
+            text="review multi ask",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="ask-multi-1",
+        )
+    )
+    parked = orch.raise_ask_user(
+        receipt.run_id,
+        question="Which?",
+        options=["A", "B", "C"],
+        allow_multiple=True,
+    )
+    assert parked["status"] == "parked"
+    assert parked.get("gate_multi") is True
+    meta = store.task_metadata(receipt.task_id)
+    assert meta.get("gate_multi") is True
+    assert meta.get("gate_selected") == []
+
+    toggled = orch.apply_job_action("ask", f"{receipt.run_id}#0")
+    assert toggled["status"] == "toggled"
+    assert toggled["gate_selected"] == [0]
+    meta = store.task_metadata(receipt.task_id)
+    assert meta.get("awaiting_gate") is True
+    assert meta.get("gate_selected") == [0]
+
+    toggled2 = orch.apply_job_action("ask", f"{receipt.run_id}#2")
+    assert toggled2["status"] == "toggled"
+    assert toggled2["gate_selected"] == [0, 2]
+
+    # empty confirm stays parked
+    empty = orch.apply_job_action("ask", f"{receipt.run_id}#0")  # deselect A
+    assert empty["status"] == "toggled"
+    assert empty["gate_selected"] == [2]
+    # deselect last
+    orch.apply_job_action("ask", f"{receipt.run_id}#2")
+    ignored = orch.apply_job_action("ask-confirm", receipt.run_id)
+    assert ignored["status"] == "ignored"
+    meta = store.task_metadata(receipt.task_id)
+    assert meta.get("awaiting_gate") is True
+
+    orch.apply_job_action("ask", f"{receipt.run_id}#1")
+    orch.apply_job_action("ask", f"{receipt.run_id}#2")
+    answered = orch.apply_job_action("ask-confirm", receipt.run_id)
+    assert answered["gate_result"] == "allow"
+    assert answered["gate_answer"] == "B, C"
+    meta = store.task_metadata(receipt.task_id)
+    assert meta.get("awaiting_gate") is False
+    store.close()
+
+
+def test_gateway_ask_confirm_button_routes_to_on_job(tmp_path: Path):
+    store = SQLiteStore(tmp_path / "gw-ask-confirm.sqlite3")
+    store.initialize()
+    seen: list[tuple[str, str]] = []
+
+    def on_job(action: str, run_id: str) -> None:
+        seen.append((action, run_id))
+
+    class _Opener:
+        def __call__(self, *args, **kwargs):
+            class _Resp:
+                status = 204
+
+                def read(self):
+                    return b""
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *a):
+                    return False
+
+            return _Resp()
+
+    action = handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix1",
+            "token": "tok",
+            "application_id": "app",
+            "channel_id": "ch",
+            "data": {"custom_id": ask_confirm_custom_id("run-ask")},
+            "member": {"user": {"id": "u1"}},
+        },
+        opener=_Opener(),
+        on_job=on_job,
+    )
+    assert action == "ask-confirm"
+    assert seen == [("ask-confirm", "run-ask")]
+    store.close()
+
