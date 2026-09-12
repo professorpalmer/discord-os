@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.5.44
+
+Path A live SSH progress pipe to Discord + CI flake hardens (drain/JobPool timing).
+
 ### P0.2 Path A progress pipe
 
 SSH remote cook (`SshRemoteCookBackend.stream`) no longer waits blind until the
@@ -12,8 +16,11 @@ prose) and yields live `PROGRESS` events to Discord before the final receipt.
 missing remote CLI still fail closed (spoken Deny; never silent local cook).
 Tests: `tests/test_remote_cook.py` (mocked SSH popen). Docs: host README.
 
-Also: drain+JobPool timing assert uses `backend.hold` instead of a tight
-0.15s wall budget (CI load flake on 3.12).
+### CI flake hardens (drain / JobPool timing)
+
+Drain+JobPool timing assert uses `backend.hold` instead of a tight 0.15s wall
+budget (CI load flake on 3.12). Parallel JobPool test hardened against
+wall-clock flake.
 
 ## 0.5.43
 
