@@ -25,6 +25,25 @@ _SCHEDULE_RE = re.compile(
 )
 
 
+
+def _coerce_usd(raw: Any) -> Optional[float]:
+    """Accept 0.04, "0.04", "$0.04". Reject junk."""
+
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    text = str(raw).strip().replace(",", "")
+    if text.startswith("$"):
+        text = text[1:].strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
 def spend_usd_from_usage(usage: Optional[UsageReceipt]) -> float:
     """Provider cost first; otherwise a conservative token estimate. Never $0-snap."""
 
@@ -35,11 +54,8 @@ def spend_usd_from_usage(usage: Optional[UsageReceipt]) -> float:
         raw = meta.get(key)
         if raw is None:
             continue
-        try:
-            value = float(raw)
-        except (TypeError, ValueError):
-            continue
-        if value >= 0:
+        value = _coerce_usd(raw)
+        if value is not None and value >= 0:
             return value
     inbound = _token_count(usage.input_tokens)
     outbound = _token_count(usage.output_tokens)

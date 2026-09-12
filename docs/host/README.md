@@ -22,6 +22,8 @@ macOS LaunchAgent (`com.discord-os.host`) or the Windows equivalent from `host/i
 
 ```bash
 discord-os host status
+discord-os host doctor          # LaunchAgent / workspace / pid / gateway
+discord-os host doctor --fix   # clear dead-pid gateway locks only
 discord-os host stop
 discord-os host start --channel-id ID
 ```

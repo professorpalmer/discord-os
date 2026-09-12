@@ -1954,3 +1954,66 @@ def test_idle_session_thread_uses_thread_watermark_not_parent(tmp_path: Path):
     assert parent_wm["last_message_id"] == parent_tip
     store.close()
 
+
+def test_idle_session_two_sequential_followups_advance_thread_watermark(tmp_path: Path):
+    """Two idle follow-ups each mint a job and advance the thread watermark."""
+
+    store = _armed_store(tmp_path, channel_id="parent-ch")
+    store.set_listen_watermark("job-thread", created_ms=1_700_000_000_000, message_id="1174109840998400000")
+    store.set_listen_watermark("parent-ch", created_ms=1_700_000_100_000, message_id="1174110260428800000")
+    orch = _FakeSteerOrch(store)
+    fake = FakeDiscordMCPProvider()
+    facade = DiscordFacade(fake, bot_token_fingerprint="fp", owner_id="test")
+    pool = JobPool()
+
+    fake.inbox.append(
+        DiscordMessage(
+            channel_id="parent-ch",
+            content="SSH into the ec2 and deploy",
+            message_id="1174109882941440000",
+            author_id="human-1",
+            thread_id="job-thread",
+        )
+    )
+    drain_inbound(
+        orch,
+        facade,
+        channel_id="parent-ch",
+        workspace_id="ws",
+        thread_id="job-thread",
+        since_ms=0,
+        job_pool=pool,
+    )
+    pool.wait(timeout=2.0)
+    assert len(orch.jobs) == 1
+    assert store.get_listen_watermark("job-thread")["last_message_id"] == "1174109882941440000"
+
+    fake.inbox.append(
+        DiscordMessage(
+            channel_id="parent-ch",
+            content="Ssh dugout should work",
+            message_id="1174109924884480000",
+            author_id="human-1",
+            thread_id="job-thread",
+        )
+    )
+    drain_inbound(
+        orch,
+        facade,
+        channel_id="parent-ch",
+        workspace_id="ws",
+        thread_id="job-thread",
+        since_ms=0,
+        job_pool=pool,
+    )
+    pool.wait(timeout=2.0)
+    assert len(orch.jobs) == 2
+    assert orch.jobs[0].thread_id == "job-thread"
+    assert orch.jobs[1].thread_id == "job-thread"
+    assert orch.jobs[0].channel_id == "parent-ch"
+    assert orch.jobs[1].channel_id == "parent-ch"
+    assert store.get_listen_watermark("job-thread")["last_message_id"] == "1174109924884480000"
+    # Parent tip untouched by thread drains
+    assert store.get_listen_watermark("parent-ch")["last_message_id"] == "1174110260428800000"
+    store.close()
+

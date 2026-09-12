@@ -250,6 +250,16 @@ def build_parser() -> argparse.ArgumentParser:
     host_sub.add_parser("stop", help="Stop the detached host process")
     p_host_status = host_sub.add_parser("status", help="Show whether the host is running and armed")
     p_host_status.add_argument("--json", action="store_true")
+    p_host_doctor = host_sub.add_parser(
+        "doctor",
+        help="Check LaunchAgent / workspace / pid / gateway coherence",
+    )
+    p_host_doctor.add_argument(
+        "--fix",
+        action="store_true",
+        help="Clear gateway_owners rows whose embedded pid is dead",
+    )
+    p_host_doctor.add_argument("--json", action="store_true")
     p_host_run = host_sub.add_parser(
         "run",
         help="Foreground host loop (used by host start; prefer host start)",
@@ -1751,10 +1761,12 @@ def cmd_host(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         return cmd_host_stop(args, out=out)
     if command == "status":
         return cmd_host_status(args, out=out)
+    if command == "doctor":
+        return cmd_host_doctor(args, out=out)
     if command == "run":
         args.announce_host = True
         return cmd_listen(args, out=out)
-    print("host: start, stop, status, or run", file=sys.stderr)
+    print("host: start, stop, status, doctor, or run", file=sys.stderr)
     return 2
 
 
@@ -1881,6 +1893,20 @@ def cmd_host_status(args: argparse.Namespace, *, out: TextIO | None = None) -> i
         if channel_id:
             print(f"channel:{channel_id}", file=out)
     return 0
+
+
+
+def cmd_host_doctor(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
+    out = out or sys.stdout
+    from agent_discord.host.doctor import run_doctor
+
+    code, lines = run_doctor(fix=bool(getattr(args, "fix", False)))
+    if getattr(args, "json", False):
+        print(json.dumps({"ok": code == 0, "lines": lines}, indent=2), file=out)
+    else:
+        for line in lines:
+            print(line, file=out)
+    return code
 
 
 def cmd_connect(args: argparse.Namespace, *, out: TextIO | None = None, stdin: TextIO | None = None) -> int:
