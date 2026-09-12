@@ -14,7 +14,7 @@ from agent_discord.puppetmaster.backend import (
 def test_parse_token_and_reasoning_lines_redact_cot():
     event = _parse_token_line(
         '{"type":"token","content":"def foo():"}',
-        "cursor/grok-4-5",
+        "openrouter/auto",
     )
     assert event is not None
     assert event.kind == EventKind.PROGRESS
@@ -24,14 +24,14 @@ def test_parse_token_and_reasoning_lines_redact_cot():
 
     plan = _parse_token_line(
         '{"type":"reasoning","plan":"edit backend.py","chain_of_thought":"SECRET"}',
-        "cursor/grok-4-5",
+        "openrouter/auto",
     )
     assert plan is not None
     assert plan.summary.stage == "plan"
     assert "SECRET" not in plan.summary.message
     assert "chain_of_thought" not in plan.summary.details
 
-    delta = _parse_token_line('{"type":"delta","text":" + 1"}', "cursor/grok-4-5")
+    delta = _parse_token_line('{"type":"delta","text":" + 1"}', "openrouter/auto")
     assert delta is not None
     assert delta.summary.details["token"] is True
 
@@ -42,7 +42,7 @@ def test_parse_token_and_reasoning_lines_redact_cot():
     assert durable is not None
     assert "live tokens" in str(durable.summary.details["token_text"])
 
-    progress = _parse_progress_line("progress: 40% stage: work running tools", "cursor/grok-4-5")
+    progress = _parse_progress_line("progress: 40% stage: work running tools", "openrouter/auto")
     assert progress is not None
     assert progress.summary.percent == 40.0
 

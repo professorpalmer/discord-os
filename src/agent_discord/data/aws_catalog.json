@@ -166,7 +166,7 @@
       "discord": "SQLite events + spend_events",
       "module": "src/agent_discord/persistence/sqlite.py",
       "rank": "next",
-      "note": "Usage-first spend exists but CLI/swarm often omit cost metadata, so the $10 cap cannot see live Cursor spend.",
+      "note": "Usage-first spend exists but CLI/swarm often omit cost metadata, so the $10 cap cannot see live OpenRouter spend.",
       "source": "job_25b133796ba5"
     },
     {
@@ -278,12 +278,12 @@
       "discord": "Puppetmaster backends on this Mac",
       "module": "src/agent_discord/puppetmaster/backend.py",
       "rank": "shipped",
-      "note": "Agentic --mode follows compute_mode. Cursor CLI omits --implement on analyze. Swarm still remap-handoffs to implement with a write lock.",
+      "note": "Agentic --mode follows compute_mode. Swarm still remap-handoffs to implement with a write lock.",
       "source": "job_25b133796ba5"
     },
     {
       "aws": "SageMaker / Bedrock",
-      "discord": "OpenRouter or Cursor pin; fail closed; no silent remap",
+      "discord": "OpenRouter/agentic pin; fail closed; no OpenRouter fallback; no silent remap",
       "module": "src/agent_discord/config.py",
       "rank": "shipped",
       "note": "Optional Marionette HTTP is fail-closed. Discord OS is not a compute host.",
@@ -318,7 +318,7 @@
       "discord": "live-thread steer",
       "module": "src/agent_discord/orchestration/orchestrator.py",
       "rank": "shipped",
-      "note": "orchestrator.steer fills the backend queue. PuppetmasterCliBackend.stream drains it onto stdin and a state_dir sidecar while the CLI process is live.",
+      "note": "orchestrator.steer fills the backend queue. Agentic stream drains follow-ups while the CLI process is live (fail closed if unsupported).",
       "source": "job_d9a1e008889e"
     }
   ],
@@ -374,9 +374,9 @@
     },
     {
       "id": "cli-compute-mode",
-      "title": "Honor analyze vs implement on the Cursor CLI backend",
+      "title": "Honor analyze vs implement on the agentic OpenRouter backend",
       "rank": "shipped",
-      "adapt": "PuppetmasterCliBackend.cursor_write_argv omits --implement on analyze. Agentic already used --mode.",
+      "adapt": "AgenticPuppetmasterBackend passes --mode analyze|implement; analyze omits --allow-dirty.",
       "source": "job_25b133796ba5"
     },
     {

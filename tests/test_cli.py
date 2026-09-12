@@ -21,7 +21,7 @@ def test_cli_check_live_channel(tmp_path: Path, monkeypatch, capsys):
     ws = tmp_path / ".agent-discord"
     monkeypatch.setenv("AGENT_DISCORD_WORKSPACE", str(ws))
     monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
-    monkeypatch.setenv("PUPPETMASTER_MODEL", "cursor/grok-4-5")
+    monkeypatch.setenv("PUPPETMASTER_MODEL", "openrouter/auto")
     monkeypatch.setattr(
         "agent_discord.discord.rest.fetch_bot_identity",
         lambda token: {"id": "1", "username": "staff-bot"},
@@ -45,7 +45,7 @@ def test_cli_bootstrap_check_run(tmp_path: Path, monkeypatch, capsys):
     ws = tmp_path / ".agent-discord"
     monkeypatch.setenv("AGENT_DISCORD_WORKSPACE", str(ws))
     monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
-    monkeypatch.setenv("PUPPETMASTER_MODEL", "cursor/grok-4-5")
+    monkeypatch.setenv("PUPPETMASTER_MODEL", "openrouter/auto")
 
     assert main(["bootstrap", "--workspace", str(ws)]) == 0
     assert main(["check"]) == 0

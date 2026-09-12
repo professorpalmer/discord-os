@@ -26,7 +26,7 @@ def test_cli_invite_json(tmp_path: Path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("AGENT_DISCORD_WORKSPACE", str(tmp_path / ".agent-discord"))
     monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
-    monkeypatch.setenv("PUPPETMASTER_MODEL", "cursor/grok-4-5")
+    monkeypatch.setenv("PUPPETMASTER_MODEL", "openrouter/auto")
     monkeypatch.setenv("DISCORD_APPLICATION_ID", "1523488316425506947")
     assert main(["invite", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)

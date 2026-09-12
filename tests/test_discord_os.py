@@ -111,7 +111,7 @@ def test_cli_put_get_ls_fake_json(tmp_path: Path, monkeypatch, capsys):
     ws = tmp_path / ".agent-discord"
     monkeypatch.setenv("AGENT_DISCORD_WORKSPACE", str(ws))
     monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
-    monkeypatch.setenv("PUPPETMASTER_MODEL", "cursor/grok-4-5")
+    monkeypatch.setenv("PUPPETMASTER_MODEL", "openrouter/auto")
     src = tmp_path / "payload.bin"
     src.write_bytes(b"discord-os-bytes")
 
@@ -156,7 +156,7 @@ def test_cli_put_get_ls_json_includes_guild_jump_url(tmp_path: Path, monkeypatch
     ws = tmp_path / ".agent-discord"
     monkeypatch.setenv("AGENT_DISCORD_WORKSPACE", str(ws))
     monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
-    monkeypatch.setenv("PUPPETMASTER_MODEL", "cursor/grok-4-5")
+    monkeypatch.setenv("PUPPETMASTER_MODEL", "openrouter/auto")
     src = tmp_path / "payload.bin"
     src.write_bytes(b"guild-pointer")
     guild_id = "1400123456789012345"
@@ -546,7 +546,7 @@ def test_listen_once_dispatches_inbox(tmp_path: Path, monkeypatch, capsys):
     ws = tmp_path / ".agent-discord"
     monkeypatch.setenv("AGENT_DISCORD_WORKSPACE", str(ws))
     monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
-    monkeypatch.setenv("PUPPETMASTER_MODEL", "cursor/grok-4-5")
+    monkeypatch.setenv("PUPPETMASTER_MODEL", "openrouter/auto")
     persist = ws / "fake_discord"
     persist.mkdir(parents=True)
     fake = FakeDiscordMCPProvider(persist_dir=persist)

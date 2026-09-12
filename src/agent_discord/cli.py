@@ -70,7 +70,6 @@ from agent_discord.orchestration.receipts import render_receipt
 from agent_discord.persistence.research import ResearchMemoryStore
 from agent_discord.persistence.sqlite import SQLiteStore
 from agent_discord.puppetmaster.agentic import AgenticPuppetmasterBackend
-from agent_discord.puppetmaster.backend import PuppetmasterCliBackend
 from agent_discord.puppetmaster.fake import FakePuppetmasterBackend
 from agent_discord.puppetmaster.models import AGENTIC_MODEL_PIN, DEFAULT_MODEL_PIN
 
@@ -130,7 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument(
         "--fake",
         action="store_true",
-        help="Use fake MCP + fake Puppetmaster (no network / no Cursor credits)",
+        help="Use fake MCP + fake Puppetmaster (no network / no live compute)",
     )
     p_run.add_argument(
         "--no-discord-post",
@@ -338,7 +337,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_listen.add_argument(
         "--fake",
         action="store_true",
-        help="Use fake MCP + fake Puppetmaster (no network / no Cursor credits)",
+        help="Use fake MCP + fake Puppetmaster (no network / no live compute)",
     )
     p_listen.add_argument(
         "--no-discord-post",
@@ -651,16 +650,10 @@ def cmd_check(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     resolution = resolve_compute(config)
     print(f"backend:    {config.agent_backend}", file=out)
     print(f"compute:    {resolution.requested} -> {resolution.mode}", file=out)
-    if resolution.mode == "agentic":
-        print(
-            f"model pin:  {resolution.model} (adapter {AGENTIC_MODEL_PIN.adapter_name})",
-            file=out,
-        )
-    else:
-        print(
-            f"model pin:  {config.puppetmaster_model} (adapter {DEFAULT_MODEL_PIN.adapter_name})",
-            file=out,
-        )
+    print(
+        f"model pin:  {resolution.model} (adapter {AGENTIC_MODEL_PIN.adapter_name})",
+        file=out,
+    )
     print(f"pm cwd:     {config.puppetmaster_cwd}", file=out)
     from agent_discord.host.realms import parse_channel_realms
     from agent_discord.host.repos import load_host_repos
@@ -1027,7 +1020,9 @@ def cmd_run(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
 
 
 def _select_backend(config: AppConfig) -> PuppetmasterBackend:
-    """Default remains Puppetmaster; Marionette is explicit opt-in via config."""
+    """Product compute is OpenRouter/agentic only; Marionette is explicit opt-in."""
+    from agent_discord.config import ConfigError, has_openrouter_key
+
     if config.agent_backend == "marionette":
         return MarionetteBackend(
             base_url=config.marionette_base_url,
@@ -1038,19 +1033,19 @@ def _select_backend(config: AppConfig) -> PuppetmasterBackend:
             ),
             api_token=config.marionette_api_token,
         )
-    cli = resolve_puppetmaster_cli(config.puppetmaster_cli)
     resolution = resolve_compute(config)
-    if resolution.mode == "agentic":
-        return AgenticPuppetmasterBackend(
-            cli=cli,
-            pin=AGENTIC_MODEL_PIN,
-            cwd=config.puppetmaster_cwd,
-            vault=KeyVault(keys_dir(config)),
+    if resolution.mode != "agentic":
+        raise ConfigError(
+            "product compute requires agentic/OpenRouter; Cursor compute was removed"
         )
-    return PuppetmasterCliBackend(
+    if not has_openrouter_key(config):
+        raise ConfigError("no OpenRouter key; run discord-os connect")
+    cli = resolve_puppetmaster_cli(config.puppetmaster_cli)
+    return AgenticPuppetmasterBackend(
         cli=cli,
-        pin=DEFAULT_MODEL_PIN,
+        pin=AGENTIC_MODEL_PIN,
         cwd=config.puppetmaster_cwd,
+        vault=KeyVault(keys_dir(config)),
     )
 
 

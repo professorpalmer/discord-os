@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.39
+
+Rip Cursor / PM-cursor adapter out of Discord OS. Product compute is OpenRouter / agentic only.
+
+- Remove `puppetmaster cursor` product path and `PuppetmasterCliBackend` cursor invocation.
+- Drop `AGENT_DISCORD_COMPUTE=cursor`; `auto` means agentic-or-fail (no Cursor fallback).
+- Canonical pin is `openrouter/auto`. Missing OpenRouter fails closed (`discord-os connect` / spoken Deny).
+- Retarget Marionette pin + tests to OpenRouter/agentic; purge Cursor framing from `.env.example`, compute docs, catalog notes.
+- Spoken provider failures no longer say "locked to Cursor" / "Unlock … under Cursor".
+
 ## 0.5.38
 
 P2.9 Slash progressive enhancement (still opt-in).

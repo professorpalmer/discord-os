@@ -171,7 +171,7 @@ def test_ticket_connect_cli(tmp_path: Path, monkeypatch, capsys):
     ws = tmp_path / ".agent-discord"
     monkeypatch.setenv("AGENT_DISCORD_WORKSPACE", str(ws))
     monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
-    monkeypatch.setenv("PUPPETMASTER_MODEL", "cursor/grok-4-5")
+    monkeypatch.setenv("PUPPETMASTER_MODEL", "openrouter/auto")
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     ticket = mint_pairing_ticket(ws, provider="openrouter")
     monkeypatch.setattr("sys.stdin", StringIO(FAKE_KEY + "\n"))
@@ -189,7 +189,7 @@ def test_connect_from_env_and_status(tmp_path: Path, monkeypatch, capsys):
     ws = tmp_path / ".agent-discord"
     monkeypatch.setenv("AGENT_DISCORD_WORKSPACE", str(ws))
     monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
-    monkeypatch.setenv("PUPPETMASTER_MODEL", "cursor/grok-4-5")
+    monkeypatch.setenv("PUPPETMASTER_MODEL", "openrouter/auto")
     monkeypatch.setenv("OPENROUTER_API_KEY", FAKE_KEY)
     monkeypatch.setenv("AGENT_DISCORD_COMPUTE", "auto")
     assert main(["connect", "--provider", "openrouter", "--from-env", "--json"]) == 0
@@ -220,7 +220,7 @@ def test_status_json_discord_token_source_host_file_and_empty(tmp_path: Path, mo
     monkeypatch.chdir(tmp_path)
     ws = tmp_path / ".agent-discord"
     monkeypatch.setenv("AGENT_DISCORD_WORKSPACE", str(ws))
-    monkeypatch.setenv("PUPPETMASTER_MODEL", "cursor/grok-4-5")
+    monkeypatch.setenv("PUPPETMASTER_MODEL", "openrouter/auto")
     monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     host = tmp_path / "host.discord_token"
@@ -512,7 +512,7 @@ def test_listen_cli_durable_watermark_with_fake_provider(tmp_path: Path, monkeyp
     ws = tmp_path / ".agent-discord"
     monkeypatch.setenv("AGENT_DISCORD_WORKSPACE", str(ws))
     monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
-    monkeypatch.setenv("PUPPETMASTER_MODEL", "cursor/grok-4-5")
+    monkeypatch.setenv("PUPPETMASTER_MODEL", "openrouter/auto")
     persist = ws / "fake_discord"
     persist.mkdir(parents=True)
     now_ms = int(time.time() * 1000)
@@ -709,12 +709,12 @@ def test_put_still_raises_when_over_max():
         store.put(b"12345", channel_id="ch", filename="big.bin", kind="blob")
 
 
-def test_check_config_agentic_skips_cursor_pin(tmp_path: Path):
+def test_check_config_agentic_ignores_stray_model_pin(tmp_path: Path):
     cfg = load_config(
         env={
             "AGENT_DISCORD_WORKSPACE": str(tmp_path),
             "DISCORD_BOT_TOKEN": "tok",
-            "PUPPETMASTER_MODEL": "cursor/other",
+            "PUPPETMASTER_MODEL": "openrouter/other-ignored",
             "AGENT_DISCORD_COMPUTE": "agentic",
             "OPENROUTER_API_KEY": FAKE_KEY,
         },
@@ -729,7 +729,7 @@ def test_check_config_agentic_requires_connect_without_key(tmp_path: Path):
         env={
             "AGENT_DISCORD_WORKSPACE": str(tmp_path),
             "DISCORD_BOT_TOKEN": "tok",
-            "PUPPETMASTER_MODEL": "cursor/other",
+            "PUPPETMASTER_MODEL": "openrouter/other-ignored",
             "AGENT_DISCORD_COMPUTE": "agentic",
         },
         dotenv_path=tmp_path / "missing.env",

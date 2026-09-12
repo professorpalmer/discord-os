@@ -24,7 +24,7 @@ def _request(run_id: str = "run-1") -> DispatchRequest:
         task_id="task-1",
         run_id=run_id,
         prompt="investigate widgets",
-        model="cursor/grok-4-5",
+        model="openrouter/auto",
         context=ContextSnapshot(
             task_id="task-1",
             memories=[{"content": "prior note"}],
@@ -46,15 +46,15 @@ def test_marionette_fake_dispatch_normalizes_contracts():
             jobs_path="/v1/jobs",
         ),
     )
-    pin = backend.resolve_model("cursor/grok-4-5")
-    assert pin.canonical == "cursor/grok-4-5"
-    assert pin.adapter_name == "grok-4.5"
+    pin = backend.resolve_model("openrouter/auto")
+    assert pin.canonical == "openrouter/auto"
+    assert pin.adapter_name == "openrouter/auto"
 
     result = backend.dispatch(_request())
     assert result.status == TaskStatus.COMPLETED
     assert result.usage is not None
-    assert result.usage.model == "cursor/grok-4-5"
-    assert result.usage.adapter_name == "grok-4.5"
+    assert result.usage.model == "openrouter/auto"
+    assert result.usage.adapter_name == "openrouter/auto"
     assert result.usage.metadata.get("backend") == "marionette"
     assert result.artifacts
     assert any(e.kind.value == "dispatch" or e.summary.stage == "dispatch" for e in result.events)
@@ -68,7 +68,7 @@ def test_marionette_no_silent_model_fallback():
         transport=FakeMarionetteTransport(),
     )
     with pytest.raises(ModelNotAllowedError, match="no silent fallback"):
-        backend.resolve_model("cursor/other")
+        backend.resolve_model("openrouter/other")
 
 
 def test_marionette_missing_base_url_fails_closed():

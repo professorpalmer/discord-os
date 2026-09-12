@@ -1,6 +1,8 @@
-"""Puppetmaster CLI/package backend adapter with pinned model enforcement."""
+"""Shared Puppetmaster CLI helpers (agentic/OpenRouter product compute)."""
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 import json
 import os
@@ -9,7 +11,6 @@ import re
 import shutil
 import subprocess
 import threading
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Optional
 
@@ -24,7 +25,6 @@ from agent_discord.contracts import (
     TaskStatus,
     UsageReceipt,
 )
-from agent_discord.puppetmaster.models import DEFAULT_MODEL_PIN
 from agent_discord.redaction import (
     ALLOWED_REASONING_KEYS,
     redact_text_markers,
@@ -240,303 +240,8 @@ _PHASE_ALIASES = {
 }
 
 
-@dataclass
-class PuppetmasterCliBackend:
-    """Boundary usable with an installed Puppetmaster Cursor worker CLI.
-
-    Invokes ``puppetmaster cursor`` (public CLI shape). Does not spend Cursor
-    credits in tests — use FakePuppetmasterBackend instead.
-
-    Model resolution is exact-allowlist only; never remaps to another model.
-    The CLI receives the adapter model name (``grok-4.5``); receipts/audit keep
-    the canonical pin (``cursor/grok-4-5``).
-    """
-
-    cli: str = "puppetmaster"
-    pin: ModelPin = field(default_factory=lambda: DEFAULT_MODEL_PIN)
-    cwd: Optional[str | Path] = None
-    timeout_seconds: float = 3600.0
-    _statuses: dict[str, TaskStatus] = field(default_factory=dict)
-    _steers: dict[str, list[str]] = field(default_factory=dict)
-
-    def resolve_model(self, requested: str) -> ModelPin:
-        self.pin.assert_allowed(requested)
-        if requested != self.pin.canonical:
-            raise ModelNotAllowedError(
-                f"requested {requested!r} != pinned {self.pin.canonical!r}; "
-                "no silent fallback"
-            )
-        return self.pin
-
-    def available(self) -> bool:
-        return shutil.which(self.cli) is not None
-
-    def dispatch(self, request: DispatchRequest) -> DispatchResult:
-        pin = self.resolve_model(request.model)
-        self._statuses[request.run_id] = TaskStatus.RUNNING
-
-        if not self.available():
-            self._statuses[request.run_id] = TaskStatus.FAILED
-            return DispatchResult(
-                run_id=request.run_id,
-                status=TaskStatus.FAILED,
-                events=(
-                    DispatchEvent(
-                        kind=EventKind.ERROR,
-                        summary=ProgressSummary(
-                            stage="dispatch",
-                            message=f"puppetmaster CLI not found: {self.cli}",
-                        ),
-                    ),
-                ),
-                final_summary="puppetmaster CLI unavailable",
-                error=f"CLI not found: {self.cli}",
-            )
-
-        if not pin.adapter_name:
-            self._statuses[request.run_id] = TaskStatus.FAILED
-            return DispatchResult(
-                run_id=request.run_id,
-                status=TaskStatus.FAILED,
-                events=(
-                    DispatchEvent(
-                        kind=EventKind.ERROR,
-                        summary=ProgressSummary(
-                            stage="dispatch",
-                            message="model pin adapter_name is unavailable",
-                        ),
-                    ),
-                ),
-                final_summary="model pin unavailable",
-                error="adapter_name missing on model pin",
-            )
-
-        prompt = _safe_dispatch_prompt(request)
-        command = [
-            self.cli,
-            "cursor",
-            *cursor_write_argv(request),
-            "--model",
-            pin.adapter_name,
-            "--timeout-seconds",
-            str(int(self.timeout_seconds)),
-        ]
-        workdir = request_workdir(request, self.cwd)
-        if workdir:
-            command.extend(["--cwd", workdir])
-        command.append(prompt)
-
-        try:
-            proc = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_seconds,
-                check=False,
-                cwd=workdir,
-                env=worker_env(),
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            self._statuses[request.run_id] = TaskStatus.FAILED
-            return DispatchResult(
-                run_id=request.run_id,
-                status=TaskStatus.FAILED,
-                events=(
-                    DispatchEvent(
-                        kind=EventKind.ERROR,
-                        summary=ProgressSummary(stage="dispatch", message=str(exc)),
-                    ),
-                ),
-                final_summary="dispatch failed",
-                error=str(exc),
-            )
-
-        safe_meta = _parse_safe_cli_completion(proc.stdout, proc.stderr)
-        if proc.returncode != 0:
-            self._statuses[request.run_id] = TaskStatus.FAILED
-            err = safe_meta.get("error") or proc.stderr.strip() or f"exit {proc.returncode}"
-            return DispatchResult(
-                run_id=request.run_id,
-                status=TaskStatus.FAILED,
-                events=(
-                    DispatchEvent(
-                        kind=EventKind.ERROR,
-                        summary=ProgressSummary(stage="dispatch", message=str(err)),
-                    ),
-                ),
-                final_summary="dispatch failed",
-                error=str(err),
-            )
-
-        summary = str(safe_meta.get("summary") or "completed")
-        self._statuses[request.run_id] = TaskStatus.COMPLETED
-        return DispatchResult(
-            run_id=request.run_id,
-            status=TaskStatus.COMPLETED,
-            events=(
-                DispatchEvent(
-                    kind=EventKind.DISPATCH,
-                    summary=ProgressSummary(
-                        stage="dispatch",
-                        message=f"dispatched via CLI with {pin.adapter_name}",
-                        details={"model": pin.canonical},
-                    ),
-                ),
-                DispatchEvent(
-                    kind=EventKind.RECEIPT,
-                    summary=ProgressSummary(stage="done", message=summary, percent=100.0),
-                    payload=safe_meta,
-                ),
-            ),
-            final_summary=summary,
-            usage=usage_from_cli_meta(pin, self.cli, safe_meta),
-        )
-
-    def steer(self, run_id: str, text: str) -> None:
-        """Queue follow-up text for a live CLI worker."""
-
-        rid = (run_id or "").strip()
-        body = (text or "").strip()
-        if not rid or not body:
-            return
-        self._steers.setdefault(rid, []).append(body)
-
-    def _take_backend_steers(self, run_id: str) -> list[str]:
-        rid = (run_id or "").strip()
-        if not rid:
-            return []
-        return list(self._steers.pop(rid, []))
-
-    def _flush_live_steers(self, run_id: str, proc: Any) -> None:
-        texts = self._take_backend_steers(run_id)
-        if not texts:
-            return
-        blob = "\n".join(texts).strip()
-        if not blob:
-            return
-        path = Path(resolved_state_dir()) / "steers" / f"{run_id}.txt"
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("a", encoding="utf-8") as handle:
-                handle.write(blob + "\n")
-        except OSError:
-            pass
-        stdin = getattr(proc, "stdin", None)
-        if stdin is None:
-            return
-        try:
-            stdin.write(blob + "\n")
-            stdin.flush()
-        except Exception:
-            pass
-
-    def cancel(self, run_id: str) -> bool:
-        """Report unsupported cancellation instead of calling a fake CLI command."""
-        return False
-
-    def status(self, run_id: str) -> TaskStatus:
-        return self._statuses.get(run_id, TaskStatus.PENDING)
-
-    def stream(self, request: DispatchRequest) -> Iterator[DispatchEvent]:
-        """Stream dispatch progress live instead of blocking until completion."""
-        pin = self.resolve_model(request.model)
-        self._statuses[request.run_id] = TaskStatus.RUNNING
-
-        if not self.available():
-            self._statuses[request.run_id] = TaskStatus.FAILED
-            yield DispatchEvent(
-                kind=EventKind.ERROR,
-                summary=ProgressSummary(
-                    stage="dispatch",
-                    message=f"puppetmaster CLI not found: {self.cli}",
-                ),
-            )
-            return
-
-        if not pin.adapter_name:
-            self._statuses[request.run_id] = TaskStatus.FAILED
-            yield DispatchEvent(
-                kind=EventKind.ERROR,
-                summary=ProgressSummary(
-                    stage="dispatch",
-                    message="model pin adapter_name is unavailable",
-                ),
-            )
-            return
-
-        prompt = _safe_dispatch_prompt(request)
-        early_steers = self._take_backend_steers(request.run_id)
-        if early_steers:
-            prompt = f"{prompt}\n\nFollow-up:\n" + "\n".join(early_steers)
-        command = prepend_early_job_id(
-            [
-                self.cli,
-                "cursor",
-                *cursor_write_argv(request),
-                "--model",
-                pin.adapter_name,
-                "--timeout-seconds",
-                str(int(self.timeout_seconds)),
-            ]
-        )
-        workdir = request_workdir(request, self.cwd)
-        if workdir:
-            command.extend(["--cwd", workdir])
-        if cli_supports_flag(self.cli, "cursor", "--json-lines"):
-            command.append("--json-lines")
-        command.append(prompt)
-
-        try:
-            proc = subprocess.Popen(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                stdin=subprocess.PIPE,
-                text=True,
-                cwd=workdir,
-                env=worker_env(),
-            )
-        except OSError as exc:
-            self._statuses[request.run_id] = TaskStatus.FAILED
-            yield DispatchEvent(
-                kind=EventKind.ERROR,
-                summary=ProgressSummary(stage="dispatch", message=str(exc)),
-            )
-            return
-
-        yield DispatchEvent(
-            kind=EventKind.DISPATCH,
-            summary=ProgressSummary(
-                stage="dispatch",
-                message=f"dispatched via CLI with {pin.adapter_name}",
-                percent=2.0,
-                details={"model": pin.canonical},
-            ),
-        )
-        for event in iter_cli_process_events(
-            proc,
-            model=pin.canonical,
-            cli=self.cli,
-            timeout_seconds=self.timeout_seconds,
-            steer_poll=lambda: self._flush_live_steers(request.run_id, proc),
-        ):
-            if event.kind == EventKind.ERROR:
-                self._statuses[request.run_id] = TaskStatus.FAILED
-            elif event.kind == EventKind.RECEIPT:
-                self._statuses[request.run_id] = TaskStatus.COMPLETED
-            yield event
-        stdin = getattr(proc, "stdin", None)
-        if stdin is not None:
-            try:
-                stdin.close()
-            except Exception:
-                pass
-        if self._statuses.get(request.run_id) == TaskStatus.RUNNING:
-            self._statuses[request.run_id] = TaskStatus.COMPLETED
-
-
 def _safe_dispatch_prompt(request: DispatchRequest) -> str:
-    """Build a plain-text prompt suitable for `puppetmaster cursor` (no hidden CoT)."""
+    """Build a plain-text prompt suitable for `puppetmaster agentic` (no hidden CoT)."""
     memory_bits = []
     for item in list(request.context.memories)[:8]:
         if isinstance(item, dict):
@@ -635,13 +340,6 @@ _SAFE_SUMMARY_KEYS = frozenset(
 )
 
 
-def cursor_write_argv(request: DispatchRequest) -> list[str]:
-    """Honor compute_mode. Analyze stays read-only on the Cursor CLI."""
-
-    mode = str((request.metadata or {}).get("compute_mode") or "").strip().lower()
-    if mode == "analyze":
-        return []
-    return ["--implement", "--allow-dirty"]
 
 
 def usage_from_cli_meta(
@@ -827,8 +525,8 @@ def provider_failure_spoken(text: str) -> str:
         or "cursor-only" in lower
     ):
         return (
-            "Puppetmaster is locked to Cursor on this host. "
-            "Unlock the agentic adapter or run under Cursor to continue."
+            "OpenRouter agentic compute is required on this host. "
+            "Run discord-os connect, then retry."
         )
     if (
         "missing_cli" in lower

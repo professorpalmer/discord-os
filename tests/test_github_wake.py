@@ -43,8 +43,8 @@ def _job(store: SQLiteStore, *, task_id: str, thread_id: str, summary: str = "op
     store.create_run(
         run_id=f"{task_id}-run",
         task_id=task_id,
-        model="cursor/grok-4-5",
-        adapter_name="grok-4.5",
+        model="openrouter/auto",
+        adapter_name="openrouter/auto",
         status=TaskStatus.COMPLETED,
     )
     store.update_run(f"{task_id}-run", status=TaskStatus.COMPLETED, summary=summary)

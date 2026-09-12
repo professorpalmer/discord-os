@@ -272,7 +272,7 @@ def test_ssh_cook_denied_local_path_allowed(tmp_path: Path) -> None:
     assert_host_cook_allowed(local)  # no raise
 
     # host_runner_argv still builds mockable remote path (Path A building block).
-    argv = host_runner_argv(ssh, ["puppetmaster", "cursor", "status"])
+    argv = host_runner_argv(ssh, ["puppetmaster", "agentic", "status"])
     assert argv[:3] == ["ssh", "-o", "BatchMode=yes"]
     joined = " ".join(argv)
     assert "ghp_" not in joined

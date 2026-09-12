@@ -6,7 +6,7 @@ Discord is the screen, identity, ACL, notification bus, and object plane. This p
 CLI / Discord
   → listen + JobPool
   → Orchestrator
-       → backend (agentic | cursor | optional Marionette | fake)
+       → backend (agentic/OpenRouter | optional Marionette | fake)
        → SQLite (bindings, tasks, runs, events, memory, artifacts, lineage, GitHub binds/rules, watermarks, gateway lock)
        → Discord facade → object store → REST (default) | optional SaseQ/BrainDAO | fake
 ```

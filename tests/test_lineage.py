@@ -135,8 +135,8 @@ def test_steer_appends_lineage_node(tmp_path: Path):
     store.create_run(
         run_id="r1",
         task_id="t1",
-        model="cursor/grok-4-5",
-        adapter_name="grok-4.5",
+        model="openrouter/auto",
+        adapter_name="openrouter/auto",
         status=TaskStatus.RUNNING,
     )
     orch._run_status["r1"] = TaskStatus.RUNNING
@@ -175,8 +175,8 @@ def _stacked_jobs(store: SQLiteStore) -> tuple[str, str, str]:
     store.create_run(
         run_id="a-run",
         task_id="a",
-        model="cursor/grok-4-5",
-        adapter_name="grok-4.5",
+        model="openrouter/auto",
+        adapter_name="openrouter/auto",
         status=TaskStatus.COMPLETED,
     )
     record_node(store, run_id="a-run", task_id="a", step="intake", body="ship A")
@@ -189,8 +189,8 @@ def _stacked_jobs(store: SQLiteStore) -> tuple[str, str, str]:
     store.create_run(
         run_id="b-run",
         task_id="b",
-        model="cursor/grok-4-5",
-        adapter_name="grok-4.5",
+        model="openrouter/auto",
+        adapter_name="openrouter/auto",
         status=TaskStatus.COMPLETED,
     )
     record_node(store, run_id="b-run", task_id="b", step="intake", body="ship B")
@@ -208,8 +208,8 @@ def _stacked_jobs(store: SQLiteStore) -> tuple[str, str, str]:
     store.create_run(
         run_id="c-run",
         task_id="c",
-        model="cursor/grok-4-5",
-        adapter_name="grok-4.5",
+        model="openrouter/auto",
+        adapter_name="openrouter/auto",
         status=TaskStatus.COMPLETED,
     )
     record_node(store, run_id="c-run", task_id="c", step="intake", body="ship C")

@@ -170,8 +170,8 @@ def test_bound_pr_does_not_mint_second_job(tmp_path: Path):
     store.create_run(
         run_id="t1-run",
         task_id="t1",
-        model="cursor/grok-4-5",
-        adapter_name="grok-4.5",
+        model="openrouter/auto",
+        adapter_name="openrouter/auto",
         status=TaskStatus.COMPLETED,
     )
     store.bind_job_pull_request("t1", repo=REPO, number=88, branch="main")
@@ -224,8 +224,8 @@ def test_single_enqueues_prompt_on_bound_job(tmp_path: Path):
     store.create_run(
         run_id="t1-run",
         task_id="t1",
-        model="cursor/grok-4-5",
-        adapter_name="grok-4.5",
+        model="openrouter/auto",
+        adapter_name="openrouter/auto",
         status=TaskStatus.COMPLETED,
     )
     store.bind_job_pull_request("t1", repo=REPO, number=88, branch="main")
@@ -263,8 +263,8 @@ def test_single_steers_live_bound_job(tmp_path: Path):
     store.create_run(
         run_id="t1-run",
         task_id="t1",
-        model="cursor/grok-4-5",
-        adapter_name="grok-4.5",
+        model="openrouter/auto",
+        adapter_name="openrouter/auto",
         status=TaskStatus.RUNNING,
     )
     store.bind_job_pull_request("t1", repo=REPO, number=88, branch="main")
@@ -300,8 +300,8 @@ def test_single_merge_enqueues_follow_up(tmp_path: Path):
     store.create_run(
         run_id="t1-run",
         task_id="t1",
-        model="cursor/grok-4-5",
-        adapter_name="grok-4.5",
+        model="openrouter/auto",
+        adapter_name="openrouter/auto",
         status=TaskStatus.COMPLETED,
     )
     store.bind_job_pull_request("t1", repo=REPO, number=88, branch="feat", base="main")

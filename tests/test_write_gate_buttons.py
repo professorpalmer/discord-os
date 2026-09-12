@@ -211,8 +211,8 @@ def test_publish_job_card_idle_includes_continue(tmp_path: Path):
     store.create_run(
         run_id="run-idle",
         task_id="t-idle",
-        model="cursor/grok-4-5",
-        adapter_name="grok-4.5",
+        model="openrouter/auto",
+        adapter_name="openrouter/auto",
         status=TaskStatus.COMPLETED,
     )
     store.update_run("run-idle", status=TaskStatus.COMPLETED, summary="Done. Fix shipped.")

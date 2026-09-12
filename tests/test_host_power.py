@@ -217,7 +217,7 @@ def test_cli_host_status_and_run_once(tmp_path: Path, monkeypatch, capsys):
     ws = tmp_path / ".agent-discord"
     monkeypatch.setenv("AGENT_DISCORD_WORKSPACE", str(ws))
     monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
-    monkeypatch.setenv("PUPPETMASTER_MODEL", "cursor/grok-4-5")
+    monkeypatch.setenv("PUPPETMASTER_MODEL", "openrouter/auto")
     assert main(["bootstrap", "--workspace", str(ws)]) == 0
     assert main(["host", "status", "--json"]) == 0
     status = capsys.readouterr().out

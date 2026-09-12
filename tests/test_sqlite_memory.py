@@ -40,7 +40,7 @@ def test_event_append_strips_chain_of_thought_recursively(tmp_path: Path):
         channel_id="c",
         intake_text="hi",
     )
-    store.create_run(run_id="r1", task_id="t1", model="cursor/grok-4-5", adapter_name="grok-4.5")
+    store.create_run(run_id="r1", task_id="t1", model="openrouter/auto", adapter_name="openrouter/auto")
     store.append_event(
         task_id="t1",
         run_id="r1",
@@ -324,8 +324,8 @@ def test_list_recent_jobs_ranks_attention_ahead_of_recency(tmp_path: Path):
     store.create_run(
         run_id="parked-run",
         task_id="parked",
-        model="cursor/grok-4-5",
-        adapter_name="grok-4.5",
+        model="openrouter/auto",
+        adapter_name="openrouter/auto",
         status=TaskStatus.PENDING,
     )
     store.create_task(
@@ -337,8 +337,8 @@ def test_list_recent_jobs_ranks_attention_ahead_of_recency(tmp_path: Path):
     store.create_run(
         run_id="done-run",
         task_id="done",
-        model="cursor/grok-4-5",
-        adapter_name="grok-4.5",
+        model="openrouter/auto",
+        adapter_name="openrouter/auto",
         status=TaskStatus.COMPLETED,
     )
     store.update_run("done-run", status=TaskStatus.COMPLETED, summary="ok")
@@ -361,8 +361,8 @@ def test_list_recent_jobs_ranks_waiting_after_need(tmp_path: Path):
     store.create_run(
         run_id="wait-run",
         task_id="wait",
-        model="cursor/grok-4-5",
-        adapter_name="grok-4.5",
+        model="openrouter/auto",
+        adapter_name="openrouter/auto",
         status=TaskStatus.COMPLETED,
     )
     store.update_run("wait-run", status=TaskStatus.COMPLETED, summary="pr open")
@@ -376,8 +376,8 @@ def test_list_recent_jobs_ranks_waiting_after_need(tmp_path: Path):
     store.create_run(
         run_id="need-run",
         task_id="need",
-        model="cursor/grok-4-5",
-        adapter_name="grok-4.5",
+        model="openrouter/auto",
+        adapter_name="openrouter/auto",
         status=TaskStatus.COMPLETED,
     )
     store.update_run("need-run", status=TaskStatus.COMPLETED, summary="pr open")
@@ -391,8 +391,8 @@ def test_list_recent_jobs_ranks_waiting_after_need(tmp_path: Path):
     store.create_run(
         run_id="done-run",
         task_id="done",
-        model="cursor/grok-4-5",
-        adapter_name="grok-4.5",
+        model="openrouter/auto",
+        adapter_name="openrouter/auto",
         status=TaskStatus.COMPLETED,
     )
     store.update_run("done-run", status=TaskStatus.COMPLETED, summary="ok")
@@ -413,16 +413,16 @@ def test_list_recent_jobs_uses_latest_run_per_task(tmp_path: Path):
     store.create_run(
         run_id="failed-run",
         task_id="t",
-        model="cursor/grok-4-5",
-        adapter_name="grok-4.5",
+        model="openrouter/auto",
+        adapter_name="openrouter/auto",
         status=TaskStatus.FAILED,
     )
     store.update_run("failed-run", status=TaskStatus.FAILED, summary="boom")
     store.create_run(
         run_id="ok-run",
         task_id="t",
-        model="cursor/grok-4-5",
-        adapter_name="grok-4.5",
+        model="openrouter/auto",
+        adapter_name="openrouter/auto",
         status=TaskStatus.COMPLETED,
     )
     store.update_run("ok-run", status=TaskStatus.COMPLETED, summary="ok")

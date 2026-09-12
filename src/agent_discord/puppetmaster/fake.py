@@ -1,4 +1,4 @@
-"""Deterministic fake Puppetmaster backend for tests (no Cursor credits)."""
+"""Deterministic fake Puppetmaster backend for tests (no live compute)."""
 
 from __future__ import annotations
 

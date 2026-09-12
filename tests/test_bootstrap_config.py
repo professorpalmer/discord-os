@@ -31,18 +31,18 @@ def test_load_config_defaults(tmp_path: Path, monkeypatch):
     assert cfg.interactions == "off"
 
 
-def test_check_config_requires_token_and_pin(tmp_path: Path):
+def test_check_config_requires_token_and_openrouter(tmp_path: Path):
     cfg = load_config(
         env={
             "AGENT_DISCORD_WORKSPACE": str(tmp_path),
             "DISCORD_BOT_TOKEN": "",
-            "PUPPETMASTER_MODEL": "cursor/other",
+            "PUPPETMASTER_MODEL": "openrouter/auto",
         },
         dotenv_path=tmp_path / "missing.env",
     )
     problems = check_config(cfg, require_token=True)
     assert any("DISCORD_BOT_TOKEN" in p for p in problems)
-    assert any("PUPPETMASTER_MODEL" in p for p in problems)
+    assert any("run discord-os connect" in p for p in problems)
 
 
 def test_check_config_requires_stdio_command(tmp_path: Path):
@@ -53,7 +53,8 @@ def test_check_config_requires_stdio_command(tmp_path: Path):
             "DISCORD_MCP_PROVIDER": "saseq",
             "DISCORD_MCP_TRANSPORT": "stdio",
             "DISCORD_MCP_STDIO_COMMAND": "",
-            "PUPPETMASTER_MODEL": "cursor/grok-4-5",
+            "PUPPETMASTER_MODEL": "openrouter/auto",
+            "OPENROUTER_API_KEY": "sk-or-v1-test",
         },
         dotenv_path=tmp_path / "missing.env",
     )
@@ -75,7 +76,7 @@ def test_bootstrap_creates_workspace_and_db(tmp_path: Path, monkeypatch):
     info = describe_bootstrap(cfg)
     assert info["bootstrapped"] is True
     assert info["product"] == "Discord OS"
-    assert info["puppetmaster_adapter_name"] == "grok-4.5"
+    assert info["puppetmaster_adapter_name"] == "openrouter/auto"
     assert info["agent_backend"] == "puppetmaster"
     assert (tmp_path / ".env").is_file()
     assert "DISCORD_BOT_TOKEN=" in (tmp_path / ".env").read_text(encoding="utf-8")
@@ -86,7 +87,8 @@ def test_marionette_backend_requires_base_url(tmp_path: Path):
         env={
             "AGENT_DISCORD_WORKSPACE": str(tmp_path),
             "DISCORD_BOT_TOKEN": "tok",
-            "PUPPETMASTER_MODEL": "cursor/grok-4-5",
+            "PUPPETMASTER_MODEL": "openrouter/auto",
+            "OPENROUTER_API_KEY": "sk-or-v1-test",
             "AGENT_DISCORD_BACKEND": "marionette",
             "MARIONETTE_BASE_URL": "",
         },
@@ -101,7 +103,8 @@ def test_marionette_backend_ok_when_configured(tmp_path: Path):
         env={
             "AGENT_DISCORD_WORKSPACE": str(tmp_path),
             "DISCORD_BOT_TOKEN": "tok",
-            "PUPPETMASTER_MODEL": "cursor/grok-4-5",
+            "PUPPETMASTER_MODEL": "openrouter/auto",
+            "OPENROUTER_API_KEY": "sk-or-v1-test",
             "AGENT_DISCORD_BACKEND": "marionette",
             "MARIONETTE_BASE_URL": "http://127.0.0.1:8787",
         },
@@ -116,7 +119,8 @@ def test_interactions_http_requires_application_id_and_public_key(tmp_path: Path
         env={
             "AGENT_DISCORD_WORKSPACE": str(tmp_path),
             "DISCORD_BOT_TOKEN": "tok",
-            "PUPPETMASTER_MODEL": "cursor/grok-4-5",
+            "PUPPETMASTER_MODEL": "openrouter/auto",
+            "OPENROUTER_API_KEY": "sk-or-v1-test",
             "AGENT_DISCORD_INTERACTIONS": "http",
         },
         dotenv_path=tmp_path / "missing.env",
@@ -128,7 +132,8 @@ def test_interactions_http_requires_application_id_and_public_key(tmp_path: Path
         env={
             "AGENT_DISCORD_WORKSPACE": str(tmp_path),
             "DISCORD_BOT_TOKEN": "tok",
-            "PUPPETMASTER_MODEL": "cursor/grok-4-5",
+            "PUPPETMASTER_MODEL": "openrouter/auto",
+            "OPENROUTER_API_KEY": "sk-or-v1-test",
             "AGENT_DISCORD_INTERACTIONS": "http",
             "DISCORD_APPLICATION_ID": "app",
             "DISCORD_PUBLIC_KEY": "aa" * 32,
@@ -165,3 +170,19 @@ def test_resolve_puppetmaster_cli_prefers_venv_sibling(tmp_path: Path, monkeypat
         str(tmp_path / "python-bin" / "python"),
     )
     assert resolve_puppetmaster_cli("puppetmaster") == str(sibling)
+
+
+def test_load_config_rejects_cursor_compute(tmp_path: Path):
+    try:
+        load_config(
+            env={
+                "AGENT_DISCORD_WORKSPACE": str(tmp_path),
+                "AGENT_DISCORD_COMPUTE": "cursor",
+            },
+            dotenv_path=tmp_path / "missing.env",
+        )
+        raised = False
+    except ConfigError as exc:
+        raised = True
+        assert "agentic" in str(exc).lower() or "auto" in str(exc).lower()
+    assert raised

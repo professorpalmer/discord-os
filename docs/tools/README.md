@@ -28,7 +28,7 @@ DISCORD_OS_TOOLS={"aws":{"bin":"aws","hint":"sts"}}
 
 Host tool auth is one-time on the Mac. `discord-os add github` writes `GH_TOKEN` into the host `.env` (`~/discord-os/.env` or cwd). Every worker inherits `PATH` plus `GH_TOKEN` / `GITHUB_TOKEN`. Analyze-mode is never told to run `gh` itself — the host runs it when signed in. If `gh` is unsigned, the live card says one line plus how-to, then Done. No worker essay.
 
-The worker prompt says: call these from the shell; do not wait for Cursor MCP.
+The worker prompt says: call these from the shell; do not wait for an IDE MCP bridge.
 
 ## Code
 

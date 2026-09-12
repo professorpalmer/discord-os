@@ -46,7 +46,7 @@ def bootstrap_workspace(
         "discord_mcp_transport": config.discord_mcp_transport,
         "agent_backend": config.agent_backend,
         "puppetmaster_model": config.puppetmaster_model,
-        "puppetmaster_adapter_name": "grok-4.5",
+        "puppetmaster_adapter_name": "openrouter/auto",
     }
     marker_path = config.workspace / BOOTSTRAP_MARKER
     marker_path.write_text(json.dumps(marker, indent=2) + "\n", encoding="utf-8")

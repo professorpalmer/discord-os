@@ -107,7 +107,7 @@ def load_config(
             f"DISCORD_MCP_TRANSPORT must be 'http' or 'stdio', got {transport!r}"
         )
 
-    model = (merged.get("PUPPETMASTER_MODEL") or "cursor/grok-4-5").strip()
+    model = (merged.get("PUPPETMASTER_MODEL") or "openrouter/auto").strip()
     db_path = ws / "agent_discord.sqlite3"
     cwd_raw = (merged.get("PUPPETMASTER_CWD") or "").strip()
     puppetmaster_cwd = Path(cwd_raw).expanduser().resolve() if cwd_raw else Path.cwd()
@@ -119,9 +119,10 @@ def load_config(
         )
 
     compute = (merged.get("AGENT_DISCORD_COMPUTE") or "auto").strip().lower()
-    if compute not in {"auto", "cursor", "agentic"}:
+    if compute not in {"auto", "agentic"}:
         raise ConfigError(
-            f"AGENT_DISCORD_COMPUTE must be 'auto', 'cursor', or 'agentic', got {compute!r}"
+            f"AGENT_DISCORD_COMPUTE must be 'auto' or 'agentic', got {compute!r} "
+            "(Cursor compute was removed; product compute is OpenRouter/agentic only)"
         )
 
     openrouter_env = (merged.get("OPENROUTER_API_KEY") or "").strip()
@@ -267,7 +268,7 @@ def check_config(config: AppConfig, *, require_token: bool = True) -> list[str]:
                 "(no fabricated default npm package; set an explicit command, e.g. "
                 "'npx -y @iqai/mcp-discord' for BrainDAO)"
             )
-    if config.compute not in {"auto", "cursor", "agentic"}:
+    if config.compute not in {"auto", "agentic"}:
         problems.append("invalid AGENT_DISCORD_COMPUTE")
     if config.interactions not in {"off", "http"}:
         problems.append("invalid AGENT_DISCORD_INTERACTIONS")
@@ -277,14 +278,12 @@ def check_config(config: AppConfig, *, require_token: bool = True) -> list[str]:
         if not config.discord_public_key:
             problems.append("DISCORD_PUBLIC_KEY is required when interactions=http")
     resolution = resolve_compute(config)
-    if resolution.mode == "cursor" and config.puppetmaster_model != "cursor/grok-4-5":
-        problems.append(
-            "PUPPETMASTER_MODEL must be cursor/grok-4-5 (pinned; no silent fallback)"
-        )
     if resolution.mode == "agentic" and not has_openrouter_key(config):
         problems.append(
             "no OpenRouter key; run discord-os connect"
         )
+    # Product model comes from resolve_compute (openrouter/auto). Stray
+    # PUPPETMASTER_MODEL values are ignored — never remapped to Cursor.
     if config.agent_backend not in {"puppetmaster", "marionette"}:
         problems.append("invalid AGENT_DISCORD_BACKEND")
     if config.agent_backend == "marionette" and not config.marionette_base_url:
@@ -316,31 +315,20 @@ def has_openrouter_key(config: AppConfig) -> bool:
 
 
 def resolve_compute(config: AppConfig) -> ComputeResolution:
-    """Resolve auto|cursor|agentic. auto uses agentic when a key is present."""
+    """Resolve auto|agentic. auto means agentic when OpenRouter is present.
+
+    Missing OpenRouter fails closed via check_config / runtime Deny — never Cursor.
+    """
 
     from agent_discord.puppetmaster.models import AGENTIC_CANONICAL_MODEL
 
     requested = config.compute
-    if requested == "cursor":
-        return ComputeResolution(
-            mode="cursor",
-            requested="cursor",
-            model=config.puppetmaster_model,
-        )
-    if requested == "agentic":
-        return ComputeResolution(
-            mode="agentic",
-            requested="agentic",
-            model=AGENTIC_CANONICAL_MODEL,
-        )
-    if has_openrouter_key(config):
-        return ComputeResolution(
-            mode="agentic",
-            requested="auto",
-            model=AGENTIC_CANONICAL_MODEL,
+    if requested not in {"auto", "agentic"}:
+        raise ConfigError(
+            f"AGENT_DISCORD_COMPUTE must be 'auto' or 'agentic', got {requested!r}"
         )
     return ComputeResolution(
-        mode="cursor",
-        requested="auto",
-        model=config.puppetmaster_model,
+        mode="agentic",
+        requested=requested,
+        model=AGENTIC_CANONICAL_MODEL,
     )

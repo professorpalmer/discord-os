@@ -67,7 +67,7 @@ def test_dispatch_persists_events_and_posts_receipt(tmp_path: Path):
     )
     assert receipt.status == TaskStatus.COMPLETED
     assert backend.last_request is not None
-    assert backend.last_request.model == "cursor/grok-4-5"
+    assert backend.last_request.model == "openrouter/auto"
     assert backend.last_request.context.memories
     assert backend.last_request.metadata["compute_mode"] == "analyze"
     assert fake_discord.threads
@@ -91,7 +91,7 @@ def test_dispatch_persists_events_and_posts_receipt(tmp_path: Path):
     )
 
     rendered = render_receipt(receipt)
-    assert "cursor/grok-4-5" in rendered or "grok-4.5" in rendered
+    assert "openrouter/auto" in rendered or "openrouter/auto" in rendered
     assert "chain_of_thought" not in rendered
     jobs = store.list_recent_jobs("ch", limit=5)
     assert jobs

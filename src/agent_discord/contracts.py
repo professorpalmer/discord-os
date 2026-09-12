@@ -1,6 +1,6 @@
 """Explicit typed contracts shared across adapters and orchestration.
 
-Tests inject fakes against these protocols — no Discord, Cursor, or network required.
+Tests inject fakes against these protocols — no Discord, network, or live compute required.
 """
 
 from __future__ import annotations
@@ -36,11 +36,11 @@ class EventKind(str, Enum):
 
 @dataclass(frozen=True)
 class ModelPin:
-    """Pinned Cursor model — allowlist is exact-match only; no silent fallback."""
+    """Pinned product model — allowlist is exact-match only; no silent fallback."""
 
-    canonical: str = "cursor/grok-4-5"
-    adapter_name: str = "grok-4.5"
-    allowlist: tuple[str, ...] = ("cursor/grok-4-5",)
+    canonical: str = "openrouter/auto"
+    adapter_name: str = "openrouter/auto"
+    allowlist: tuple[str, ...] = ("openrouter/auto",)
 
     def assert_allowed(self, model: str) -> None:
         if model not in self.allowlist:

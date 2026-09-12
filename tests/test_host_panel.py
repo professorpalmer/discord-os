@@ -480,8 +480,8 @@ def test_panel_last_job_names_need_live_or_last(tmp_path: Path):
     store.create_run(
         run_id="parked-run",
         task_id="parked",
-        model="cursor/grok-4-5",
-        adapter_name="grok-4.5",
+        model="openrouter/auto",
+        adapter_name="openrouter/auto",
         status=TaskStatus.PENDING,
     )
     assert _panel_last_job(store, "ch").startswith("Need:")

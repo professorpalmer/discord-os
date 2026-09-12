@@ -213,7 +213,7 @@ def test_cli_interactions_off_without_flags(tmp_path: Path, monkeypatch, capsys)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("AGENT_DISCORD_WORKSPACE", str(tmp_path / ".agent-discord"))
     monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
-    monkeypatch.setenv("PUPPETMASTER_MODEL", "cursor/grok-4-5")
+    monkeypatch.setenv("PUPPETMASTER_MODEL", "openrouter/auto")
     monkeypatch.setenv("AGENT_DISCORD_INTERACTIONS", "off")
     assert main(["interactions"]) == 1
     err = capsys.readouterr().err
