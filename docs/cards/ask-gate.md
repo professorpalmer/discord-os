@@ -45,6 +45,10 @@ discord-os gate-hook
 discord-os gate-hook --print-attach
 ```
 
+Local agentic cooks also get `PYTHONPATH=<gate_inject>:…` so
+`sitecustomize.py` wraps Puppetmaster `AgenticAdapter._execute_tool` and
+**really invokes** that CLI before each tool (not env-stamp-only).
+
 Listen/orch drains `pending/`, parks the card, and writes `results/` when
 the phone (or spoken Allow / Deny / Always, or expire) resolves it. Fail
 closed: unanswered → deny. Shapes stolen (not cloned): albertorsesc
@@ -102,10 +106,14 @@ resolver instead of resuming an implement.
 
 ## Residual
 
-- Puppetmaster agentic 1.27 does not invoke a host PreToolUse hook inside
-  `_execute_tool`. Live OpenRouter cooks block when an adapter calls
-  `request_tool_hold` or when a PreToolUse-shaped wrapper runs
-  `discord-os gate-hook` (env is stamped on every agentic spawn).
+- **Local agentic PreToolUse now fires**: every local OpenRouter/agentic spawn
+  prepends `orchestration/gate_inject/` onto `PYTHONPATH` so CPython loads
+  `sitecustomize.py`, which wraps `AgenticAdapter._execute_tool` and runs
+  `discord-os gate-hook` before each tool. Deny / timeout → tool does not run.
+  Write-gate off / session Always still auto-allow via listen drain (no card).
+- **Path A SSH gap (P1 — gates across SSH)**: remote `puppetmaster agentic`
+  over SSH does **not** share this Mac's `DISCORD_OS_GATE_*` file queue. Tool
+  asks do not hold across SSH yet; document honestly, do not pretend.
 - Per-tool (exact tool name) allowlists beyond class
 - Multi-select AskUserQuestion confirm row
 
@@ -116,7 +124,8 @@ resolver instead of resuming an implement.
 - `src/agent_discord/orchestration/service.py` — tool-class session prefs
 - `src/agent_discord/orchestration/orchestrator.py` — `request_tool_hold` /
   `raise_tool_gate` / `raise_ask_user` / resolve
-- `src/agent_discord/puppetmaster/agentic.py` — stamps gate env on spawn
+- `src/agent_discord/puppetmaster/agentic.py` — stamps gate env + PYTHONPATH inject on spawn
+- `src/agent_discord/orchestration/gate_inject/sitecustomize.py` — wraps agentic `_execute_tool`
 - `src/agent_discord/host/panel.py` — ask button → `on_job("ask", run#idx)`
 - `src/agent_discord/orchestration/listen.py` — spoken Allow / Deny / Always;
   drain pending hook files

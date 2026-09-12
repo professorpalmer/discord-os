@@ -42,7 +42,7 @@ Attribution-BrainDAO = "https://github.com/BrainDAO/mcp-discord"
 where = ["src"]
 
 [tool.setuptools.package-data]
-agent_discord = ["data/*.json"]
+agent_discord = ["data/*.json", "orchestration/gate_inject/*.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

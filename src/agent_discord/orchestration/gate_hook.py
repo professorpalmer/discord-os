@@ -47,6 +47,7 @@ ENV_GATE_ROOT = "DISCORD_OS_GATE_ROOT"
 ENV_RUN_ID = "DISCORD_OS_RUN_ID"
 ENV_TIMEOUT = "DISCORD_OS_GATE_TIMEOUT_SECONDS"
 ENV_HOOK = "DISCORD_OS_GATE_HOOK"
+ENV_INJECT = "DISCORD_OS_GATE_INJECT"
 DEFAULT_POLL_SECONDS = 0.05
 PENDING_DIR = "pending"
 RESULTS_DIR = "results"
@@ -439,6 +440,13 @@ def build_request(
     )
 
 
+
+def gate_inject_dir() -> Path:
+    """Directory with sitecustomize.py prepended onto agentic PYTHONPATH."""
+
+    return Path(__file__).resolve().parent / "gate_inject"
+
+
 def attach_gate_env(
     env: dict[str, str],
     *,
@@ -459,6 +467,14 @@ def attach_gate_env(
     if timeout_seconds is not None:
         env[ENV_TIMEOUT] = str(float(timeout_seconds))
     env.setdefault(ENV_HOOK, "discord-os gate-hook")
+    # Prepend sitecustomize inject so puppetmaster agentic PreToolUse really fires.
+    inject = gate_inject_dir()
+    if (inject / "sitecustomize.py").is_file():
+        prev = str(env.get("PYTHONPATH") or "").strip()
+        env["PYTHONPATH"] = (
+            str(inject) if not prev else f"{inject}{os.pathsep}{prev}"
+        )
+        env[ENV_INJECT] = "1"
     return run_dir
 
 
@@ -829,6 +845,70 @@ def drain_gate_queue(
                 continue
             if polled.get("awaiting_gate"):
                 continue
+            # File-queue hook always enqueues; honor write-gate off / session
+            # Always here so the blocked worker unblocks without a Discord card.
+            if req.kind not in {GATE_KIND_ASK, GATE_KIND_PLAN} and not is_exit_plan_tool(
+                req.tool_name
+            ):
+                channel_id = ""
+                thread_id = ""
+                try:
+                    run = {}
+                    getter = getattr(store, "get_run", None) if store is not None else None
+                    if callable(getter):
+                        run = getter(req.run_id) or {}
+                    task_id = str((run or {}).get("task_id") or "")
+                    if task_id and store is not None:
+                        task = (getattr(store, "get_task", lambda _t: {})(task_id) or {})
+                        meta_reader = getattr(store, "task_metadata", None)
+                        meta = meta_reader(task_id) if callable(meta_reader) else {}
+                        if not isinstance(meta, dict):
+                            meta = {}
+                        channel_id = str(
+                            task.get("channel_id") or meta.get("channel_id") or ""
+                        )
+                        thread_id = str(
+                            task.get("thread_id") or meta.get("thread_id") or ""
+                        )
+                except Exception:
+                    channel_id = ""
+                    thread_id = ""
+                try:
+                    decided = tool_class_decision(
+                        store,
+                        req.tool_class or req.tool_name,
+                        channel_id=channel_id,
+                        thread_id=thread_id,
+                    )
+                except Exception:
+                    decided = None
+                if decided is not None and decided.decision == "allow":
+                    written = GateHoldResult(
+                        request_id=req.request_id,
+                        decision="allow",
+                        reason=decided.reason or "allowed",
+                        tool_class=decided.tool_class or req.tool_class,
+                    )
+                    complete_request(run_dir, written)
+                    acted.append(
+                        {
+                            "action": "auto_allow",
+                            "run_id": req.run_id,
+                            **written.to_payload(),
+                        }
+                    )
+                    continue
+                if decided is not None and decided.decision == "deny":
+                    denied = deny_result(
+                        req.request_id,
+                        decided.reason or "denied",
+                        decided.tool_class or req.tool_class,
+                    )
+                    complete_request(run_dir, denied)
+                    acted.append(
+                        {"action": "deny", "run_id": req.run_id, **denied.to_payload()}
+                    )
+                    continue
             try:
                 if req.kind == GATE_KIND_ASK:
                     orchestrator.raise_ask_user(
@@ -1008,6 +1088,12 @@ PreToolUse-shaped command (stdin JSON, stdout permissionDecision, exit 0):
 Listen/orch drains pending/ , parks the card, and writes results/ when
 Allow / Deny / Always / Approve / Cancel (or expire) lands. Fail closed:
 no result → deny.
+
+Local agentic: PYTHONPATH prepends gate_inject/sitecustomize.py so
+AgenticAdapter._execute_tool invokes this hook before each tool.
+
+Path A SSH: gate queue stays on this Mac — gates across SSH are not
+wired yet (P1).
 
 In-process adapters: request_tool_hold / request_plan_hold.
 """

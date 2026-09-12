@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### P0.3 Gate-hook really fires
+
+- Local OpenRouter/agentic cooks no longer only *stamp* `DISCORD_OS_GATE_*`.
+  Spawns prepend `orchestration/gate_inject/` to `PYTHONPATH` so
+  `sitecustomize.py` wraps Puppetmaster `AgenticAdapter._execute_tool` and
+  runs `discord-os gate-hook` before each tool (hold → Discord Ask/Allow card).
+- Listen drain auto-allows when write-gate is off or session Always applies
+  (hook still enqueues; worker unblocks without a spurious card).
+- Path A SSH: gate file-queue does **not** cross SSH yet — residual P1
+  "gates across SSH". Docs: [docs/cards/ask-gate.md](docs/cards/ask-gate.md).
+- Tests prove inject arms + patched `_execute_tool` invokes the hook (not
+  install-only). No version bump / tag / PyPI in this commit.
+
 ## 0.5.44
 
 Path A live SSH progress pipe to Discord + CI flake hardens (drain/JobPool timing).

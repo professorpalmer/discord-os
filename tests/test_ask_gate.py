@@ -512,3 +512,226 @@ def test_drain_writes_result_from_gate_metadata(tmp_path: Path):
     assert found is not None
     assert found.decision == "allow"
     store.close()
+
+
+def test_attach_gate_env_stamps_inject_pythonpath(tmp_path: Path):
+    from agent_discord.orchestration.gate_hook import (
+        ENV_INJECT,
+        attach_gate_env,
+        gate_inject_dir,
+    )
+
+    env: dict[str, str] = {}
+    run_dir = attach_gate_env(env, run_id="run-inject-1", workspace=tmp_path)
+    assert run_dir.is_dir()
+    inject = gate_inject_dir()
+    assert (inject / "sitecustomize.py").is_file()
+    assert env.get(ENV_INJECT) == "1"
+    assert str(inject) in (env.get("PYTHONPATH") or "")
+    assert env.get("DISCORD_OS_GATE_HOOK") == "discord-os gate-hook"
+    assert env.get("DISCORD_OS_RUN_ID") == "run-inject-1"
+
+
+def test_gate_inject_patch_invokes_hook_before_tool(tmp_path: Path, monkeypatch):
+    """Prove the live wrap fires gate-hook — not install/stamp-only."""
+
+    import importlib.util
+
+    inject_path = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "agent_discord"
+        / "orchestration"
+        / "gate_inject"
+        / "sitecustomize.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "discord_os_gate_sitecustomize_test", inject_path
+    )
+    assert spec and spec.loader
+    sc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sc)
+
+    calls: list[tuple[str, object]] = []
+
+    class _Adapter:
+        def _execute_tool(self, name, args, cwd, implement, task):
+            calls.append(("tool", name))
+            return f"ran:{name}"
+
+    monkeypatch.setenv("DISCORD_OS_GATE_DIR", str(tmp_path / "g"))
+    monkeypatch.setenv("DISCORD_OS_RUN_ID", "run-fire")
+    monkeypatch.setenv("DISCORD_OS_GATE_TIMEOUT_SECONDS", "0.15")
+    monkeypatch.setenv("DISCORD_OS_GATE_INJECT", "1")
+
+    def fake_runner(argv, input=None, capture_output=True, text=True, timeout=None, env=None):
+        calls.append(("hook", argv))
+        # Simulate gate-hook deny (timeout path shape)
+        class _Proc:
+            stdout = json.dumps(
+                {
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "timeout",
+                    "continue": False,
+                }
+            )
+            stderr = ""
+            returncode = 0
+
+        return _Proc()
+
+    assert sc.patch_execute_tool(_Adapter, runner=fake_runner) is True
+    out = _Adapter()._execute_tool("run_terminal", {"command": "ls"}, tmp_path, True, None)
+    assert any(row[0] == "hook" for row in calls)
+    assert not any(row[0] == "tool" for row in calls)
+    assert "denied" in out.lower() or "gate-hook" in out.lower()
+
+
+def test_gate_inject_patch_allows_then_runs_tool(tmp_path: Path, monkeypatch):
+    from pathlib import Path as P
+    import importlib.util
+
+    inject_path = (
+        P(__file__).resolve().parents[1]
+        / "src"
+        / "agent_discord"
+        / "orchestration"
+        / "gate_inject"
+        / "sitecustomize.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "discord_os_gate_sitecustomize_allow", inject_path
+    )
+    assert spec and spec.loader
+    sc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sc)
+
+    ran: list[str] = []
+
+    class _Adapter:
+        def _execute_tool(self, name, args, cwd, implement, task):
+            ran.append(name)
+            return "ok"
+
+    monkeypatch.setenv("DISCORD_OS_GATE_DIR", str(tmp_path / "g2"))
+    monkeypatch.setenv("DISCORD_OS_RUN_ID", "run-allow")
+    monkeypatch.setenv("DISCORD_OS_GATE_INJECT", "1")
+
+    def fake_runner(argv, input=None, capture_output=True, text=True, timeout=None, env=None):
+        class _Proc:
+            stdout = json.dumps(
+                {
+                    "permissionDecision": "allow",
+                    "permissionDecisionReason": "Allowed.",
+                    "continue": True,
+                    "gate_result": "allow",
+                }
+            )
+            stderr = ""
+            returncode = 0
+
+        return _Proc()
+
+    assert sc.patch_execute_tool(_Adapter, runner=fake_runner) is True
+    assert _Adapter()._execute_tool("write_file", {"path": "a"}, tmp_path, True, None) == "ok"
+    assert ran == ["write_file"]
+
+
+def test_drain_auto_allows_when_write_gate_off(tmp_path: Path):
+    from agent_discord.orchestration.gate_hook import (
+        ensure_run_gate_dir,
+        resolve_run_gate_dir,
+    )
+
+    orch, store, fake, backend = _orch(tmp_path)
+    set_write_gate(store, False)
+    receipt = orch.run_task(
+        TaskIntake(
+            text="review auto allow drain",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="live-drain-auto",
+        )
+    )
+    run_dir = ensure_run_gate_dir(
+        resolve_run_gate_dir(run_id=receipt.run_id, workspace=tmp_path, store=store)
+    )
+    req = build_request(run_id=receipt.run_id, tool_name="shell", tool_input="pwd")
+    enqueue_request(run_dir, req)
+    acted = drain_gate_queue(orch)
+    assert any(row.get("action") == "auto_allow" for row in acted)
+    found = read_result(run_dir, req.request_id)
+    assert found is not None
+    assert found.decision == "allow"
+    # No Discord park when write-gate is off
+    assert orch.gate_result_for(receipt.run_id).get("awaiting_gate") in {None, False, 0, ""}
+    store.close()
+
+
+def test_live_hook_cli_fires_enqueue_then_drain_parks(tmp_path: Path):
+    """End-to-end: real run_hook enqueues; drain parks Ask/Allow card."""
+
+    orch, store, fake, backend = _orch(tmp_path)
+    set_write_gate(store, True)
+    receipt = orch.run_task(
+        TaskIntake(
+            text="review live hook fire",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="live-hook-fire",
+        )
+    )
+    from agent_discord.orchestration.gate_hook import (
+        ensure_run_gate_dir,
+        resolve_run_gate_dir,
+        run_hook,
+    )
+
+    run_dir = ensure_run_gate_dir(
+        resolve_run_gate_dir(run_id=receipt.run_id, workspace=tmp_path, store=store)
+    )
+    env = {
+        "DISCORD_OS_GATE_DIR": str(run_dir),
+        "DISCORD_OS_RUN_ID": receipt.run_id,
+        "DISCORD_OS_GATE_TIMEOUT_SECONDS": "2.0",
+    }
+
+    box: dict = {}
+
+    def hold() -> None:
+        stdin = io.StringIO(
+            json.dumps(
+                {
+                    "tool_name": "run_terminal",
+                    "tool_input": {"command": "pytest -q"},
+                    "run_id": receipt.run_id,
+                }
+            )
+        )
+        stdout = io.StringIO()
+        box["code"] = run_hook([], stdin=stdin, stdout=stdout, env=env)
+        box["payload"] = json.loads(stdout.getvalue())
+
+    thread = threading.Thread(target=hold)
+    thread.start()
+    deadline = time.time() + 2.0
+    pending_seen = False
+    while time.time() < deadline:
+        from agent_discord.orchestration.gate_hook import list_pending
+
+        if list_pending(run_dir):
+            pending_seen = True
+            break
+        time.sleep(0.02)
+    assert pending_seen, "gate-hook did not enqueue pending/ — hook did not fire"
+    parked = drain_gate_queue(orch)
+    assert any(row.get("action") == "park" for row in parked)
+    assert orch.gate_result_for(receipt.run_id).get("awaiting_gate") is True
+    allowed = orch.apply_job_action("approve", receipt.run_id)
+    assert allowed["gate_result"] == "allow"
+    thread.join(timeout=2.0)
+    assert not thread.is_alive()
+    assert box.get("code") == 0
+    assert box["payload"]["permissionDecision"] == "allow"
+    assert box["payload"]["continue"] is True
+    store.close()
