@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.40
 
 P0 Path A: real SSH / remote cook.
 
