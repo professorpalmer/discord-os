@@ -6,13 +6,16 @@ is Puppetmaster ``agentic`` / OpenRouter — the remote host must already have
 ``OPENROUTER_API_KEY`` (or vault) configured; this Mac never tunnels secrets
 on argv.
 
-Fail closed: unreachable / BatchMode failure / missing remote CLI → spoken
-Deny. Never silent local cook for ``kind=ssh``.
+``stream()`` pipes remote agentic stdout/stderr into live Discord PROGRESS
+(same line parsers as local agentic). Fail closed: unreachable / BatchMode
+failure / missing remote CLI → spoken Deny. Never silent local cook for
+``kind=ssh``.
 """
 
 from __future__ import annotations
 
 import os
+import queue
 import shutil
 import subprocess
 import threading
@@ -46,6 +49,9 @@ from agent_discord.host.runners import (
     spoken_host_deny,
 )
 from agent_discord.puppetmaster.backend import (
+    TokenStreamBuffer,
+    _completion_summary,
+    _event_from_cli_line,
     _parse_safe_cli_completion,
     _safe_dispatch_prompt,
     usage_from_cli_meta,
@@ -274,11 +280,58 @@ class SshRemoteCookBackend:
         return shutil.which("ssh") is not None
 
     def dispatch(self, request: DispatchRequest) -> DispatchResult:
+        """Collect live Path A stream events into a single result (Cancel-safe)."""
+
+        events = tuple(self.stream(request))
+        status = self._statuses.get(request.run_id, TaskStatus.FAILED)
+        final_summary = ""
+        error: Optional[str] = None
+        usage = None
+        for event in events:
+            if event.kind == EventKind.RECEIPT:
+                final_summary = event.summary.message
+                if isinstance(event.payload, dict) and event.payload:
+                    usage = usage_from_cli_meta(self.pin, self.cli, event.payload)
+            elif event.kind == EventKind.ERROR:
+                error = event.summary.message
+                if not final_summary:
+                    final_summary = error
+            elif event.kind == EventKind.CANCEL_REQUESTED:
+                final_summary = "cancelled"
+                error = "cancelled"
+        if status == TaskStatus.CANCELLED:
+            final_summary = final_summary or "cancelled"
+            error = error or "cancelled"
+        elif status == TaskStatus.COMPLETED:
+            final_summary = final_summary or "completed"
+        elif status == TaskStatus.FAILED and not final_summary:
+            final_summary = error or "remote cook failed"
+        return DispatchResult(
+            run_id=request.run_id,
+            status=status,
+            events=events,
+            final_summary=final_summary,
+            error=error,
+            usage=usage,
+        )
+
+    def stream(self, request: DispatchRequest) -> Iterator[DispatchEvent]:
+        """Live SSH progress pipe: DISPATCH → PROGRESS… → RECEIPT/ERROR/CANCEL.
+
+        Parses remote agentic stdout/stderr the same way local agentic does
+        (NDJSON / progress / prose). Never silent local cook. Cancel honesty
+        unchanged (tracked Popen + remote pid echo + ControlMaster).
+        """
+
         self._statuses[request.run_id] = TaskStatus.RUNNING
         deny = self._preflight_deny()
         if deny:
             self._statuses[request.run_id] = TaskStatus.FAILED
-            return self._deny_result(request.run_id, deny)
+            yield DispatchEvent(
+                kind=EventKind.ERROR,
+                summary=ProgressSummary(stage="deny", message=deny),
+            )
+            return
 
         remote_cmd = build_remote_agentic_argv(
             request,
@@ -292,131 +345,58 @@ class SshRemoteCookBackend:
             proc = self._spawn_ssh_cook(wrapped)
         except (OSError, subprocess.TimeoutExpired) as exc:
             self._statuses[request.run_id] = TaskStatus.FAILED
-            return self._deny_result(
-                request.run_id,
-                spoken_ssh_unreachable(self.host.id, detail=str(exc)[:160]),
+            spoken = spoken_ssh_unreachable(self.host.id, detail=str(exc)[:160])
+            yield DispatchEvent(
+                kind=EventKind.ERROR,
+                summary=ProgressSummary(stage="deny", message=spoken),
             )
+            return
 
         self._register_child(request.run_id, proc)
         try:
-            stdout, stderr = self._wait_ssh_cook(request.run_id, proc)
+            yield DispatchEvent(
+                kind=EventKind.DISPATCH,
+                summary=ProgressSummary(
+                    stage="dispatch",
+                    message=(
+                        f"dispatched via ssh/{self.host.id} "
+                        f"agentic with {self.pin.adapter_name}"
+                    ),
+                    percent=2.0,
+                    details={
+                        "model": self.pin.canonical,
+                        "host_id": self.host.id,
+                        "host_kind": "ssh",
+                    },
+                ),
+            )
+            for event in self._iter_ssh_cook_events(request.run_id, proc):
+                if request.run_id in self._cancel_requested:
+                    self._statuses[request.run_id] = TaskStatus.CANCELLED
+                    yield DispatchEvent(
+                        kind=EventKind.CANCEL_REQUESTED,
+                        summary=ProgressSummary(
+                            stage="cancelled", message="cancelled"
+                        ),
+                    )
+                    return
+                if event.kind == EventKind.ERROR:
+                    self._statuses[request.run_id] = TaskStatus.FAILED
+                elif event.kind == EventKind.RECEIPT:
+                    self._statuses[request.run_id] = TaskStatus.COMPLETED
+                yield event
+            if request.run_id in self._cancel_requested:
+                self._statuses[request.run_id] = TaskStatus.CANCELLED
+                yield DispatchEvent(
+                    kind=EventKind.CANCEL_REQUESTED,
+                    summary=ProgressSummary(stage="cancelled", message="cancelled"),
+                )
+                return
+            if self._statuses.get(request.run_id) == TaskStatus.RUNNING:
+                self._statuses[request.run_id] = TaskStatus.COMPLETED
         finally:
             self._unregister_child(request.run_id, proc)
-
-        if request.run_id in self._cancel_requested:
-            self._statuses[request.run_id] = TaskStatus.CANCELLED
             self._cancel_requested.discard(request.run_id)
-            return DispatchResult(
-                run_id=request.run_id,
-                status=TaskStatus.CANCELLED,
-                events=(
-                    DispatchEvent(
-                        kind=EventKind.CANCEL_REQUESTED,
-                        summary=ProgressSummary(stage="cancelled", message="cancelled"),
-                    ),
-                ),
-                final_summary="cancelled",
-                error="cancelled",
-            )
-
-        # Normalize to attribute-compatible object for existing helpers.
-        proc = _ProcView(
-            returncode=int(getattr(proc, "returncode", 1) or 0),
-            stdout=stdout,
-            stderr=stderr,
-        )
-
-        if _is_ssh_transport_failure(proc):
-            self._statuses[request.run_id] = TaskStatus.FAILED
-            detail = (
-                str(getattr(proc, "stderr", "") or getattr(proc, "stdout", "") or "")
-                .strip()
-                .splitlines()
-            )
-            bit = detail[0] if detail else f"exit {getattr(proc, 'returncode', '?')}"
-            return self._deny_result(
-                request.run_id,
-                spoken_ssh_unreachable(self.host.id, detail=bit[:160]),
-            )
-
-        safe_meta = _parse_safe_cli_completion(
-            str(getattr(proc, "stdout", "") or ""),
-            str(getattr(proc, "stderr", "") or ""),
-        )
-        code = int(getattr(proc, "returncode", 1) or 0)
-        if code != 0:
-            self._statuses[request.run_id] = TaskStatus.FAILED
-            err = (
-                safe_meta.get("error")
-                or str(getattr(proc, "stderr", "") or "").strip()
-                or f"remote exit {code}"
-            )
-            # Missing remote CLI / agentic → spoken Deny (fail closed, no local).
-            lower = str(err).lower()
-            if "not found" in lower or "no such file" in lower:
-                return self._deny_result(
-                    request.run_id,
-                    spoken_host_deny(
-                        self.host.id,
-                        reason="remote agentic CLI missing / Deny",
-                    ),
-                )
-            return DispatchResult(
-                run_id=request.run_id,
-                status=TaskStatus.FAILED,
-                events=(
-                    DispatchEvent(
-                        kind=EventKind.ERROR,
-                        summary=ProgressSummary(stage="dispatch", message=str(err)[:500]),
-                    ),
-                ),
-                final_summary="remote cook failed",
-                error=str(err)[:500],
-            )
-
-        summary = str(safe_meta.get("summary") or "completed")
-        self._statuses[request.run_id] = TaskStatus.COMPLETED
-        return DispatchResult(
-            run_id=request.run_id,
-            status=TaskStatus.COMPLETED,
-            events=(
-                DispatchEvent(
-                    kind=EventKind.DISPATCH,
-                    summary=ProgressSummary(
-                        stage="dispatch",
-                        message=(
-                            f"dispatched via ssh/{self.host.id} "
-                            f"agentic with {self.pin.adapter_name}"
-                        ),
-                        details={
-                            "model": self.pin.canonical,
-                            "host_id": self.host.id,
-                            "host_kind": "ssh",
-                        },
-                    ),
-                ),
-                DispatchEvent(
-                    kind=EventKind.RECEIPT,
-                    summary=ProgressSummary(
-                        stage="done", message=summary, percent=100.0
-                    ),
-                    payload=safe_meta,
-                ),
-            ),
-            final_summary=summary,
-            usage=usage_from_cli_meta(self.pin, self.cli, safe_meta),
-        )
-
-    def stream(self, request: DispatchRequest) -> Iterator[DispatchEvent]:
-        """MVP: one-shot SSH cook; yield dispatch then receipt/error (no live tokens).
-
-        Uses a tracked Popen so phone Cancel can kill the local ssh process group
-        (and best-effort remote pid / ControlMaster).
-        """
-
-        result = self.dispatch(request)
-        for event in result.events:
-            yield event
 
     def cancel(self, run_id: str) -> bool:
         rid = (run_id or "").strip()
@@ -466,78 +446,174 @@ class SshRemoteCookBackend:
             return _ExecFnChild(self.exec_fn, list(argv), self.timeout_seconds)
         return _default_popen(list(argv))
 
-    def _wait_ssh_cook(self, run_id: str, proc: Any) -> tuple[str, str]:
+    def _iter_ssh_cook_events(
+        self, run_id: str, proc: Any
+    ) -> Iterator[DispatchEvent]:
+        """Drain SSH child stdout/stderr into live PROGRESS, then terminal event.
+
+        Captures ``DISCORD_OS_REMOTE_PID`` for Cancel. Does not follow local
+        ``puppetmaster deltas`` (remote job is not on this Mac).
+        """
+
+        model = self.pin.canonical
         stdout_chunks: list[str] = []
         stderr_chunks: list[str] = []
         deadline = time.monotonic() + float(self.timeout_seconds)
+        token_buffer = TokenStreamBuffer()
+        has_pipes = (
+            getattr(proc, "stdout", None) is not None
+            or getattr(proc, "stderr", None) is not None
+        )
 
-        def _drain(pipe: Any, sink: list[str], *, parse_pid: bool) -> None:
-            if pipe is None:
-                return
+        def _note_remote_pid(line: str) -> bool:
+            if "DISCORD_OS_REMOTE_PID=" not in line:
+                return False
             try:
-                for line in iter(pipe.readline, ""):
-                    sink.append(line)
-                    if parse_pid and "DISCORD_OS_REMOTE_PID=" in line:
-                        try:
-                            raw = line.strip().split("DISCORD_OS_REMOTE_PID=", 1)[1]
-                            pid = int(raw.split()[0])
-                            if pid > 0:
-                                with self._child_lock:
-                                    self._remote_pids[run_id] = pid
-                        except (TypeError, ValueError, IndexError):
-                            pass
-            except Exception:
-                pass
+                raw = line.strip().split("DISCORD_OS_REMOTE_PID=", 1)[1]
+                pid = int(raw.split()[0])
+            except (TypeError, ValueError, IndexError):
+                return True
+            if pid > 0:
+                with self._child_lock:
+                    self._remote_pids[run_id] = pid
+            return True
 
-        readers: list[threading.Thread] = []
-        if getattr(proc, "stdout", None) is not None or getattr(proc, "stderr", None) is not None:
-            t_out = threading.Thread(
-                target=_drain, args=(getattr(proc, "stdout", None), stdout_chunks), kwargs={"parse_pid": True}, daemon=True
-            )
-            t_err = threading.Thread(
-                target=_drain, args=(getattr(proc, "stderr", None), stderr_chunks), kwargs={"parse_pid": False}, daemon=True
-            )
-            readers.extend([t_out, t_err])
-            for t in readers:
-                t.start()
-            while process_is_alive(proc):
+        if has_pipes:
+            line_queue: queue.Queue[Any] = queue.Queue()
+            main_done = 0
+
+            def _reader(pipe: Any, sink: list[str]) -> None:
+                try:
+                    if pipe is None:
+                        return
+                    for line in iter(pipe.readline, ""):
+                        sink.append(line)
+                        line_queue.put(line)
+                except Exception:
+                    pass
+                finally:
+                    line_queue.put("__main_done__")
+
+            for pipe, sink in (
+                (getattr(proc, "stdout", None), stdout_chunks),
+                (getattr(proc, "stderr", None), stderr_chunks),
+            ):
+                threading.Thread(
+                    target=_reader, args=(pipe, sink), daemon=True
+                ).start()
+
+            while True:
+                try:
+                    item = line_queue.get(timeout=0.05)
+                except queue.Empty:
+                    if run_id in self._cancel_requested:
+                        break
+                    if time.monotonic() > deadline:
+                        terminate_process_group(proc, started_new_session=True)
+                        break
+                    if not process_is_alive(proc) and main_done >= 2:
+                        break
+                    continue
+                if item == "__main_done__":
+                    main_done += 1
+                    if not process_is_alive(proc) and main_done >= 2:
+                        break
+                    continue
+                line = str(item)
+                if _note_remote_pid(line):
+                    continue
                 if run_id in self._cancel_requested:
                     break
-                if time.monotonic() > deadline:
-                    terminate_process_group(proc, started_new_session=True)
-                    break
-                time.sleep(0.05)
+                event = _event_from_cli_line(line, model, token_buffer)
+                if event is not None:
+                    # Tag Path A origin without leaking secrets.
+                    details = dict(event.summary.details or {})
+                    details.setdefault("host_id", self.host.id)
+                    details.setdefault("host_kind", "ssh")
+                    yield DispatchEvent(
+                        kind=event.kind,
+                        summary=ProgressSummary(
+                            stage=event.summary.stage,
+                            message=event.summary.message,
+                            percent=event.summary.percent,
+                            details=details,
+                        ),
+                        payload=event.payload,
+                    )
             try:
                 proc.wait(timeout=2)
             except Exception:
                 pass
-            for t in readers:
-                t.join(timeout=1.0)
-            return "".join(stdout_chunks), "".join(stderr_chunks)
+        else:
+            # Fake/_ExecFnChild: blocking communicate — no live lines.
+            communicate = getattr(proc, "communicate", None)
+            if callable(communicate):
+                try:
+                    out, err = communicate(timeout=self.timeout_seconds)
+                except TypeError:
+                    out, err = communicate()
+                except subprocess.TimeoutExpired:
+                    terminate_process_group(proc, started_new_session=True)
+                    out, err = "", ""
+                text_out = str(out or "")
+                for line in text_out.splitlines(keepends=True):
+                    stdout_chunks.append(line)
+                    _note_remote_pid(line)
+                stderr_chunks.append(str(err or ""))
 
-        # Fake/_ExecFnChild: blocking communicate-shaped API
-        communicate = getattr(proc, "communicate", None)
-        if callable(communicate):
-            try:
-                out, err = communicate(timeout=self.timeout_seconds)
-            except TypeError:
-                out, err = communicate()
-            except subprocess.TimeoutExpired:
-                terminate_process_group(proc, started_new_session=True)
-                out, err = "", ""
-            text_out = str(out or "")
-            for line in text_out.splitlines():
-                if "DISCORD_OS_REMOTE_PID=" in line:
-                    try:
-                        raw = line.strip().split("DISCORD_OS_REMOTE_PID=", 1)[1]
-                        pid = int(raw.split()[0])
-                        if pid > 0:
-                            with self._child_lock:
-                                self._remote_pids[run_id] = pid
-                    except (TypeError, ValueError, IndexError):
-                        pass
-            return text_out, str(err or "")
-        return "", ""
+        if run_id in self._cancel_requested:
+            return
+
+        stdout = "".join(stdout_chunks)
+        stderr = "".join(stderr_chunks)
+        view = _ProcView(
+            returncode=int(getattr(proc, "returncode", 1) or 0),
+            stdout=stdout,
+            stderr=stderr,
+        )
+        if _is_ssh_transport_failure(view):
+            detail = (stderr or stdout).strip().splitlines()
+            bit = detail[0] if detail else f"exit {view.returncode}"
+            spoken = spoken_ssh_unreachable(self.host.id, detail=bit[:160])
+            yield DispatchEvent(
+                kind=EventKind.ERROR,
+                summary=ProgressSummary(stage="deny", message=spoken),
+            )
+            return
+
+        safe_meta = _parse_safe_cli_completion(stdout, stderr)
+        code = int(view.returncode)
+        if code != 0:
+            err = (
+                safe_meta.get("error")
+                or stderr.strip()
+                or f"remote exit {code}"
+            )
+            lower = str(err).lower()
+            if "not found" in lower or "no such file" in lower:
+                spoken = spoken_host_deny(
+                    self.host.id,
+                    reason="remote agentic CLI missing / Deny",
+                )
+                yield DispatchEvent(
+                    kind=EventKind.ERROR,
+                    summary=ProgressSummary(stage="deny", message=spoken),
+                )
+                return
+            yield DispatchEvent(
+                kind=EventKind.ERROR,
+                summary=ProgressSummary(stage="dispatch", message=str(err)[:500]),
+            )
+            return
+
+        summary = _completion_summary(safe_meta, token_buffer, self.cli)
+        if isinstance(safe_meta, dict):
+            safe_meta["summary"] = summary
+        yield DispatchEvent(
+            kind=EventKind.RECEIPT,
+            summary=ProgressSummary(stage="done", message=summary, percent=100.0),
+            payload=safe_meta,
+        )
 
     def _register_child(self, run_id: str, proc: Any) -> None:
         rid = (run_id or "").strip()

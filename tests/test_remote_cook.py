@@ -10,6 +10,7 @@ import pytest
 from agent_discord.contracts import (
     ContextSnapshot,
     DispatchRequest,
+    EventKind,
     TaskStatus,
 )
 from agent_discord.host.remote_cook import (
@@ -137,3 +138,98 @@ def test_host_runner_argv_no_secrets_in_remote_cook_path() -> None:
     assert "ghp_" not in joined
     assert "token=" not in joined
     assert "password=" not in joined
+
+
+def test_ssh_stream_progress_pipe_before_receipt() -> None:
+    """Path A stream yields PROGRESS from remote lines before the final receipt."""
+
+    import threading
+    import time
+
+    host = RemoteHost(id="lab", label="Lab", kind="ssh", target="cary@lab.local")
+
+    class _Pipe:
+        def __init__(self, lines: list[str]) -> None:
+            self._lines = list(lines)
+            self._idx = 0
+            self._closed = threading.Event()
+
+        def readline(self) -> str:
+            if self._idx < len(self._lines):
+                line = self._lines[self._idx]
+                self._idx += 1
+                # Pace lines so the consumer can observe mid-stream progress.
+                if self._idx == 2:
+                    time.sleep(0.05)
+                return line
+            self._closed.wait(timeout=2)
+            return ""
+
+    class _Child:
+        def __init__(self) -> None:
+            self.pid = 77
+            self.returncode = None
+            self.stdout = _Pipe(
+                [
+                    "DISCORD_OS_REMOTE_PID=4242\n",
+                    "progress: 35% stage: plan drafting approach\n",
+                    '{"type":"token","content":"editing invoices.py"}\n',
+                    json.dumps({"summary": "remote live done"}) + "\n",
+                ]
+            )
+            self.stderr = _Pipe([])
+            self._done = threading.Event()
+            threading.Thread(target=self._finish, daemon=True).start()
+
+        def _finish(self) -> None:
+            # After stdout lines are queued by the reader, mark complete.
+            time.sleep(0.2)
+            self.returncode = 0
+            self.stdout._closed.set()
+            self.stderr._closed.set()
+            self._done.set()
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            self._done.wait(timeout=timeout or 2)
+            return self.returncode if self.returncode is not None else 0
+
+        def terminate(self) -> None:
+            self.returncode = -15
+            self.stdout._closed.set()
+            self.stderr._closed.set()
+
+        def kill(self) -> None:
+            self.terminate()
+
+    child = _Child()
+
+    def _popen(argv):
+        assert argv[:3] == ["ssh", "-o", "BatchMode=yes"]
+        blob = " ".join(argv)
+        assert "OPENROUTER" not in blob
+        assert "token=" not in blob
+        return child
+
+    backend = SshRemoteCookBackend(
+        host=host, probe_first=False, popen_fn=_popen, timeout_seconds=5.0
+    )
+    events = list(backend.stream(_req(host_id="lab", host_kind="ssh", compute_mode="analyze")))
+    kinds = [e.kind for e in events]
+    assert EventKind.DISPATCH in kinds
+    assert EventKind.PROGRESS in kinds
+    assert EventKind.RECEIPT in kinds
+    assert kinds.index(EventKind.PROGRESS) < kinds.index(EventKind.RECEIPT)
+    assert kinds.index(EventKind.DISPATCH) < kinds.index(EventKind.PROGRESS)
+    progress = [e for e in events if e.kind == EventKind.PROGRESS]
+    assert any("35" in (e.summary.message or "") or e.summary.percent == 35.0 for e in progress) or any(
+        "invoices" in (e.summary.message or "") or "invoices" in str(e.summary.details)
+        for e in progress
+    )
+    assert all(e.summary.details.get("host_id") == "lab" for e in progress)
+    receipt = next(e for e in events if e.kind == EventKind.RECEIPT)
+    assert "remote live done" in receipt.summary.message
+    assert backend.status("r1") == TaskStatus.COMPLETED
+    assert backend._remote_pids.get("r1") in {None, 4242}  # cleared after unregister

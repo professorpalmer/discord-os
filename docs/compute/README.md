@@ -25,6 +25,10 @@ Optional Marionette HTTP: `AGENT_DISCORD_BACKEND=marionette` plus `MARIONETTE_BA
 - `src/agent_discord/host/remote_cook.py` — Path A SSH remote cook
 - `src/agent_discord/keys/` — connect + vault
 
+## Path A progress pipe
+
+`SshRemoteCookBackend.stream` yields live `PROGRESS` from remote agentic stdout/stderr (mocked-SSH covered in `tests/test_remote_cook.py`). No local `deltas --follow` for remote jobs. Fail closed on unreachable SSH.
+
 ## Cancel honesty
 
 Local agentic and Path A SSH cooks register a killable child process group.

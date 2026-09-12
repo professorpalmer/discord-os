@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### P0.2 Path A progress pipe
+
+SSH remote cook (`SshRemoteCookBackend.stream`) no longer waits blind until the
+SSH one-shot finishes. Remote agentic stdout/stderr is parsed with the same
+line helpers as local agentic (NDJSON token/reasoning, `progress:` lines,
+prose) and yields live `PROGRESS` events to Discord before the final receipt.
+`DISCORD_OS_REMOTE_PID` capture + Cancel honesty unchanged. Unreachable /
+missing remote CLI still fail closed (spoken Deny; never silent local cook).
+Tests: `tests/test_remote_cook.py` (mocked SSH popen). Docs: host README.
+
 ## 0.5.43
 
 CI green after OpenRouter fail-closed, concurrency honesty, Cancel honesty docs.
