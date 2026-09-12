@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.5.46
+
+ARG_MAX stdin/file handoff for oversized agentic prompts (local + Path A).
+
 ### P0.4 ARG_MAX stdin/file handoff
 
 Large agentic prompts no longer die on opaque OS ``ARG_MAX`` / ``E2BIG``.
