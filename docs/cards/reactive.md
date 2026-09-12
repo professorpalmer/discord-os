@@ -41,7 +41,7 @@ HOST Jobs already uses the seam (`_publish_job_card`). Write-gate park in the or
 - A full client UI, a dashboard rewrite of the card, or a React/web component that mirrors buttons.
 - Per-token re-layout, inner-scroll APIs Discord does not have, or a generic reactive widget kit.
 - New verbs. Allow / Always / Deny / Continue / Cancel / Retry are the set.
-- Voice join + TTS (P2.13). Out of scope here.
+- Voice join + TTS — see [../host/voice.md](../host/voice.md) (P2.13 spike; out of scope for cards).
 
 ## Code
 

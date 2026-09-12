@@ -78,7 +78,20 @@ JSON: `GET /api/status`. HTML: `GET /`. Code: `src/agent_discord/host/dashboard.
 - `/open [here|host] terminal|files|browser` — dest-explicit. `here` lists files or returns a link in Discord. `host` opens a GUI. Browser with a URL defaults to here.
 - `schedule every 1h: run tests` — SQLite cron, listen loop fires it
 - GitHub rules — exact repo/branch/conclusion filters; `new` cooks an unbound match, `single` follows up in the owning job
-- voice memo — local whisper CLI if on PATH
+- voice memo — local whisper CLI if on PATH ([voice.md](voice.md) for TTS / join spike)
+
+## Voice join + TTS (P2.13 spike)
+
+Opt-in local spoken Done on this Mac. Discord voice-channel join is stubbed
+**fail closed**. See [voice.md](voice.md).
+
+| Rule | Behavior |
+|---|---|
+| Default | `DISCORD_OS_TTS` unset/off — no subprocess, no sound. |
+| Opt-in | `DISCORD_OS_TTS=1` + `say` / `espeak` on PATH. Argv only; keys never in argv. |
+| Missing CLI | Spoken Deny. Host keeps running. |
+| Voice join | Always Denied in this spike (gateway + Opus/UDP deferred). |
+| Activities | Never. |
 
 ## Code
 
@@ -86,6 +99,7 @@ JSON: `GET /api/status`. HTML: `GET /`. Code: `src/agent_discord/host/dashboard.
 - `src/agent_discord/host/power.py` — armed / pid
 - `src/agent_discord/host/runners.py` — multi-host allowlist (fail-closed)
 - `src/agent_discord/host/dashboard.py` — read-only companion web dashboard
+- `src/agent_discord/discord/tts.py` — local TTS + voice-join stub (P2.13)
 - `src/agent_discord/host/install.py` — login item
 - `src/agent_discord/host/actions.py` — Terminal / files / browser
 - `src/agent_discord/cli.py` — `cmd_host_*`, `cmd_setup`

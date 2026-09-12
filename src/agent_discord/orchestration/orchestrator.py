@@ -1163,6 +1163,13 @@ class AgentOrchestrator:
 
         if self.post_progress_to_discord and self.discord is not None:
             live.finish(card, summary=safe_final_summary)
+        # P2.13: opt-in local TTS for Done / spoken summary. Fail closed; never raises.
+        try:
+            from agent_discord.discord.tts import maybe_speak_done
+
+            maybe_speak_done(safe_final_summary)
+        except Exception:
+            pass
         self._release_live_thread(live.thread_id or job_thread_id, run_id)
         self._react_terminal(intake, result.status)
         self._set_presence("idle", "Discord OS")

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+Voice channel join + TTS spike (P2.13). Thin. Fail closed.
+
+- Env opt-in `DISCORD_OS_TTS=1` (default off). Local `say` / `espeak` argv-only helper speaks Done strings when enabled.
+- Missing CLI → spoken Deny; no shell, keys never in argv.
+- `join_voice_channel` stub always Denies (gateway voice + Opus/UDP deferred). Docs: [docs/host/voice.md](docs/host/voice.md).
+- Not Activities. No heavy native voice libs required.
+
+
 ## 0.5.28
 
 Reactive card spike (P2.14).
