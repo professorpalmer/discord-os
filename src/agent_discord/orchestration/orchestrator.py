@@ -1705,12 +1705,34 @@ class AgentOrchestrator:
                     edit_card(self.discord, dest, card_mid, card)
         except Exception:
             pass
+        channel_id = ""
+        try:
+            task = self.store.get_task(task_id) if task_id else None
+            if isinstance(task, dict):
+                channel_id = str(task.get("channel_id") or "").strip()
+        except Exception:
+            channel_id = ""
+        if channel_id:
+            self._refresh_host_jobs_after_rank_change(channel_id)
         return {
             "action": "dismiss",
             "run_id": rid,
             "status": "cancelled" if status == "failed" else "cleared",
             "summary": "dismissed",
         }
+
+    def _refresh_host_jobs_after_rank_change(self, channel_id: str) -> None:
+        """Best-effort HOST Jobs / Need line refresh after dismiss or cancel settle."""
+
+        cid = (channel_id or "").strip()
+        if not cid or self.discord is None:
+            return
+        try:
+            from agent_discord.orchestration.listen import publish_host_card
+
+            publish_host_card(self.discord, self.store, cid)
+        except Exception:
+            return
 
     def _continue_idle_run(self, run_id: str, *, prompt: str = "") -> dict[str, Any]:
         """Start a new tip-parented job in the prior idle Discord thread."""
@@ -3275,6 +3297,17 @@ class AgentOrchestrator:
                     source="orchestrator",
                 )
             self._paint_cancel_outcome(rid, confirmed=True, spoken="cancelled")
+            try:
+                run_row = self.store.get_run(rid) or {}
+                tid = str(run_row.get("task_id") or "")
+                task_row = self.store.get_task(tid) if tid else None
+                ch = ""
+                if isinstance(task_row, dict):
+                    ch = str(task_row.get("channel_id") or "").strip()
+                if ch:
+                    self._refresh_host_jobs_after_rank_change(ch)
+            except Exception:
+                pass
             out = {"action": "cancel", "run_id": rid, **receipt.as_dict()}
             return out
 

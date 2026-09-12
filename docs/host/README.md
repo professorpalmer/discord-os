@@ -29,7 +29,7 @@ Bind a channel: `bind host lab` (or `/bind host lab`). Doctor reports allowlist 
 **Path A (remote cook).** Oversized prompts use SSH **stdin** handoff (not argv) so OS ``ARG_MAX`` does not abort the cook — see [compute README](../compute/README.md).  Allowlisted `kind=ssh` hosts cook off this Mac: control plane builds `host_runner_argv` (`ssh -o BatchMode=yes user@host …`) and runs remote `puppetmaster agentic` (OpenRouter). Doctor/preflight probe checks SSH **and** remote CLI + OpenRouter presence (no key tunnel). Probe fails or `DISCORD_OS_SSH_COOK=0` → spoken Deny — never a silent local cook. Remote must already have OpenRouter configured (key never on argv). Live progress pipe: remote agentic stdout/stderr → Discord `PROGRESS` cards while SSH runs (same parsers as local). Phone **Cancel** kills the local ssh process group and best-effort remote pid / ControlMaster; failure speaks **Cancel unconfirmed** (no false Cancelled paint).
 
 
-`discord-os setup` / `host start` detaches it and posts the HOST card: On, Off, Ask, a More menu (Pair / Halt / Gate / Roles / GitHub / Files here or on host / Terminal on host / Browser here or on host), and Jobs. Dest is a noun: **here** stays in Discord (the tapping client — phone or desktop — opens the link or reads the listing). **host** opens a GUI on the listen machine. Discord does not send which client tapped; presence `client_status` is not a dest. The job line and select are a deterministic briefing over SQLite: parked / failed first, then waiting-on-CI, then live, then last Done. Not a second board. Selecting a failed job opens its card with **Dismiss** so phone/HOST can ack the Need without Continue/Retry; dismiss refreshes the Jobs line when the panel message id is known. Message intake is REST. A Gateway is open **only** so those controls work. Do not run a second bot process on the same token. Discord has no tabs — the More select is the grouping.
+`discord-os setup` / `host start` detaches it and posts the HOST card: On, Off, Ask, a More menu (Pair / Halt / Gate / Roles / GitHub / Files here or on host / Terminal on host / Browser here or on host), and Jobs. Dest is a noun: **here** stays in Discord (the tapping client — phone or desktop — opens the link or reads the listing). **host** opens a GUI on the listen machine. Discord does not send which client tapped; presence `client_status` is not a dest. The job line and select are a deterministic briefing over SQLite: parked / failed first, then waiting-on-CI, then live, then last Done. Not a second board. Selecting a failed job opens its card with **Dismiss** so phone/HOST can ack the Need without Continue/Retry. Dismiss / ack / cancel settle immediately refresh the HOST Jobs select (and Need line); if the panel message id is missing the host recovers or repaints it, else speaks Need once. Message intake is REST. A Gateway is open **only** so those controls work. Do not run a second bot process on the same token. Discord has no tabs — the More select is the grouping.
 
 ## Power
 
@@ -142,7 +142,7 @@ Opt-in local spoken Done on this Mac. Discord voice-channel join is stubbed
 
 ## Code
 
-- `src/agent_discord/host/panel.py` — HOST card, Ask channel
+- `src/agent_discord/host/panel.py` — HOST card, Ask channel; `refresh_host_jobs_panel` after ranking flips
 - `src/agent_discord/host/power.py` — armed / pid
 - `src/agent_discord/host/runners.py` — multi-host allowlist (fail-closed)
 - `src/agent_discord/orchestration/service.py` — operators / REQUIRE_OPERATORS

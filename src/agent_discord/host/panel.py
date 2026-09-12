@@ -22,6 +22,23 @@ ASK_ID = "discord-os:ask"
 ASK_MODAL_ID = "discord-os:ask-modal"
 ASK_TEXT_ID = "discord-os:ask-text"
 JOBS_ID = "discord-os:jobs"
+# Status flips that change HOST Jobs ranking — refresh panel immediately.
+JOBS_PANEL_RANK_ACTIONS = frozenset({"dismiss", "ack", "cancel"})
+_HOST_PANEL_MARKERS = frozenset(
+    {
+        "discord-os:on",
+        "discord-os:off",
+        "discord-os:off-confirm",
+        "discord-os:off-cancel",
+        "discord-os:ask",
+        "discord-os:jobs",
+        "discord-os:more",
+    }
+)
+_PANEL_STALE_NEED_PREF = "jobs_panel_stale_need"
+_PANEL_STALE_NEED_SPOKEN = (
+    "Need: HOST Jobs panel could not refresh. Tap On or open Jobs."
+)
 MORE_ID = "discord-os:more"
 PAIR_ID = "discord-os:pair"
 HALT_ID = "discord-os:halt"
@@ -660,9 +677,9 @@ def handle_gateway_interaction(
                 on_job(job.action, job.run_id)
             except Exception:
                 pass
-        if job.action in {"dismiss", "ack"}:
+        if job.action in JOBS_PANEL_RANK_ACTIONS:
             try:
-                _refresh_host_jobs_panel(
+                refresh_host_jobs_panel(
                     store, channel_id, token=token, opener=opener
                 )
             except Exception:
@@ -1200,47 +1217,232 @@ def _paint_after_ack(
     )
 
 
+def refresh_host_jobs_panel(
+    store: Any,
+    channel_id: str,
+    *,
+    token: str,
+    opener: Any,
+) -> bool:
+    """Edit HOST Jobs select (+ Need line) after ranking-affecting status flips.
+
+    When ``card_message_id`` is known, edit in place. When missing: recover the
+    panel message from recent channel history, else post a fresh panel. If
+    recovery/repaint is impossible, speak Need once — never silent lag forever.
+    Returns True when the panel was edited or repainted.
+    """
+
+    return _refresh_host_jobs_panel(
+        store, channel_id, token=token, opener=opener
+    )
+
+
 def _refresh_host_jobs_panel(
     store: Any,
     channel_id: str,
     *,
     token: str,
     opener: Any,
-) -> None:
-    """Cheap HOST Jobs repaint after dismiss so Need leaves the select."""
+) -> bool:
+    """Cheap HOST Jobs repaint after dismiss/cancel so ranking leaves Need/Live."""
 
     if not (token or "").strip():
-        return
+        return False
     reader = getattr(store, "get_host_control", None)
     if not callable(reader):
-        return
+        _speak_host_jobs_panel_need_once(
+            store, channel_id, token=token, opener=opener
+        )
+        return False
     try:
         control = reader(channel_id) or {}
     except Exception:
-        return
+        control = {}
     if not isinstance(control, dict):
-        return
+        control = {}
     message_id = str(control.get("card_message_id") or "").strip()
-    if not message_id:
-        return
     armed = True
     try:
         armed = bool(control.get("armed", True))
     except Exception:
         armed = True
-    _paint_host_panel(
-        store,
-        channel_id,
-        token=token,
-        message_id=message_id,
-        armed=armed,
-        confirm_off=False,
-        opener=opener,
+    if not message_id:
+        message_id = _recover_host_panel_message_id(
+            store, channel_id, token=token, opener=opener
+        )
+    if message_id:
+        try:
+            _paint_host_panel(
+                store,
+                channel_id,
+                token=token,
+                message_id=message_id,
+                armed=armed,
+                confirm_off=False,
+                opener=opener,
+            )
+            _clear_host_jobs_panel_need(store, channel_id)
+            return True
+        except Exception as exc:
+            print(f"panel jobs refresh edit failed: {exc}", flush=True)
+            message_id = ""
+    if _repaint_host_panel_message(
+        store, channel_id, token=token, armed=armed, opener=opener
+    ):
+        _clear_host_jobs_panel_need(store, channel_id)
+        return True
+    _speak_host_jobs_panel_need_once(
+        store, channel_id, token=token, opener=opener
     )
+    return False
+
+
+def _components_look_like_host_panel(components: Any) -> bool:
+    for item in components or ():
+        if not isinstance(item, dict):
+            continue
+        cid = str(item.get("custom_id") or "").strip()
+        if cid in _HOST_PANEL_MARKERS:
+            return True
+        nested = item.get("components")
+        if isinstance(nested, list) and _components_look_like_host_panel(nested):
+            return True
+    return False
+
+
+def _recover_host_panel_message_id(
+    store: Any,
+    channel_id: str,
+    *,
+    token: str,
+    opener: Any,
+) -> str:
+    """Find the HOST panel message in recent history and rebind card_message_id."""
+
+    try:
+        from agent_discord.discord.rest import list_channel_messages
+
+        messages = list_channel_messages(
+            token=token,
+            channel_id=channel_id,
+            limit=30,
+            opener=opener,
+        )
+    except Exception as exc:
+        print(f"panel jobs recover list failed: {exc}", flush=True)
+        return ""
+    for msg in messages or ():
+        mid = str(getattr(msg, "message_id", "") or "").strip()
+        if not mid:
+            continue
+        meta = getattr(msg, "metadata", None) or {}
+        comps = meta.get("components") if isinstance(meta, dict) else None
+        if _components_look_like_host_panel(comps):
+            writer = getattr(store, "set_host_control", None)
+            if callable(writer):
+                try:
+                    writer(channel_id, card_message_id=mid)
+                except Exception:
+                    pass
+            return mid
+    return ""
+
+
+def _repaint_host_panel_message(
+    store: Any,
+    channel_id: str,
+    *,
+    token: str,
+    armed: bool,
+    opener: Any,
+) -> bool:
+    """Post a fresh HOST panel and bind card_message_id. Best-effort."""
+
+    if not (token or "").strip() or not (channel_id or "").strip():
+        return False
+    try:
+        from agent_discord.discord.rest import send_channel_message
+
+        panel = host_panel_payload(
+            armed,
+            channel_id=channel_id,
+            confirm_off=False,
+            jobs=_panel_jobs(store, channel_id),
+            store=store,
+        )
+        posted = send_channel_message(
+            token=token,
+            channel_id=channel_id,
+            content="",
+            components=panel["components"],
+            flags=panel["flags"],
+            opener=opener,
+        )
+    except Exception as exc:
+        print(f"panel jobs repaint failed: {exc}", flush=True)
+        return False
+    mid = str(getattr(posted, "message_id", "") or "").strip()
+    if not mid:
+        return False
+    writer = getattr(store, "set_host_control", None)
+    if callable(writer):
+        try:
+            writer(channel_id, card_message_id=mid)
+        except Exception:
+            pass
+    return True
+
+
+def _speak_host_jobs_panel_need_once(
+    store: Any,
+    channel_id: str,
+    *,
+    token: str,
+    opener: Any,
+) -> None:
+    """Spoken Need once when Jobs panel cannot be refreshed — no silent lag."""
+
+    if not (token or "").strip() or not (channel_id or "").strip():
+        return
+    key = f"{_PANEL_STALE_NEED_PREF}:{channel_id}"
+    reader = getattr(store, "get_preference", None)
+    if callable(reader):
+        try:
+            if str(reader("_host", key) or "").strip():
+                return
+        except Exception:
+            pass
+    try:
+        from agent_discord.discord.rest import send_channel_message
+
+        send_channel_message(
+            token=token,
+            channel_id=channel_id,
+            content=_PANEL_STALE_NEED_SPOKEN,
+            opener=opener,
+        )
+    except Exception as exc:
+        print(f"panel jobs need speak failed: {exc}", flush=True)
+        return
+    writer = getattr(store, "set_preference", None)
+    if callable(writer):
+        try:
+            writer("_host", key, "1")
+        except Exception:
+            pass
+
+
+def _clear_host_jobs_panel_need(store: Any, channel_id: str) -> None:
+    writer = getattr(store, "set_preference", None)
+    if not callable(writer) or not (channel_id or "").strip():
+        return
+    try:
+        writer("_host", f"{_PANEL_STALE_NEED_PREF}:{channel_id}", "")
+    except Exception:
+        pass
 
 
 def _paint_host_panel(
-
     store: Any,
     channel_id: str,
     *,

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Discord-half P0.3 — HOST Jobs panel refresh after dismiss/status change
+
+- After dismiss / ack / cancel settle (ranking-affecting flips), immediately edit
+  the HOST panel Jobs select and Need line so phone is not stuck on a stale
+  snapshot. Shared `refresh_host_jobs_panel` (bulk clear can reuse later).
+- When `card_message_id` is missing: recover the panel from recent channel
+  history, else repaint a fresh panel and bind the id. If neither is possible,
+  spoken **Need** once — no silent lag forever.
+- Docs: [host](docs/host/README.md), [jobs](docs/jobs/README.md).
+  Tests: `test_host_jobs_panel_refresh.py`.
+- No version bump in this change — ship cadence / parent pack cuts the tag.
+
 ### Discord-half P0.2 — Always bind job thread on channel asks
 
 - Channel-parent asks with empty `thread_id` always create a Discord job thread

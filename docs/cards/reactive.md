@@ -20,7 +20,7 @@ The live card is a `FLAG_COMPONENTS_V2` container edited in the job thread (`sen
 
 `progress` without a live-running flag still paints **done** (Continue + Retry). Live flushes go through `reactive_progress_card` (Cancel). Settle with a job thread paints **idle** Continue (Done / Cancelled); **failed** paints Continue + Dismiss (or Continue + Retry + Dismiss without a thread). That split is owned by `reactive_paint(..., has_thread=)`.
 
-Custom ids stay `discord-os:job:<verb>:<run_id>`. Verbs are approve / always / deny / cancel / retry / continue / dismiss (ack alias). They never toggle HOST power and they never dispatch Puppetmaster by themselves — `apply_job_action` does that. Cancel is the phone interrupt for a live cook — tap the job-thread card, not HOST Off. **Dismiss** acks a failed Need (marks cancelled / clears attention) so HOST briefing ranks Last.
+Custom ids stay `discord-os:job:<verb>:<run_id>`. Verbs are approve / always / deny / cancel / retry / continue / dismiss (ack alias). They never toggle HOST power and they never dispatch Puppetmaster by themselves — `apply_job_action` does that. Cancel is the phone interrupt for a live cook — tap the job-thread card, not HOST Off. **Dismiss** acks a failed Need (marks cancelled / clears attention) so HOST briefing ranks Last; HOST Jobs panel refreshes on dismiss/cancel settle (P0.3).
 
 Parked Allow expires after `DISCORD_OS_APPROVAL_TIMEOUT_MINUTES` (default 20) with spoken `Expired. Write was not started.`
 
