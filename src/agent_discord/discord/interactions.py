@@ -5,6 +5,10 @@ host verbs behind slash chrome. It does not open a second Gateway.
 
 Discord requires a public HTTPS URL and a 3s ACK. Bind loopback; tunnel if
 you opt in. Slash ``/connect`` never accepts a secret option.
+
+P2.9: thin slash aliases ``/bind`` ``/status`` ``/on`` ``/off`` ``/stop``
+mirror text verbs when ``AGENT_DISCORD_INTERACTIONS=http`` and commands are
+registered. Text + HOST panel remain the default. No slash ``/add``.
 """
 
 from __future__ import annotations
@@ -64,6 +68,49 @@ OPEN_COMMAND = {
         },
     ],
 }
+BIND_COMMAND = {
+    "name": "bind",
+    "description": "Bind this channel to a realm, memory, or host id (same as text bind)",
+    "type": 1,
+    "options": [
+        {
+            "name": "name",
+            "description": "Realm name, memory, or host <id> (e.g. puppetmaster / memory / host lab)",
+            "type": 3,
+            "required": False,
+        },
+    ],
+}
+STATUS_COMMAND = {
+    "name": "status",
+    "description": "Read-only host power / spend / jobs digest (same as text /status)",
+    "type": 1,
+}
+ON_COMMAND = {
+    "name": "on",
+    "description": "Arm this channel (same as text /on)",
+    "type": 1,
+}
+OFF_COMMAND = {
+    "name": "off",
+    "description": "Disarm this channel (same as text /off)",
+    "type": 1,
+}
+STOP_COMMAND = {
+    "name": "stop",
+    "description": "Disarm this channel (alias of /off)",
+    "type": 1,
+}
+
+OPT_IN_COMMANDS = (
+    CONNECT_COMMAND,
+    OPEN_COMMAND,
+    BIND_COMMAND,
+    STATUS_COMMAND,
+    ON_COMMAND,
+    OFF_COMMAND,
+    STOP_COMMAND,
+)
 
 
 class InteractionError(ValueError):
@@ -132,6 +179,16 @@ def handle_interaction_payload(
             browser_open=browser_open,
         )
         return _ephemeral(opened.card or opened.error or "open")
+    if name in {"on", "off", "stop", "status"}:
+        return _handle_power_slash(payload, name=name, workspace=workspace)
+    if name == "bind":
+        options = _option_map(data.get("options"))
+        return _handle_bind_slash(
+            payload,
+            name_opt=str(options.get("name") or "").strip(),
+            workspace=workspace,
+            env=env,
+        )
     return _ephemeral("unknown command")
 
 
@@ -153,7 +210,7 @@ def register_opt_in_commands(
     else:
         path = f"/applications/{app_id}/commands"
     names: list[str] = []
-    for command in (CONNECT_COMMAND, OPEN_COMMAND):
+    for command in OPT_IN_COMMANDS:
         result = call_discord_json(
             token, "POST", path, payload=command, opener=opener
         )
@@ -255,3 +312,187 @@ def _ephemeral(content: str) -> dict[str, Any]:
         "type": RESPONSE_CHANNEL_MESSAGE,
         "data": {"content": content[:2000], "flags": EPHEMERAL},
     }
+
+
+def _channel_id(payload: Mapping[str, Any]) -> str:
+    raw = payload.get("channel_id")
+    if raw:
+        return str(raw).strip()
+    channel = payload.get("channel")
+    if isinstance(channel, Mapping) and channel.get("id"):
+        return str(channel.get("id")).strip()
+    return ""
+
+
+def _author_id(payload: Mapping[str, Any]) -> str:
+    member = payload.get("member")
+    if isinstance(member, Mapping):
+        user = member.get("user")
+        if isinstance(user, Mapping) and user.get("id"):
+            return str(user.get("id")).strip()
+    user = payload.get("user")
+    if isinstance(user, Mapping) and user.get("id"):
+        return str(user.get("id")).strip()
+    return ""
+
+
+def _open_store(workspace: Path):
+    from agent_discord.persistence.sqlite import SQLiteStore
+
+    db = Path(workspace) / "agent_discord.sqlite3"
+    store = SQLiteStore(db)
+    store.initialize()
+    return store
+
+
+def _handle_power_slash(
+    payload: Mapping[str, Any],
+    *,
+    name: str,
+    workspace: Path,
+) -> dict[str, Any]:
+    from agent_discord.host.power import parse_power_command
+
+    channel_id = _channel_id(payload)
+    if not channel_id:
+        return _ephemeral("missing channel_id")
+
+    # /stop is phone autocomplete alias for /off (disarm).
+    verb = "off" if name == "stop" else name
+    parsed = parse_power_command(f"/{verb}")
+    store = None
+    try:
+        store = _open_store(workspace)
+        if parsed.action == "on":
+            from agent_discord.orchestration.service import seed_owner_if_empty
+
+            seed_owner_if_empty(store, _author_id(payload) or None)
+            writer = getattr(store, "set_host_control", None)
+            if callable(writer):
+                writer(channel_id, armed=True)
+            return _ephemeral("On")
+        if parsed.action == "off":
+            writer = getattr(store, "set_host_control", None)
+            if callable(writer):
+                writer(channel_id, armed=False)
+            label = "Stopped" if name == "stop" else "Off"
+            return _ephemeral(label)
+        # status — read-only; never mutates power
+        armed = bool(store.host_is_armed(channel_id))
+        line = _status_line(workspace=workspace, store=store, armed=armed)
+        return _ephemeral(line)
+    except Exception as exc:  # noqa: BLE001 — ephemeral fail-closed
+        return _ephemeral(f"power failed: {exc}")
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
+
+
+def _status_line(*, workspace: Path, store: object, armed: bool) -> str:
+    power = "on" if armed else "off"
+    try:
+        from agent_discord.host.dashboard import build_status_snapshot
+        from agent_discord.host.status_digest import format_status_digest
+
+        snap = build_status_snapshot(workspace=workspace)
+        if isinstance(snap, Mapping):
+            # Prefer dashboard armed if present; else inject channel armed.
+            host = snap.get("host") if isinstance(snap.get("host"), Mapping) else {}
+            if "armed" not in host:
+                host = dict(host)
+                host["armed"] = armed
+                snap = dict(snap)
+                snap["host"] = host
+            return format_status_digest(snap)
+    except Exception:
+        pass
+    return f"Discord OS status · power {power}"
+
+
+def _handle_bind_slash(
+    payload: Mapping[str, Any],
+    *,
+    name_opt: str,
+    workspace: Path,
+    env: Optional[Mapping[str, str]] = None,
+) -> dict[str, Any]:
+    from agent_discord.host.memory import bind_memory_channel, is_memory_bind
+    from agent_discord.host.realms import (
+        bind_channel_realm,
+        parse_bind_command,
+    )
+    from agent_discord.host.repos import load_host_repos
+    from agent_discord.host.runners import (
+        HostAllowlistError,
+        bind_channel_host,
+        is_host_bind_command,
+        load_host_allowlist,
+        parse_host_bind_command,
+    )
+
+    channel_id = _channel_id(payload)
+    if not channel_id:
+        return _ephemeral("missing channel_id")
+
+    raw = (name_opt or "").strip()
+    if not raw:
+        return _ephemeral("bind needs a name (realm, memory, or host <id>)")
+
+    # Accept "host lab" or bare realm / memory.
+    text = f"/bind {raw}".strip()
+    workspace_id = "default"
+    store = None
+    try:
+        store = _open_store(workspace)
+        if is_host_bind_command(text):
+            host_id = parse_host_bind_command(text)
+            allowlist = load_host_allowlist(env=env) if env is not None else load_host_allowlist()
+            try:
+                chosen = bind_channel_host(
+                    store,
+                    workspace_id=workspace_id,
+                    channel_id=channel_id,
+                    host_id=host_id,
+                    allowlist=allowlist,
+                )
+            except HostAllowlistError as exc:
+                return _ephemeral(str(getattr(exc, "spoken", None) or exc))
+            return _ephemeral(f"Bound host {chosen.id}")
+
+        name = parse_bind_command(text)
+        if is_memory_bind(name):
+            bind_memory_channel(
+                store,
+                workspace_id=workspace_id,
+                channel_id=channel_id,
+            )
+            return _ephemeral("Bound memory")
+        if not name:
+            return _ephemeral("bind needs a name (realm, memory, or host <id>)")
+        repos = list(load_host_repos(env=env) if env is not None else load_host_repos())
+        chosen = bind_channel_realm(
+            store,
+            workspace_id=workspace_id,
+            channel_id=channel_id,
+            name=name,
+            repos=repos,
+        )
+        if chosen is not None:
+            return _ephemeral(f"Bound {chosen.name}")
+        # Still record the requested name via merge if bind_channel_realm returned None
+        # (unknown realm) — match text absorb which still publishes with the typed name.
+        writer = getattr(store, "merge_binding_metadata", None)
+        if callable(writer):
+            writer(workspace_id, channel_id, {"repo": name})
+        return _ephemeral(f"Bound {name}")
+    except Exception as exc:  # noqa: BLE001
+        return _ephemeral(f"bind failed: {exc}")
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass

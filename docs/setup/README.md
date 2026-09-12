@@ -43,7 +43,17 @@ From Discord: `bind puppetmaster`, `bind memory`. Same SQLite rows. No slash `/a
 
 ### Slash (opt-in)
 
-Discord OS stays text-first. Slash is **opt-in** for hosts that register application commands with the Discord app: prefer the existing bind / power / open text verbs and the HOST panel. If you enable slash later, mirror those same verbs (`/bind`, `/on`, `/off`, `/open`) — do not invent a parallel `/add` surface. Until slash is registered for your app, text + HOST panel are the supported path.
+Discord OS stays text-first. Slash is **opt-in** and default **off** (`AGENT_DISCORD_INTERACTIONS=off`). Text bind / power / open verbs and the HOST panel remain the supported path.
+
+When you opt in (`AGENT_DISCORD_INTERACTIONS=http`), register + serve:
+
+```bash
+# .env: AGENT_DISCORD_INTERACTIONS=http  DISCORD_PUBLIC_KEY=…  DISCORD_APPLICATION_ID=…
+discord-os interactions --register   # guild or global thin aliases
+discord-os interactions --serve      # loopback /interactions; tunnel → Developer Portal URL
+```
+
+Registered aliases (same verbs as text; no `/add`): `/bind`, `/status`, `/on`, `/off`, `/stop` (alias of `/off`), plus existing `/open` and `/connect`. Phone autocomplete only — listen message-prefix is unchanged.
 
 ## Code
 

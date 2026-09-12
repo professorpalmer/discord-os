@@ -1,6 +1,15 @@
 # Changelog
 
+## Unreleased
+
+P2.9 Slash progressive enhancement (still opt-in).
+
+- Thin slash aliases `/bind`, `/status`, `/on`, `/off`, `/stop` (stop = off) registered only when `AGENT_DISCORD_INTERACTIONS=http` + `discord-os interactions --register`.
+- Handlers reuse power/bind absorb parse paths against workspace SQLite; text listen + HOST panel stay default. No `/add`.
+- Docs: [docs/setup/README.md](docs/setup/README.md), [docs/host/slash.md](docs/host/slash.md).
+
 ## 0.5.37
+
 
 P2.8 Plan-mode Approve card (c-lord ExitPlanMode shape).
 

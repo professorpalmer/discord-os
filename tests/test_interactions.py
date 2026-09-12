@@ -9,16 +9,23 @@ from urllib.request import Request, urlopen
 
 from agent_discord.cli import main
 from agent_discord.discord.interactions import (
+    BIND_COMMAND,
     CONNECT_COMMAND,
     INTERACTION_APPLICATION_COMMAND,
     INTERACTION_PING,
+    OFF_COMMAND,
+    ON_COMMAND,
     OPEN_COMMAND,
+    OPT_IN_COMMANDS,
     RESPONSE_PONG,
+    STATUS_COMMAND,
+    STOP_COMMAND,
     handle_interaction_payload,
     register_opt_in_commands,
     serve_interactions,
     verify_ed25519,
 )
+from agent_discord.persistence.sqlite import SQLiteStore
 from agent_discord.orchestration.cards import CARD_PREFIX
 
 
@@ -123,9 +130,17 @@ def test_register_opt_in_commands_posts_connect_and_open():
         guild_id="guild-1",
         opener=opener,
     )
-    assert names == ["connect", "open"]
-    assert [item["name"] for item in posted] == ["connect", "open"]
+    expected = ["connect", "open", "bind", "status", "on", "off", "stop"]
+    assert names == expected
+    assert [item["name"] for item in posted] == expected
     assert "options" not in posted[0]
+    assert "add" not in names
+    assert {c["name"] for c in OPT_IN_COMMANDS} == set(expected)
+    assert BIND_COMMAND["name"] == "bind"
+    assert STATUS_COMMAND["name"] == "status"
+    assert ON_COMMAND["name"] == "on"
+    assert OFF_COMMAND["name"] == "off"
+    assert STOP_COMMAND["name"] == "stop"
 
 
 def test_interactions_http_ping_and_bad_signature(tmp_path: Path):
@@ -203,3 +218,103 @@ def test_cli_interactions_off_without_flags(tmp_path: Path, monkeypatch, capsys)
     assert main(["interactions"]) == 1
     err = capsys.readouterr().err
     assert "default is off" in err
+
+
+def _power_payload(name: str, channel_id: str = "ch-1", author_id: str = "human-1"):
+    return {
+        "type": INTERACTION_APPLICATION_COMMAND,
+        "channel_id": channel_id,
+        "member": {"user": {"id": author_id}},
+        "data": {"name": name},
+    }
+
+
+def test_slash_power_on_off_stop_and_status(tmp_path: Path):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    # Arm via /on
+    on_reply = handle_interaction_payload(
+        _power_payload("on"),
+        workspace=ws,
+        roots=[ws],
+    )
+    assert on_reply["data"]["content"] == "On"
+    assert on_reply["data"]["flags"] == 64
+    store = SQLiteStore(ws / "agent_discord.sqlite3")
+    store.initialize()
+    assert store.host_is_armed("ch-1") is True
+
+    status = handle_interaction_payload(
+        _power_payload("status"),
+        workspace=ws,
+        roots=[ws],
+    )
+    body = status["data"]["content"].lower()
+    assert "power" in body or "on" in body
+    assert store.host_is_armed("ch-1") is True  # status read-only
+
+    off = handle_interaction_payload(
+        _power_payload("off"),
+        workspace=ws,
+        roots=[ws],
+    )
+    assert off["data"]["content"] == "Off"
+    assert store.host_is_armed("ch-1") is False
+
+    # re-arm then /stop alias disarms
+    handle_interaction_payload(_power_payload("on"), workspace=ws, roots=[ws])
+    stop = handle_interaction_payload(
+        _power_payload("stop"),
+        workspace=ws,
+        roots=[ws],
+    )
+    assert stop["data"]["content"] == "Stopped"
+    assert store.host_is_armed("ch-1") is False
+    store.close()
+
+
+def test_slash_power_missing_channel(tmp_path: Path):
+    reply = handle_interaction_payload(
+        {"type": INTERACTION_APPLICATION_COMMAND, "data": {"name": "on"}},
+        workspace=tmp_path,
+        roots=[tmp_path],
+    )
+    assert "missing channel" in reply["data"]["content"].lower()
+
+
+def test_slash_bind_realm(tmp_path: Path, monkeypatch):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    repo = tmp_path / "puppetmaster"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    monkeypatch.setenv(
+        "DISCORD_OS_REPOS",
+        f"puppetmaster:{repo}",
+    )
+    reply = handle_interaction_payload(
+        {
+            "type": INTERACTION_APPLICATION_COMMAND,
+            "channel_id": "ch-bind",
+            "data": {
+                "name": "bind",
+                "options": [{"name": "name", "value": "puppetmaster"}],
+            },
+        },
+        workspace=ws,
+        roots=[ws],
+    )
+    assert "bound" in reply["data"]["content"].lower()
+    store = SQLiteStore(ws / "agent_discord.sqlite3")
+    store.initialize()
+    row = store.get_binding("default", "ch-bind")
+    assert row is not None
+    meta = row.get("metadata_json") or row.get("metadata") or ""
+    assert "puppetmaster" in str(meta).lower()
+    store.close()
+
+
+def test_slash_no_add_command():
+    names = {item["name"] for item in OPT_IN_COMMANDS}
+    assert "add" not in names
+
