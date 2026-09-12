@@ -23,3 +23,11 @@ Optional Marionette HTTP: `AGENT_DISCORD_BACKEND=marionette` plus `MARIONETTE_BA
 - `src/agent_discord/puppetmaster/agentic.py` — OpenRouter via `puppetmaster agentic`
 - `src/agent_discord/puppetmaster/backend.py` — shared CLI helpers
 - `src/agent_discord/keys/` — connect + vault
+
+## Cancel honesty
+
+Local agentic and Path A SSH cooks register a killable child process group.
+Phone Cancel terminates that group (and best-effort remote pid on SSH). If the
+backend cannot confirm the interrupt, Discord speaks **Cancel unconfirmed** and
+does not paint Cancelled. See [cards/reactive.md](../cards/reactive.md).
+

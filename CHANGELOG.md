@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### P0.1 Cancel honesty (local agentic + Path A SSH)
+
+Phone **Cancel** must not lie. Today Cancel painted SQLite `cancelled` while
+OpenRouter (local or SSH remote) could keep cooking.
+
+- Track killable child process groups for local `AgenticPuppetmasterBackend`
+  and Path A `SshRemoteCookBackend` (`start_new_session` / SIGTERM→SIGKILL).
+- SSH wraps remote argv with `DISCORD_OS_REMOTE_PID=$$` so cancel can
+  `kill` the remote process group over BatchMode ssh; optional ControlMaster
+  `-O exit` when a control path is configured.
+- If interrupt is unsupported or kill fails → spoken **Cancel unconfirmed**
+  and do **not** paint Done/Cancelled as success (`cancellation_pending`
+  receipt, gjc-remote-shaped).
+- Confirmed kill → `cancelled` + `CANCEL_REQUESTED` event.
+- Tests: `tests/test_cancel_honesty.py` (local + mocked SSH).
+- Docs: [docs/cards/reactive.md](docs/cards/reactive.md),
+  [docs/jobs/README.md](docs/jobs/README.md),
+  [docs/host/README.md](docs/host/README.md),
+  [docs/compute/README.md](docs/compute/README.md).
+
+No version bump (parent cuts).
+
 ## 0.5.42
 
 Round-3 full P1 pack.

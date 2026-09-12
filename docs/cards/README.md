@@ -12,7 +12,7 @@ Harness cards (`**Card**`, `**Receipt**`, HOST, NOTE) are skipped on intake so t
 
 A follow-up in a **live** job thread steers that worker (or queues in SQLite if the cook cannot take it yet). A follow-up after Done starts a new job in the same thread (session), parented at the prior tip. Do not start a nested thread.
 
-**Cancel** is on the live Components v2 card while the cook is running (`discord-os:job:cancel:<run_id>`). Tap that button on the job-thread card from the phone. It is not HOST Off. Parked Allow / Always allow / Deny auto-denies after `DISCORD_OS_APPROVAL_TIMEOUT_MINUTES` (default 20) with a spoken expire.
+**Cancel** is on the live Components v2 card while the cook is running (`discord-os:job:cancel:<run_id>`). Tap that button on the job-thread card from the phone. It is not HOST Off. If the cook cannot be interrupted, the phone hears **Cancel unconfirmed** (no false Cancelled paint). Parked Allow / Always allow / Deny auto-denies after `DISCORD_OS_APPROVAL_TIMEOUT_MINUTES` (default 20) with a spoken expire.
 
 State → button set / accent / stage (write-gate Allow / Always / Deny, plan Approve / Cancel, Continue) is the [reactive spike](reactive.md). Per-tool / AskUserQuestion mid-run park (live worker hold) is [ask-gate](ask-gate.md). Plan-mode Approve is [plan-approve](plan-approve.md). Not Activities. Not a client UI.
 

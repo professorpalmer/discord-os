@@ -53,3 +53,17 @@ Do not hardcode `actions="parked"` / `"running"` / `"idle"` / `"done"` at park, 
 - `src/agent_discord/orchestration/ask_gate.py` — tool / ask parked rows via `reactive_paint`
 - `src/agent_discord/host/panel.py` — HOST Jobs reprint via `reactive_for_job`
 - Tests: `tests/test_reactive_cards.py`, `tests/test_cards.py`, `tests/test_write_gate_buttons.py`
+
+## Cancel honesty (P0.1)
+
+Phone **Cancel** on a live cook must interrupt the worker, not just paint
+SQLite `cancelled`.
+
+| Path | Kill | Confirmed paint |
+|---|---|---|
+| Local agentic | SIGTERM → SIGKILL process group of the tracked `puppetmaster agentic` child | Cancelled |
+| Path A SSH | Remote `kill` on echoed `DISCORD_OS_REMOTE_PID` (best-effort), optional ControlMaster `-O exit`, then local ssh process-group kill | Cancelled |
+| No live child / kill fails | Spoken **Cancel unconfirmed**; status stays running (`cancellation_pending`) | Do **not** paint Done/Cancelled |
+
+Receipts are gjc-remote-shaped: `confirmed` vs `cancellation_pending`. Plan-park Cancel still denies ExitPlanMode (not a live-cook interrupt).
+

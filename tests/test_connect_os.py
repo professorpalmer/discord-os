@@ -595,13 +595,13 @@ def test_should_dispatch_skips_cards():
 def test_agentic_backend_argv_and_env_never_on_argv(monkeypatch, tmp_path: Path):
     calls: list[dict[str, Any]] = []
 
-    def fake_run(cmd, **kwargs):
+    def fake_popen(cmd, **kwargs):
         calls.append({"cmd": list(cmd), "env": kwargs.get("env")})
 
         class Proc:
             returncode = 0
-            stdout = "job_id: j9\nsummary: done via agentic\n"
-            stderr = ""
+            def communicate(self, timeout=None):
+                return ("job_id: j9\nsummary: done via agentic\n", "")
 
         return Proc()
 
@@ -609,7 +609,7 @@ def test_agentic_backend_argv_and_env_never_on_argv(monkeypatch, tmp_path: Path)
         "agent_discord.puppetmaster.agentic.shutil.which",
         lambda _: "/usr/bin/puppetmaster",
     )
-    monkeypatch.setattr("agent_discord.puppetmaster.agentic.subprocess.run", fake_run)
+    monkeypatch.setattr("agent_discord.puppetmaster.agentic.subprocess.Popen", fake_popen)
     vault = KeyVault(tmp_path / "keys")
     vault.put("openrouter", FAKE_KEY, "env")
     backend = AgenticPuppetmasterBackend(
@@ -646,13 +646,13 @@ def test_agentic_backend_argv_and_env_never_on_argv(monkeypatch, tmp_path: Path)
 def test_agentic_analyze_mode_skips_implement(monkeypatch, tmp_path: Path):
     calls: list[dict[str, Any]] = []
 
-    def fake_run(cmd, **kwargs):
+    def fake_popen(cmd, **kwargs):
         calls.append({"cmd": list(cmd)})
 
         class Proc:
             returncode = 0
-            stdout = "job_id: j-a\nsummary: Discord OS is the harness.\n"
-            stderr = ""
+            def communicate(self, timeout=None):
+                return ("job_id: j-a\nsummary: Discord OS is the harness.\n", "")
 
         return Proc()
 
@@ -660,7 +660,7 @@ def test_agentic_analyze_mode_skips_implement(monkeypatch, tmp_path: Path):
         "agent_discord.puppetmaster.agentic.shutil.which",
         lambda _: "/usr/bin/puppetmaster",
     )
-    monkeypatch.setattr("agent_discord.puppetmaster.agentic.subprocess.run", fake_run)
+    monkeypatch.setattr("agent_discord.puppetmaster.agentic.subprocess.Popen", fake_popen)
     backend = AgenticPuppetmasterBackend(
         cli="puppetmaster",
         pin=AGENTIC_MODEL_PIN,

@@ -335,13 +335,16 @@ def test_prose_cli_line_becomes_token_stream():
 def test_dispatch_uses_agentic_subcommand(monkeypatch, tmp_path: Path):
     calls: list[dict[str, Any]] = []
 
-    def fake_run(cmd, **kwargs):
+    def fake_popen(cmd, **kwargs):
         calls.append({"cmd": list(cmd), **{k: kwargs.get(k) for k in ("cwd", "input")}})
 
         class Proc:
             returncode = 0
-            stdout = "job_id: j1\ndeltas: 1\nsummary: done via agentic\n"
-            stderr = ""
+            def communicate(self, timeout=None):
+                return (
+                    "job_id: j1\ndeltas: 1\nsummary: done via agentic\n",
+                    "",
+                )
 
         return Proc()
 
@@ -349,7 +352,7 @@ def test_dispatch_uses_agentic_subcommand(monkeypatch, tmp_path: Path):
         "agent_discord.puppetmaster.agentic.shutil.which",
         lambda _: "/usr/bin/puppetmaster",
     )
-    monkeypatch.setattr("agent_discord.puppetmaster.agentic.subprocess.run", fake_run)
+    monkeypatch.setattr("agent_discord.puppetmaster.agentic.subprocess.Popen", fake_popen)
 
     backend = AgenticPuppetmasterBackend(
         cli="puppetmaster",
@@ -380,13 +383,13 @@ def test_dispatch_uses_agentic_subcommand(monkeypatch, tmp_path: Path):
 def test_analyze_dispatch_uses_analyze_mode(monkeypatch, tmp_path: Path):
     calls: list[dict[str, Any]] = []
 
-    def fake_run(cmd, **kwargs):
+    def fake_popen(cmd, **kwargs):
         calls.append({"cmd": list(cmd)})
 
         class Proc:
             returncode = 0
-            stdout = "job_id: j1\nsummary: done via agentic\n"
-            stderr = ""
+            def communicate(self, timeout=None):
+                return ("job_id: j1\nsummary: done via agentic\n", "")
 
         return Proc()
 
@@ -394,7 +397,7 @@ def test_analyze_dispatch_uses_analyze_mode(monkeypatch, tmp_path: Path):
         "agent_discord.puppetmaster.agentic.shutil.which",
         lambda _: "/usr/bin/puppetmaster",
     )
-    monkeypatch.setattr("agent_discord.puppetmaster.agentic.subprocess.run", fake_run)
+    monkeypatch.setattr("agent_discord.puppetmaster.agentic.subprocess.Popen", fake_popen)
     backend = AgenticPuppetmasterBackend(
         cli="puppetmaster",
         pin=AGENTIC_MODEL_PIN,

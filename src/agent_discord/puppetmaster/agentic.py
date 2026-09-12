@@ -5,9 +5,16 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator, Mapping, Optional
+from typing import Any, Iterator, Mapping, Optional
+
+from agent_discord.puppetmaster.cancel_honesty import (
+    cancel_receipt,
+    popen_kwargs_for_killable_child,
+    terminate_process_group,
+)
 
 from agent_discord.contracts import (
     DispatchEvent,
@@ -49,6 +56,9 @@ class AgenticPuppetmasterBackend:
     vault: Optional[KeyVault] = None
     env: Optional[Mapping[str, str]] = None
     _statuses: dict[str, TaskStatus] = field(default_factory=dict)
+    _children: dict[str, Any] = field(default_factory=dict, repr=False)
+    _cancel_requested: set[str] = field(default_factory=set, repr=False)
+    _child_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def resolve_model(self, requested: str) -> ModelPin:
         self.pin.assert_allowed(requested)
@@ -137,16 +147,16 @@ class AgenticPuppetmasterBackend:
         self._attach_gate_env(child_env, request, workdir)
 
         try:
-            proc = subprocess.run(
+            proc = subprocess.Popen(
                 command,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=self.timeout_seconds,
-                check=False,
                 cwd=workdir,
                 env=child_env,
+                **popen_kwargs_for_killable_child(),
             )
-        except (OSError, subprocess.TimeoutExpired) as exc:
+        except OSError as exc:
             self._statuses[request.run_id] = TaskStatus.FAILED
             return DispatchResult(
                 run_id=request.run_id,
@@ -161,10 +171,52 @@ class AgenticPuppetmasterBackend:
                 error=str(exc),
             )
 
-        safe_meta = _parse_safe_cli_completion(proc.stdout, proc.stderr)
+        self._register_child(request.run_id, proc)
+        try:
+            try:
+                stdout, stderr = proc.communicate(timeout=self.timeout_seconds)
+            except subprocess.TimeoutExpired:
+                terminate_process_group(proc, started_new_session=True)
+                try:
+                    stdout, stderr = proc.communicate(timeout=2)
+                except Exception:
+                    stdout, stderr = "", ""
+                self._statuses[request.run_id] = TaskStatus.FAILED
+                return DispatchResult(
+                    run_id=request.run_id,
+                    status=TaskStatus.FAILED,
+                    events=(
+                        DispatchEvent(
+                            kind=EventKind.ERROR,
+                            summary=ProgressSummary(stage="dispatch", message="timeout"),
+                        ),
+                    ),
+                    final_summary="dispatch failed",
+                    error="timeout",
+                )
+        finally:
+            self._unregister_child(request.run_id, proc)
+
+        if request.run_id in self._cancel_requested:
+            self._statuses[request.run_id] = TaskStatus.CANCELLED
+            self._cancel_requested.discard(request.run_id)
+            return DispatchResult(
+                run_id=request.run_id,
+                status=TaskStatus.CANCELLED,
+                events=(
+                    DispatchEvent(
+                        kind=EventKind.CANCEL_REQUESTED,
+                        summary=ProgressSummary(stage="cancelled", message="cancelled"),
+                    ),
+                ),
+                final_summary="cancelled",
+                error="cancelled",
+            )
+
+        safe_meta = _parse_safe_cli_completion(stdout or "", stderr or "")
         if proc.returncode != 0:
             self._statuses[request.run_id] = TaskStatus.FAILED
-            err = safe_meta.get("error") or proc.stderr.strip() or f"exit {proc.returncode}"
+            err = safe_meta.get("error") or (stderr or "").strip() or f"exit {proc.returncode}"
             return DispatchResult(
                 run_id=request.run_id,
                 status=TaskStatus.FAILED,
@@ -203,7 +255,19 @@ class AgenticPuppetmasterBackend:
         )
 
     def cancel(self, run_id: str) -> bool:
-        return False
+        rid = (run_id or "").strip()
+        if not rid:
+            return False
+        with self._child_lock:
+            self._cancel_requested.add(rid)
+            proc = self._children.get(rid)
+        if proc is None:
+            # No live child to interrupt — cannot confirm.
+            return False
+        ok = terminate_process_group(proc, started_new_session=True)
+        if ok:
+            self._statuses[rid] = TaskStatus.CANCELLED
+        return bool(ok)
 
     def status(self, run_id: str) -> TaskStatus:
         return self._statuses.get(run_id, TaskStatus.PENDING)
@@ -283,6 +347,7 @@ class AgenticPuppetmasterBackend:
                 text=True,
                 cwd=workdir,
                 env=child_env,
+                **popen_kwargs_for_killable_child(),
             )
         except OSError as exc:
             self._statuses[request.run_id] = TaskStatus.FAILED
@@ -292,28 +357,71 @@ class AgenticPuppetmasterBackend:
             )
             return
 
-        yield DispatchEvent(
-            kind=EventKind.DISPATCH,
-            summary=ProgressSummary(
-                stage="dispatch",
-                message=f"dispatched via agentic with {pin.adapter_name}",
-                percent=2.0,
-                details={"model": pin.canonical},
-            ),
-        )
-        for event in iter_cli_process_events(
-            proc,
-            model=pin.canonical,
-            cli=self.cli,
-            timeout_seconds=self.timeout_seconds,
-        ):
-            if event.kind == EventKind.ERROR:
-                self._statuses[request.run_id] = TaskStatus.FAILED
-            elif event.kind == EventKind.RECEIPT:
+        self._register_child(request.run_id, proc)
+        try:
+            yield DispatchEvent(
+                kind=EventKind.DISPATCH,
+                summary=ProgressSummary(
+                    stage="dispatch",
+                    message=f"dispatched via agentic with {pin.adapter_name}",
+                    percent=2.0,
+                    details={"model": pin.canonical},
+                ),
+            )
+            for event in iter_cli_process_events(
+                proc,
+                model=pin.canonical,
+                cli=self.cli,
+                timeout_seconds=self.timeout_seconds,
+            ):
+                if request.run_id in self._cancel_requested:
+                    self._statuses[request.run_id] = TaskStatus.CANCELLED
+                    yield DispatchEvent(
+                        kind=EventKind.CANCEL_REQUESTED,
+                        summary=ProgressSummary(stage="cancelled", message="cancelled"),
+                    )
+                    return
+                if event.kind == EventKind.ERROR:
+                    self._statuses[request.run_id] = TaskStatus.FAILED
+                elif event.kind == EventKind.RECEIPT:
+                    self._statuses[request.run_id] = TaskStatus.COMPLETED
+                yield event
+            if request.run_id in self._cancel_requested:
+                self._statuses[request.run_id] = TaskStatus.CANCELLED
+                yield DispatchEvent(
+                    kind=EventKind.CANCEL_REQUESTED,
+                    summary=ProgressSummary(stage="cancelled", message="cancelled"),
+                )
+                return
+            if self._statuses.get(request.run_id) == TaskStatus.RUNNING:
                 self._statuses[request.run_id] = TaskStatus.COMPLETED
-            yield event
-        if self._statuses.get(request.run_id) == TaskStatus.RUNNING:
-            self._statuses[request.run_id] = TaskStatus.COMPLETED
+        finally:
+            self._unregister_child(request.run_id, proc)
+            self._cancel_requested.discard(request.run_id)
+
+
+    def _register_child(self, run_id: str, proc: Any) -> None:
+        rid = (run_id or "").strip()
+        if not rid or proc is None:
+            return
+        with self._child_lock:
+            self._children[rid] = proc
+
+    def _unregister_child(self, run_id: str, proc: Any) -> None:
+        rid = (run_id or "").strip()
+        if not rid:
+            return
+        with self._child_lock:
+            current = self._children.get(rid)
+            if current is proc or current is None:
+                self._children.pop(rid, None)
+
+    def cancel_receipt_for(self, run_id: str):
+        """gjc-remote-shaped receipt after ``cancel`` (inspect only)."""
+
+        rid = (run_id or "").strip()
+        confirmed = self._statuses.get(rid) == TaskStatus.CANCELLED
+        return cancel_receipt(confirmed=confirmed, run_id=rid)
 
     def _attach_gate_env(
         self, child_env: dict[str, str], request: DispatchRequest, workdir: Optional[str]

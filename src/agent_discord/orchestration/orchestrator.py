@@ -919,6 +919,9 @@ class AgentOrchestrator:
                 },
                 source="backend",
             )
+            if event.kind == EventKind.CANCEL_REQUESTED:
+                self._run_status[run_id] = TaskStatus.CANCELLED
+                stream_error = None
             if event.kind == EventKind.ERROR:
                 stream_error = summary.message
             if event.kind == EventKind.RECEIPT:
@@ -996,9 +999,16 @@ class AgentOrchestrator:
                 TaskStatus.RUNNING,
                 TaskStatus.PROGRESS,
             }:
-                streamed_status = (
-                    TaskStatus.FAILED if stream_error else TaskStatus.COMPLETED
-                )
+                if (
+                    self._run_status.get(run_id) == TaskStatus.CANCELLED
+                    or self.backend.status(run_id) == TaskStatus.CANCELLED
+                ):
+                    streamed_status = TaskStatus.CANCELLED
+                    stream_error = None
+                else:
+                    streamed_status = (
+                        TaskStatus.FAILED if stream_error else TaskStatus.COMPLETED
+                    )
             usage = None
             if receipt_payload:
                 from agent_discord.puppetmaster.backend import usage_from_cli_meta
@@ -1327,15 +1337,7 @@ class AgentOrchestrator:
             # Plan park Cancel = deny plan (ExitPlanMode), not live-cook interrupt.
             if self._task_awaiting_gate(run_id) and self._gate_kind(run_id) == "plan_approve":
                 return self._resolve_plan_gate(run_id, "deny")
-            try:
-                self.backend.cancel(run_id)
-            except Exception:
-                pass
-            try:
-                self.store.update_run(run_id, status=TaskStatus.CANCELLED, summary="cancelled")
-            except Exception:
-                pass
-            return {"action": verb, "run_id": run_id, "status": "cancelled"}
+            return self._cancel_live_cook(run_id)
         if verb == "retry":
             task_id = str(run.get("task_id") or "")
             task = self.store.get_task(task_id) if task_id else None
@@ -2901,6 +2903,117 @@ class AgentOrchestrator:
         with self._steer_lock:
             return list(self._steer_inbox.pop(rid, []))
 
+    def _cancel_live_cook(self, run_id: str) -> dict[str, Any]:
+        """Phone Cancel honesty: kill child or speak Cancel unconfirmed (no false paint)."""
+
+        from agent_discord.puppetmaster.cancel_honesty import (
+            CANCEL_UNCONFIRMED_SPOKEN,
+            cancel_receipt,
+        )
+
+        rid = (run_id or "").strip()
+        ok = False
+        try:
+            ok = bool(self.backend.cancel(rid))
+        except Exception:
+            ok = False
+        receipt = cancel_receipt(confirmed=ok, run_id=rid)
+        if ok:
+            self._run_status[rid] = TaskStatus.CANCELLED
+            try:
+                self.store.update_run(
+                    rid, status=TaskStatus.CANCELLED, summary="cancelled", error="cancelled"
+                )
+            except Exception:
+                pass
+            run = self.store.get_run(rid) or {}
+            task_id = str(run.get("task_id") or "")
+            if task_id:
+                self._event(
+                    task_id,
+                    rid,
+                    EventKind.CANCEL_REQUESTED,
+                    "cancel confirmed",
+                    receipt.as_dict(),
+                    source="orchestrator",
+                )
+            self._paint_cancel_outcome(rid, confirmed=True, spoken="cancelled")
+            out = {"action": "cancel", "run_id": rid, **receipt.as_dict()}
+            return out
+
+        # Fail closed honesty: do NOT paint Cancelled / Done as success.
+        merger = getattr(self.store, "merge_task_metadata", None)
+        run = self.store.get_run(rid) or {}
+        task_id = str(run.get("task_id") or "")
+        if callable(merger) and task_id:
+            try:
+                merger(task_id, {"cancellation_pending": True})
+            except Exception:
+                pass
+        if task_id:
+            self._event(
+                task_id,
+                rid,
+                EventKind.CANCEL_REQUESTED,
+                CANCEL_UNCONFIRMED_SPOKEN,
+                receipt.as_dict(),
+                source="orchestrator",
+            )
+        self._paint_cancel_outcome(
+            rid, confirmed=False, spoken=CANCEL_UNCONFIRMED_SPOKEN
+        )
+        return {"action": "cancel", "run_id": rid, **receipt.as_dict()}
+
+    def _paint_cancel_outcome(
+        self, run_id: str, *, confirmed: bool, spoken: str
+    ) -> None:
+        """Update the live card / post spoken honesty. Never lies about Cancelled."""
+
+        if not self.post_progress_to_discord or self.discord is None:
+            return
+        run = self.store.get_run(run_id) or {}
+        task_id = str(run.get("task_id") or "")
+        reader = getattr(self.store, "task_metadata", None)
+        meta = reader(task_id) if callable(reader) and task_id else {}
+        if not isinstance(meta, dict):
+            meta = {}
+        task = self.store.get_task(task_id) or {}
+        channel_id = str(task.get("channel_id") or meta.get("channel_id") or "").strip()
+        thread_id = str(task.get("thread_id") or meta.get("thread_id") or "").strip() or None
+        card_mid = str(meta.get("card_message_id") or "").strip()
+        if not channel_id and not thread_id:
+            return
+        try:
+            if confirmed:
+                card = reactive_receipt_card(
+                    RunReceipt(
+                        task_id=task_id,
+                        run_id=run_id,
+                        status=TaskStatus.CANCELLED,
+                        summary=spoken or "cancelled",
+                        error="cancelled",
+                    ),
+                    has_thread=bool(thread_id),
+                )
+                dest = thread_id or channel_id
+                if card_mid and dest:
+                    edit_card(self.discord, dest, card_mid, card)
+                elif channel_id:
+                    send_card(
+                        self.discord,
+                        channel_id,
+                        card,
+                        thread_id=thread_id,
+                    )
+            else:
+                # Spoken only — leave the running card / status alone.
+                poster = getattr(self.discord, "send_message", None)
+                dest = thread_id or channel_id
+                if callable(poster) and dest:
+                    poster(dest, spoken)
+        except Exception:
+            pass
+
     def cancel(self, run_id: str) -> bool:
         ok = bool(self.backend.cancel(run_id))
         if ok:
@@ -2912,8 +3025,8 @@ class AgentOrchestrator:
                     run["task_id"],
                     run_id,
                     EventKind.CANCEL_REQUESTED,
-                    "cancel requested",
-                    {},
+                    "cancel confirmed",
+                    {"confirmed": True, "cancellation_pending": False},
                     source="orchestrator",
                 )
         return ok

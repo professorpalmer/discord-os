@@ -1756,12 +1756,13 @@ def _start_panel_gateway(
                 return
             if action != "cancel":
                 return
+            # No orchestrator/backend — cannot confirm interrupt; never paint Cancelled.
             try:
-                from agent_discord.contracts import TaskStatus
+                from agent_discord.puppetmaster.cancel_honesty import CANCEL_UNCONFIRMED_SPOKEN
 
-                store.update_run(run_id, status=TaskStatus.CANCELLED, summary="cancelled")
+                print(CANCEL_UNCONFIRMED_SPOKEN, flush=True)
             except Exception:
-                pass
+                print("Cancel unconfirmed", flush=True)
 
         handle_gateway_interaction(
             store,
