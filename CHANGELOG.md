@@ -2,52 +2,30 @@
 
 ## Unreleased
 
-### Discord-half P0.4 — Bulk clear stale failed Needs
+## 0.5.50
 
-- CLI `discord-os jobs clear-needs --failed` with optional `--older-than DAYS`,
-  `--channel-id`, `--dry-run`. Same dismiss semantics as P0.1 (failed →
-  cancelled/`dismissed`; attention=need cleared). Fail-closed without `--failed`.
-- HOST More → **Clear failed Needs** shows a confirm (count) then clears for that
-  channel; cancels leave Needs untouched. Refreshes HOST Jobs panel (P0.3).
-- Docs: [cli](docs/cli/README.md), [jobs](docs/jobs/README.md),
-  [host](docs/host/README.md). Tests: `test_clear_failed_needs.py`.
-- No version bump in this change — ship cadence / parent pack cuts the tag.
+Discord-half P0 pack — Dismiss, thread bind, panel refresh, clear-needs.
 
-### Discord-half P0.3 — HOST Jobs panel refresh after dismiss/status change
+### Discord-half P0 pack
 
-- After dismiss / ack / cancel settle (ranking-affecting flips), immediately edit
-  the HOST panel Jobs select and Need line so phone is not stuck on a stale
-  snapshot. Shared `refresh_host_jobs_panel` (bulk clear can reuse later).
-- When `card_message_id` is missing: recover the panel from recent channel
-  history, else repaint a fresh panel and bind the id. If neither is possible,
-  spoken **Need** once — no silent lag forever.
-- Docs: [host](docs/host/README.md), [jobs](docs/jobs/README.md).
-  Tests: `test_host_jobs_panel_refresh.py`.
-- No version bump in this change — ship cadence / parent pack cuts the tag.
+- **P0.1 Dismiss / Ack failed Need**: failed cards show **Dismiss**;
+  `apply_job_action("dismiss"|"ack")` → cancelled/`dismissed`, clears GitHub
+  attention Need, briefing ranks **Last**. HOST Jobs → Dismiss.
+- **P0.2 Always bind job thread**: channel-parent asks with empty `thread_id`
+  always create a Discord job thread; fail closed with spoken **Need** on
+  create failure (incl. rate limit).
+- **P0.3 HOST Jobs panel refresh**: after dismiss/ack/cancel settle, edit Jobs
+  select + Need line immediately; recover/repaint panel when id missing;
+  spoken **Need** once if neither possible.
+- **P0.4 Bulk clear stale failed Needs**: CLI `jobs clear-needs --failed`
+  (+ `--older-than` / `--channel-id` / `--dry-run`); HOST More → **Clear failed
+  Needs** with confirm; refreshes panel (P0.3).
 
-### Discord-half P0.2 — Always bind job thread on channel asks
-
-- Channel-parent asks with empty `thread_id` always create a Discord job thread
-  (user message when present; otherwise HOST Ask posts a channel starter).
-  `thread_id` is stored on the task; cards/progress go to that thread.
-- Existing in-thread steers unchanged (no nested thread).
-- Thread create failure (including Discord rate limit) fails closed with spoken
-  **Need** — no retry storm, no silent channel-only cook.
-- Docs: [jobs](docs/jobs/README.md), [cards](docs/cards/README.md).
-  Tests: `test_bind_job_thread.py`.
-- No version bump in this change — ship cadence / parent pack cuts the tag.
-
-### Discord-half P0.1 — Dismiss / Ack failed Need
-
-- Failed job cards show **Dismiss** (Continue still available; Retry when no
-  session thread). `apply_job_action("dismiss"|"ack")` marks task+run
-  `cancelled` (summary `dismissed`), clears GitHub attention Need, and
-  briefing ranks **Last** instead of **Need**.
-- HOST Jobs select → failed card → Dismiss; cheap HOST panel Jobs refresh
-  after dismiss when the panel message id is known.
-- Docs: [jobs](docs/jobs/README.md), [host](docs/host/README.md),
-  [reactive](docs/cards/reactive.md). Tests: `test_dismiss_failed_need.py`.
-- No version bump in this change — ship cadence / parent pack cuts the tag.
+Docs: [cli](docs/cli/README.md), [jobs](docs/jobs/README.md),
+[host](docs/host/README.md), [cards](docs/cards/README.md),
+[reactive](docs/cards/reactive.md).
+Tests: `test_dismiss_failed_need.py`, `test_bind_job_thread.py`,
+`test_host_jobs_panel_refresh.py`, `test_clear_failed_needs.py`.
 
 ## 0.5.49
 
