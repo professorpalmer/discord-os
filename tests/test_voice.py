@@ -132,3 +132,24 @@ def test_mobile_push_suffix_is_discord_only():
     assert "apns" not in suffix.lower()
     assert "fcm" not in suffix.lower()
     assert "Discord OS" in suffix
+
+
+def test_post_voice_whisper_miss_speaks_when_cli_missing(monkeypatch):
+    from agent_discord.orchestration import listen as listen_mod
+
+    sent = []
+
+    class Discord:
+        def send_message(self, channel_id, body, thread_id=None):
+            sent.append((channel_id, body, thread_id))
+
+    monkeypatch.setattr(
+        "agent_discord.discord.voice.available",
+        lambda **_kw: False,
+    )
+    listen_mod._post_voice_whisper_miss(Discord(), "chan", "thr")
+    assert sent
+    assert "whisper" in sent[0][1].lower()
+    assert sent[0][0] == "chan"
+    assert sent[0][2] == "thr"
+

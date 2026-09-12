@@ -359,6 +359,12 @@ def drain_inbound(
             continue
         intake_text, intake_meta, skip_voice = _collab_intake(message, discord)
         if skip_voice:
+            _claim_inbound(store, discord, message, channel_id)
+            _post_voice_whisper_miss(
+                discord,
+                channel_id,
+                message.thread_id or thread_id,
+            )
             watermark = _advance_listen_watermark(
                 store, watermark_key, created_ms, message.message_id, watermark
             )
@@ -581,6 +587,34 @@ def _wait_for_run_id(
         except Exception:
             break
     return None
+
+
+
+def _post_voice_whisper_miss(
+    discord: Any, channel_id: str, thread_id: Optional[str]
+) -> None:
+    """Spoken Done when a voice memo arrives without a usable local whisper."""
+
+    try:
+        from agent_discord.discord.voice import available as whisper_available
+    except Exception:
+        whisper_available = lambda **_kw: False  # noqa: E731
+    if whisper_available():
+        body = (
+            "Heard the voice memo, but transcription came back empty. "
+            "Retry the memo or paste the ask as text."
+        )
+    else:
+        body = (
+            "Heard the voice memo, but no local whisper CLI is on PATH "
+            "(whisper-cli / whisper.cpp / whisper). Install one on the host, then retry."
+        )
+    try:
+        send = getattr(discord, "send_message", None)
+        if callable(send):
+            send(channel_id, body, thread_id=thread_id)
+    except Exception:
+        pass
 
 
 def _post_steer_miss(discord: Any, channel_id: str, thread_id: Optional[str]) -> None:

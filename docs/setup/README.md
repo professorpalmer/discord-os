@@ -41,6 +41,10 @@ Realm and memory also write SQLite so a running host sees them on the next poll.
 
 From Discord: `bind puppetmaster`, `bind memory`. Same SQLite rows. No slash `/add`.
 
+### Slash (opt-in)
+
+Discord OS stays text-first. Slash is **opt-in** for hosts that register application commands with the Discord app: prefer the existing bind / power / open text verbs and the HOST panel. If you enable slash later, mirror those same verbs (`/bind`, `/on`, `/off`, `/open`) — do not invent a parallel `/add` surface. Until slash is registered for your app, text + HOST panel are the supported path.
+
 ## Code
 
 - `src/agent_discord/cli.py` — `cmd_setup`, `cmd_add`

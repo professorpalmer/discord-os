@@ -820,6 +820,36 @@ def provider_failure_spoken(text: str) -> str:
         )
     if "not_authenticated" in lower and "agentic" in lower:
         return "The agentic adapter is not authenticated."
+    if (
+        "platform lock" in lower
+        or "platform_lock" in lower
+        or "locked to cursor" in lower
+        or "cursor-only" in lower
+    ):
+        return (
+            "Puppetmaster is locked to Cursor on this host. "
+            "Unlock the agentic adapter or run under Cursor to continue."
+        )
+    if (
+        "missing_cli" in lower
+        or "missing-cli" in lower
+        or "missing cli" in lower
+        or ("agentic cli" in lower and "not found" in lower)
+    ):
+        return (
+            "The agentic CLI is missing on this host. "
+            "Install or path the Puppetmaster agentic binary, then retry."
+        )
+    if (
+        "no_model" in lower
+        or "no model" in lower
+        or "model not configured" in lower
+        or "missing model" in lower
+    ):
+        return (
+            "No model is configured for this worker. "
+            "Set a model in the realm bind or host env, then retry."
+        )
     return ""
 
 

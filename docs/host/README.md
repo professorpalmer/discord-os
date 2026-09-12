@@ -42,3 +42,7 @@ discord-os host start --channel-id ID
 - `src/agent_discord/host/install.py` — login item
 - `src/agent_discord/host/actions.py` — Terminal / files / browser
 - `src/agent_discord/cli.py` — `cmd_host_*`, `cmd_setup`
+
+## Slash (opt-in)
+
+Text binds and the HOST panel are the default. Slash commands are optional and should mirror the same verbs when registered; they are not required for doctor, binds, or jobs.

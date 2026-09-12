@@ -237,6 +237,23 @@ _LIVE_AUTH_STITCH = (
 )
 
 
+
+def test_provider_failure_spoken_adapter_lock_missing_cli_no_model():
+    from agent_discord.puppetmaster.backend import provider_failure_spoken
+
+    lock = provider_failure_spoken("platform lock: cursor-only host")
+    assert "locked to Cursor" in lock
+    assert "Unlock" in lock
+
+    missing = provider_failure_spoken("missing_cli: agentic binary not found")
+    assert "agentic CLI is missing" in missing
+
+    nomodel = provider_failure_spoken("no_model configured for worker")
+    assert "No model is configured" in nomodel
+
+    assert provider_failure_spoken("ordinary worker failure") == ""
+
+
 def test_choose_spoken_answer_speaks_openrouter_401_from_stitch():
     from agent_discord.puppetmaster.backend import choose_spoken_answer
 
