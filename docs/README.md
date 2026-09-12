@@ -7,14 +7,14 @@ Surface README is first run plus this map. Feature pages live in their own folde
 | Folder | What it owns |
 |---|---|
 | [setup](setup/README.md) | First run, `add`, why there is no wizard |
-| [host](host/README.md) | On/Off/Ask, Jobs briefing, LaunchAgent, pairing, spend, schedule |
+| [host](host/README.md) | On/Off/Ask, watchdogs, status digest, TTS, REQUIRE_OPERATORS, LaunchAgent |
 | [realms](realms/README.md) | Channel = checkout |
-| [jobs](jobs/README.md) | Parallel cooks + live session threads |
+| [jobs](jobs/README.md) | Parallel cooks, `DISCORD_OS_MAX_LIVE`, live session threads |
 | [tools](tools/README.md) | Named CLI/HTTP catalog |
 | [wiki](wiki/README.md) | Portable LLM wiki over HTTP |
 | [memory](memory/README.md) | Think-tank channels |
-| [cards](cards/README.md) | One live card |
-| [compute](compute/README.md) | Puppetmaster, keys, model pins |
+| [cards](cards/README.md) | One live card; ask-gate / plan Approve / Cancel honesty / reactive |
+| [compute](compute/README.md) | OpenRouter/agentic only, keys, Path A SSH cook |
 | [objects](objects/README.md) | Snowflake object store |
 | [architecture](architecture/README.md) | Process shape and contracts |
 | [aws](aws/README.md) | AWS names as Discord analogs |

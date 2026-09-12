@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### CI: OpenRouter fail-closed check tests
+
+Happy-path CLI `check` tests set a dummy `OPENROUTER_API_KEY` so offline check
+returns 0 after OpenRouter-only fail-closed. Focused test asserts missing key
+exits non-zero. (No product semantics change.)
+
+### Concurrency honesty (`DISCORD_OS_MAX_LIVE`)
+
+- `JobPool` live ceiling is tunable via `DISCORD_OS_MAX_LIVE` (default **8**).
+- Product voice: analyze can overlap; implement/swarm serialize per checkout.
+  Real ceilings are OpenRouter RPM/TPM/spend + machine + Discord — not a hard
+  "two cooks" product voice. Do not pretend unbounded.
+- `discord-os check` prints `max live`. Docs/README/AGENTS refreshed through
+  Cancel honesty + round-1–3 seams.
+
 ### P0.1 Cancel honesty (local agentic + Path A SSH)
 
 Phone **Cancel** must not lie. Today Cancel painted SQLite `cancelled` while

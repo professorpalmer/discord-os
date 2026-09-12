@@ -1,4 +1,4 @@
-"""Parallel job pool: two asks cook at once."""
+"""Parallel job pool: analyze overlaps; implement serializes; max_live tunable."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from agent_discord.contracts import DiscordMessage, RunReceipt, TaskIntake, Task
 from agent_discord.discord.facade import DiscordFacade
 from agent_discord.discord.providers.fake import FakeDiscordMCPProvider
 from agent_discord.host.repos import HostRepo
-from agent_discord.orchestration.jobs import JobPool
+from agent_discord.orchestration.jobs import DEFAULT_MAX_LIVE, JobPool, resolve_max_live
 from agent_discord.orchestration.listen import drain_inbound
 from agent_discord.orchestration.orchestrator import AgentOrchestrator
 from agent_discord.persistence.sqlite import SQLiteStore
@@ -254,3 +254,42 @@ def test_job_pool_exposes_live_thread_ids():
     receipts = pool.wait(timeout=2.0)
     assert len(receipts) == 1
     assert pool.live_thread_ids() == ()
+
+
+def test_resolve_max_live_from_env(monkeypatch):
+    monkeypatch.delenv("DISCORD_OS_MAX_LIVE", raising=False)
+    assert resolve_max_live() == DEFAULT_MAX_LIVE
+    assert resolve_max_live({}) == DEFAULT_MAX_LIVE
+    assert resolve_max_live({"DISCORD_OS_MAX_LIVE": "12"}) == 12
+    assert resolve_max_live({"DISCORD_OS_MAX_LIVE": "0"}) == 1
+    assert resolve_max_live({"DISCORD_OS_MAX_LIVE": "nope"}) == DEFAULT_MAX_LIVE
+    monkeypatch.setenv("DISCORD_OS_MAX_LIVE", "4")
+    assert resolve_max_live() == 4
+
+
+def test_job_pool_respects_max_live_cap():
+    pool = JobPool(max_live=1)
+    assert pool.max_live == 1
+    hold = threading.Event()
+    started = []
+
+    def runner(intake: TaskIntake) -> RunReceipt:
+        started.append(intake.channel_id)
+        hold.wait(timeout=2.0)
+        return RunReceipt(
+            task_id="",
+            run_id=intake.channel_id,
+            status=TaskStatus.COMPLETED,
+            summary="ok",
+        )
+
+    pool.submit(runner, TaskIntake(text="analyze a", channel_id="a", workspace_id="ws"))
+    pool.submit(runner, TaskIntake(text="analyze b", channel_id="b", workspace_id="ws"))
+    deadline = time.monotonic() + 1.0
+    while time.monotonic() < deadline and len(started) < 1:
+        time.sleep(0.01)
+    assert started == ["a"]
+    hold.set()
+    receipts = pool.wait(timeout=3.0)
+    assert len(receipts) == 2
+    assert sorted(started) == ["a", "b"]

@@ -2,7 +2,7 @@
 
 Discord is the screen. This process is the computer. Your phone is the remote.
 
-SQLite is the database (tasks, runs, events, artifacts, execution DAG). Up to eight live jobs (two cooks at once in product voice). Implement writes serialize per checkout. Puppetmaster runs the workers on this Mac. Artifacts are channel / message / attachment plus sha256, never a CDN URL. Intake is REST. Gateway exists so On/Off buttons work. No hosted fleet.
+SQLite is the database (tasks, runs, events, artifacts, execution DAG). Up to eight live jobs by default (`DISCORD_OS_MAX_LIVE`, tunable). Analyze can overlap; implement/swarm writes serialize per checkout. Real ceilings are OpenRouter RPM/TPM/spend, machine CPU/RAM, and Discord limits — not a hard "two cooks" product voice. Puppetmaster runs the workers on this Mac (OpenRouter/agentic only — no Cursor). Artifacts are channel / message / attachment plus sha256, never a CDN URL. Intake is REST. Gateway exists so On/Off buttons work. No hosted fleet.
 
 Query the analog map with `discord-os map`. Dump a run with `discord-os lineage`.
 
@@ -53,12 +53,12 @@ From Discord you can also type `bind puppetmaster` or `bind memory` in that chan
 | **More** | Pair, Halt, Gate, Roles, GitHub, Files/Browser here or on host, Terminal on host |
 | `bind puppetmaster` | This channel is that checkout |
 | `bind memory` | This channel is think-tank |
-| a sentence | A task. Up to eight live jobs; two channels cooking is the usual case. |
+| a sentence | A task. Up to eight live jobs by default (`DISCORD_OS_MAX_LIVE`); analyze may overlap. |
 | reply in a job thread | Live → steer (or queue until the cook can take it). Idle/Done → new job in that thread (session). **Cancel** on the live card interrupts. |
 
 ![HOST card and a finished job thread](docs/screenshots/discord-host.png)
 
-![Two asks at once, live thinking card](docs/screenshots/discord-jobs.png)
+![Parallel asks, live thinking card](docs/screenshots/discord-jobs.png)
 
 ## Docs
 

@@ -22,6 +22,7 @@ Optional Marionette HTTP: `AGENT_DISCORD_BACKEND=marionette` plus `MARIONETTE_BA
 - `src/agent_discord/config.py` — `resolve_compute` (agentic-or-fail)
 - `src/agent_discord/puppetmaster/agentic.py` — OpenRouter via `puppetmaster agentic`
 - `src/agent_discord/puppetmaster/backend.py` — shared CLI helpers
+- `src/agent_discord/host/remote_cook.py` — Path A SSH remote cook
 - `src/agent_discord/keys/` — connect + vault
 
 ## Cancel honesty

@@ -20,8 +20,30 @@ from agent_discord.orchestration.routing import (
 
 
 DEFAULT_MAX_LIVE = 8
+MAX_LIVE_ENV = "DISCORD_OS_MAX_LIVE"
 _ORIGIN_THREADS: set[str] = set()
 
+
+def resolve_max_live(source: dict[str, str] | None = None) -> int:
+    """Live JobPool ceiling from env (default 8). Analyze may overlap; implement/swarm serialize.
+
+    Real ceilings are OpenRouter RPM/TPM/spend, machine CPU/RAM, and Discord rate limits —
+    not "two cooks". Raise via DISCORD_OS_MAX_LIVE; values <1 clamp to 1.
+    """
+
+    import os
+
+    raw = ""
+    if source is not None:
+        raw = (source.get(MAX_LIVE_ENV) or "").strip()
+    else:
+        raw = (os.environ.get(MAX_LIVE_ENV) or "").strip()
+    if not raw:
+        return DEFAULT_MAX_LIVE
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return DEFAULT_MAX_LIVE
 
 
 def note_origin_thread(thread_id: str) -> None:

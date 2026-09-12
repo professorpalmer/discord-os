@@ -34,4 +34,6 @@ discord-os lineage [RUN_ID|DOS-10001] [--json]
 
 `python -m agent_discord` is the same entry. `--fake` is the hermetic path.
 
+Live job ceiling: `DISCORD_OS_MAX_LIVE` (default 8). `check` prints `max live`. Product compute is OpenRouter/agentic only — `connect` before cook/On.
+
 Pointer JSON from `put` / `get` / `ls` never includes a `url` key.

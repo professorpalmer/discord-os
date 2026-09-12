@@ -1,12 +1,12 @@
 # Jobs
 
-Each ask is an OS thread **and** a Discord thread on the user message. That thread is the cowork space: describe an outcome, step away, come back to a spoken deliverable or a named failure — never a green OK with no answer. The parent channel stays the ask plus the thread starter. Job cards and answers stay in the thread. HOST stays in the channel and briefs parked / failed / live jobs before last Done. Up to eight live jobs (two cooks at once in product voice). SQLite holds the DAG. Puppetmaster is the worker. Same machine. Not a cloud VM. A follow-up in a **live** job thread steers that worker. A follow-up in an **idle** (Done) thread starts a new job in the same thread, parented at the prior tip — threads are live sessions, not one-shots.
+Each ask is an OS thread **and** a Discord thread on the user message. That thread is the cowork space: describe an outcome, step away, come back to a spoken deliverable or a named failure — never a green OK with no answer. The parent channel stays the ask plus the thread starter. Job cards and answers stay in the thread. HOST stays in the channel and briefs parked / failed / live jobs before last Done. Up to eight live jobs by default (`DISCORD_OS_MAX_LIVE`). SQLite holds the DAG. Puppetmaster is the worker. Same machine. Not a cloud VM. A follow-up in a **live** job thread steers that worker. A follow-up in an **idle** (Done) thread starts a new job in the same thread, parented at the prior tip — threads are live sessions, not one-shots.
 
 Analyze work overlaps. Implement and swarm writes serialize per resolved realm cwd so two channels do not fight one working tree.
 
 The host associates before the worker thinks: named checkout from the prompt (else the channel bind), then `gh` on that cwd. The worker prompt leads with that association. GitHub status asks still answer from the host scan. Product asks use the scan as context and cook.
 
-Cap is 8 live jobs. The listen loop does not block at that cap.
+Default live ceiling is **8** (`DISCORD_OS_MAX_LIVE`). Raise it when the machine and OpenRouter budget can take it; do not pretend unbounded — OpenRouter RPM/TPM/spend, CPU/RAM, and Discord rate limits still bite. The listen loop does not block at that cap (extra asks wait for a slot).
 
 ## Listen path
 
@@ -22,7 +22,7 @@ A job that opened a GitHub PR (or is bound as last pusher) gets check conclusion
 
 ## Code
 
-- `src/agent_discord/orchestration/jobs.py` — `JobPool`, `resolved_write_key`
+- `src/agent_discord/orchestration/jobs.py` — `JobPool`, `resolve_max_live`, `resolved_write_key`
 - `src/agent_discord/orchestration/listen.py` — claim, submit, per-destination watermark; `listen_destinations`
 - `src/agent_discord/persistence/sqlite.py` — session thread ids, parent channel, tip run, DOS-* mint
 - `src/agent_discord/orchestration/github_wake.py` — PR/CI wake into the owning thread

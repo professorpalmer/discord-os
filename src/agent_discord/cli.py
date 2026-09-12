@@ -79,7 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog=CLI_NAME,
         description=(
             f"{PRODUCT_NAME}: Discord is the screen. This process is the "
-            "computer: SQLite lineage, up to eight live jobs (two cooks at once), Puppetmaster on this "
+            "computer: SQLite lineage, up to eight live jobs (DISCORD_OS_MAX_LIVE), Puppetmaster on this "
             "Mac. Artifacts are Discord snowflakes plus sha256."
         ),
     )
@@ -669,6 +669,8 @@ def cmd_check(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     resolution = resolve_compute(config)
     print(f"backend:    {config.agent_backend}", file=out)
     print(f"compute:    {resolution.requested} -> {resolution.mode}", file=out)
+    from agent_discord.orchestration.jobs import resolve_max_live
+    print(f"max live:   {resolve_max_live()}", file=out)
     print(
         f"model pin:  {resolution.model} (adapter {AGENTIC_MODEL_PIN.adapter_name})",
         file=out,
@@ -1449,7 +1451,7 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     from agent_discord.host.memory import seed_memory_channels
     from agent_discord.host.realms import listen_channel_ids, seed_channel_realms
     from agent_discord.host.repos import load_host_repos
-    from agent_discord.orchestration.jobs import JobPool, resolved_write_key
+    from agent_discord.orchestration.jobs import JobPool, resolve_max_live, resolved_write_key
 
     host_repos = load_host_repos()
     orch.host_repos = host_repos
@@ -1465,7 +1467,7 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         workspace_id=args.workspace_id,
         repos=host_repos,
     )
-    job_pool = JobPool()
+    job_pool = JobPool(max_live=resolve_max_live())
     try:
         # Local process lock. Message intake stays REST. Host run opens a
         # Discord Gateway only so On/Off buttons work (no public URL).

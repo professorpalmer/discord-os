@@ -2,7 +2,7 @@
 
 Discord is the screen. This process is the computer. Your phone is the remote.
 
-SQLite is the database. Up to eight live jobs (two cooks at once in product voice). Puppetmaster runs on this Mac. Artifacts are Discord snowflakes plus sha256. Intake is REST. No hosted fleet.
+SQLite is the database. Up to eight live jobs by default (`DISCORD_OS_MAX_LIVE`, tunable). Analyze can overlap; implement/swarm writes serialize per checkout. Real ceilings are OpenRouter RPM/TPM/spend, machine CPU/RAM, and Discord limits — not a hard "two cooks" product voice. Puppetmaster runs on this Mac (OpenRouter/agentic only). Artifacts are Discord snowflakes plus sha256. Intake is REST. No hosted fleet.
 
 ```bash
 pip install discord-os
@@ -26,7 +26,7 @@ The `agent-discord` command still works. Full setup, Discord verbs, and docs liv
 
 ![HOST card and a finished job thread](https://raw.githubusercontent.com/professorpalmer/discord-os/master/docs/screenshots/discord-host.png)
 
-![Two asks at once, live thinking card](https://raw.githubusercontent.com/professorpalmer/discord-os/master/docs/screenshots/discord-jobs.png)
+![Parallel asks, live thinking card](https://raw.githubusercontent.com/professorpalmer/discord-os/master/docs/screenshots/discord-jobs.png)
 
 ## First run
 

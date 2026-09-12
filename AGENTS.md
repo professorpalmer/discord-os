@@ -15,9 +15,11 @@ Do not crawl the tree first. Each `docs/<feature>/README.md` lists the modules t
 
 - Host tools are **CLI or HTTP**. There is no MCP bus inside Discord. Wiki MCP results come from `discord-os wiki query`.
 - `bind puppetmaster` / `discord-os add realm` pins a channel to a checkout. Naming a repo in the prompt still overrides.
-- Up to eight live jobs (`JobPool`, product voice: two cooks at once). Implement writes serialize per realm.
+- Up to eight live jobs by default (`JobPool` / `DISCORD_OS_MAX_LIVE`). Analyze can overlap; implement/swarm serialize per realm. Real ceilings: OpenRouter RPM/TPM/spend + machine + Discord — not "two cooks".
 - Discord job threads are live sessions: live follow-ups steer; idle follow-ups cook again in-thread with lineage tip parent.
-- OpenRouter usage cost populates Halt spend receipts (agentic path).
+- Product compute is OpenRouter / puppetmaster agentic only (Cursor compute removed). Missing key fails closed (`discord-os connect`).
+- OpenRouter usage cost populates Halt spend receipts when present; omitted cost shows **unknown**, not `$0`.
+- Phone **Cancel** must kill the local/SSH cook or speak **Cancel unconfirmed** (no false Cancelled paint).
 - `~/Projects/agent-discord` is historical; live checkout is `~/Projects/discord-os`.
 - SQLite holds tasks, runs, events, artifacts, and the execution DAG. Query with `discord-os lineage`.
 - One live card per job. Edit in place. Do not flood the thread.
