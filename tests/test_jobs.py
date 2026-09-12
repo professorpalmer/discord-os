@@ -65,7 +65,9 @@ def test_job_pool_runs_two_asks_in_parallel(tmp_path: Path):
     assert len(receipts) == 2
     assert all(item.status == TaskStatus.COMPLETED for item in receipts)
     assert len(backend.started) == 2
-    assert elapsed < backend.hold * 1.8
+    # Prefer overlap proof over wall-clock (CI load can stretch 1.8x).
+    assert_dispatches_overlapped(backend)
+    assert elapsed < backend.hold * 3.0
     store.close()
 
 
