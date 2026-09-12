@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.5.51
+
+Discord-half P1 pack — accent+Section chrome, File settle, dos: router, ACK-first, ephemeral Pair/Gate.
+
 ### Discord-half P1 (5–9) — chrome, File, dos: router, ACK-first, ephemeral menus
 
 - **Accent + Section by job state**: job cards and HOST Jobs chrome use Need /
@@ -16,7 +20,6 @@
   modal (feasible). Docs: [reactive](docs/cards/reactive.md),
   [host](docs/host/README.md), [jobs](docs/jobs/README.md).
   Tests: `test_discord_half_p1.py`.
-- No version bump — parent pack cuts 0.5.51.
 
 ## 0.5.50
 
