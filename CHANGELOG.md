@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.5.52
+
+Discord-half haul complete — P0–P2 from 0.5.50 through 0.5.52.
+
+### Discord-half haul complete (0.5.50–0.5.52)
+
+- **P0 Dismiss / thread-bind / panel refresh / clear-needs (0.5.50)**: failed-card
+  Dismiss/Ack; always bind job threads; HOST Jobs panel refresh after settle;
+  bulk `jobs clear-needs --failed` (+ HOST More).
+- **P1 accent+Section / File / dos:router / ACK-first / ephemeral Pair-Gate
+  (0.5.51)**: Need/Live/Done chrome + accent; settle File; persistent
+  `dos:<verb>:<jobCode>:<nonce>` router; ACK-first then edit-in-place;
+  ephemeral Pair/Gate Confirm-Cancel menus.
+- **P2 slash autocomplete / non-blocking polls / forum skip / voice honesty
+  (0.5.52)**: opt-in `/bind` + `/job` autocomplete; polls only for non-blocking
+  asks (`live=True` hard-refuses); forum-as-realm skipped; `DISCORD_OS_VOICE_JOIN`
+  reserved spoken Deny (stub only).
+
 ### Discord-half P2 (10–13) — slash autocomplete, non-blocking polls, forum skip, voice honesty
 
 - **Slash progressive enhancement (opt-in)**: `/bind name` and new read-only
@@ -16,7 +34,6 @@
 - **Voice honesty polish**: `DISCORD_OS_VOICE_JOIN` reserved but still spoken
   Deny; TTS opt-in still does not unlock join. Stub only — not a desk/voice
   product. Docs: [voice](docs/host/voice.md).
-- No version bump — parent pack cuts 0.5.52 when ready.
 
 ## 0.5.51
 
