@@ -16,6 +16,7 @@ Voice **memos** (attachment → local whisper → intake) already live in
 | Local TTS | `say` (macOS) or `espeak` / `espeak-ng` on PATH. Argv lists only. |
 | Done hook | `maybe_speak_done(summary)` after a settle — best-effort, never raises. |
 | Voice join | `join_voice_channel(guild_id, channel_id)` → spoken **Deny**. Always. |
+| `DISCORD_OS_VOICE_JOIN` | Reserved knob. Truthy still **Deny** in this spike (not an unlock). |
 | Secrets | Keys never in argv. Assignment / PEM-shaped utterances refused. |
 
 ```bash
@@ -49,7 +50,8 @@ Blockers for this spike (why we stub):
 - Product scope: Done is already a written deliverable in the job thread.
   Local `say` covers the "spoken reply on the Mac" ask without joining.
 
-A future opt-in (e.g. `DISCORD_OS_VOICE_JOIN=1`) would still need an explicit
+Setting `DISCORD_OS_VOICE_JOIN=1` today is an **honest Deny** (spoken:
+reserved but not implemented). A future implement would still need an explicit
 allowlist of guild/channel ids and must never put the bot token in argv.
 
 ## Code
