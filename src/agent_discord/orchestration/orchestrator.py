@@ -36,10 +36,14 @@ from agent_discord.host.repos import (
 from agent_discord.host.tools import load_host_tools, tools_reach_block
 from agent_discord.orchestration.cards import (
     edit_card,
-    progress_card,
     receipt_card,
     send_card,
-    working_card,
+)
+from agent_discord.orchestration.reactive import (
+    reactive_paint,
+    reactive_progress_card,
+    reactive_receipt_card,
+    reactive_working_card,
 )
 from agent_discord.orchestration.routing import (
     MODE_IMPLEMENT,
@@ -489,13 +493,12 @@ class AgentOrchestrator:
                 except Exception:
                     job_code = ""
             live.paint(
-                progress_card(
+                reactive_progress_card(
                     stage="start",
                     message="On it.",
                     percent=1,
                     run_id=run_id,
                     job_code=job_code,
-                    actions="running",
                 ),
                 stage="start",
             )
@@ -758,7 +761,7 @@ class AgentOrchestrator:
             shown = public_card_text(host_github)
             if shown:
                 live.paint(
-                    progress_card(
+                    reactive_progress_card(
                         stage="working",
                         message=shown,
                         percent=12,
@@ -844,7 +847,7 @@ class AgentOrchestrator:
                     think_zone = thinking_hold
                     spoken = shown
                 live.paint(
-                    progress_card(
+                    reactive_progress_card(
                         stage=stream_stage,
                         message=_card_window(spoken) if spoken else "",
                         thinking=think_zone,
@@ -909,7 +912,7 @@ class AgentOrchestrator:
                 if (summary.message or "").strip().lower().startswith("dispatched via"):
                     if last_percent is not None:
                         live.paint(
-                            progress_card(
+                            reactive_progress_card(
                                 stage="working",
                                 message=_visible_card_text(token_text) or "Working.",
                                 percent=last_percent,
@@ -950,7 +953,7 @@ class AgentOrchestrator:
                 if summary.stage:
                     stream_stage = summary.stage
                 live.paint(
-                    progress_card(
+                    reactive_progress_card(
                         stage=summary.stage,
                         message=visible,
                         percent=summary.percent,
@@ -1155,7 +1158,11 @@ class AgentOrchestrator:
         think = live.thinking or thinking_hold
         if think and public_card_text(think, limit=0) == safe_final_summary:
             think = ""
-        card = receipt_card(receipt, thinking=think)
+        card = reactive_receipt_card(
+            receipt,
+            has_thread=bool(live.thread_id or job_thread_id),
+            thinking=think,
+        )
         rendered = card.text
         self._event(
             task_id,
@@ -1223,7 +1230,7 @@ class AgentOrchestrator:
             )
             if self.post_progress_to_discord and self.discord is not None:
                 live.paint(
-                    progress_card(
+                    reactive_progress_card(
                         stage=role,
                         message=bit,
                         percent=progress_items[-1].percent,
@@ -1266,7 +1273,7 @@ class AgentOrchestrator:
             error=handoff_error,
         )
         if self.post_progress_to_discord and self.discord is not None:
-            live.finish(receipt_card(receipt), summary=redact_text_markers(stitched))
+            live.finish(reactive_receipt_card(receipt, has_thread=bool(live.thread_id or job_thread_id)), summary=redact_text_markers(stitched))
         self._event(
             task_id,
             run_id,
@@ -1462,14 +1469,15 @@ class AgentOrchestrator:
             channel_id = str(task.get("channel_id") or meta.get("channel_id") or "").strip()
             thread_id = str(task.get("thread_id") or meta.get("thread_id") or "").strip() or None
             card_mid = str(meta.get("card_message_id") or "").strip()
-            card = receipt_card(
+            card = reactive_receipt_card(
                 RunReceipt(
                     task_id=task_id,
                     run_id=run_id,
                     status=TaskStatus.FAILED,
                     summary=spoken,
                     error=spoken,
-                )
+                ),
+                has_thread=bool(thread_id),
             )
             try:
                 dest = thread_id or channel_id
@@ -1604,7 +1612,7 @@ class AgentOrchestrator:
             thread_id=thread_id,
             task_id=task_id,
             meta=meta,
-            stage="parked",
+            stage=reactive_paint(awaiting_approval=True).stage,
         )
         self._set_presence("idle", "Discord OS")
         return {
@@ -1681,7 +1689,7 @@ class AgentOrchestrator:
             thread_id=thread_id,
             task_id=task_id,
             meta=meta,
-            stage="parked",
+            stage=reactive_paint(awaiting_approval=True).stage,
         )
         self._set_presence("idle", "Discord OS")
         return {
@@ -1858,14 +1866,15 @@ class AgentOrchestrator:
             channel_id = str(task.get("channel_id") or meta.get("channel_id") or "").strip()
             thread_id = str(task.get("thread_id") or meta.get("thread_id") or "").strip() or None
             card_mid = str(meta.get("card_message_id") or "").strip()
-            card = receipt_card(
+            card = reactive_receipt_card(
                 RunReceipt(
                     task_id=task_id,
                     run_id=run_id,
                     status=status,
                     summary=spoken,
                     error=spoken if failed else "",
-                )
+                ),
+                has_thread=bool(thread_id),
             )
             try:
                 dest = thread_id or channel_id
@@ -1963,15 +1972,14 @@ class AgentOrchestrator:
             summary=summary,
         )
         if self.post_progress_to_discord and self.discord is not None:
-            card = working_card(
-                task_label="Allow write",
+            card = reactive_working_card(
                 message=summary,
                 run_id=run_id,
-                actions="parked",
+                status=TaskStatus.PENDING,
             )
             try:
                 if live is not None:
-                    live.paint(card, stage="parked")
+                    live.paint(card, stage=reactive_paint(TaskStatus.PENDING).stage)
                     if live.message_id and callable(merger):
                         merger(task_id, {"card_message_id": live.message_id})
                 else:
@@ -2373,7 +2381,7 @@ class AgentOrchestrator:
             summary=spoken,
         )
         if self.post_progress_to_discord and self.discord is not None:
-            live.finish(receipt_card(receipt), summary=spoken)
+            live.finish(reactive_receipt_card(receipt, has_thread=bool(live.thread_id)), summary=spoken)
         self._react_terminal(intake, TaskStatus.COMPLETED)
         self._set_presence("idle", "Discord OS")
         return receipt

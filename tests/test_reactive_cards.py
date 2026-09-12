@@ -11,7 +11,9 @@ from agent_discord.orchestration.cards import (
     receipt_card,
     working_card,
 )
+from agent_discord.orchestration.ask_gate import tool_gate_card
 from agent_discord.orchestration.reactive import (
+    ACTIONS_DONE,
     ACTIONS_IDLE,
     ACTIONS_PARKED,
     ACTIONS_RUNNING,
@@ -23,6 +25,9 @@ from agent_discord.orchestration.reactive import (
     reactive_action_row,
     reactive_for_job,
     reactive_paint,
+    reactive_progress_card,
+    reactive_receipt_card,
+    reactive_working_card,
 )
 
 
@@ -109,3 +114,75 @@ def test_reactive_for_job_matches_host_jobs_mapping():
     assert action_labels(done.actions) == DONE_BUTTONS
     # progress without a live-running flag still paints done (today's HOST Jobs).
     assert reactive_for_job({"status": "progress"}).actions == "done"
+
+def test_reactive_helpers_own_park_running_settle_buttons():
+    """P1.6: park / running / settle paints come from the seam helpers."""
+
+    park = reactive_working_card(
+        message="Waiting for Allow to write.",
+        run_id="run-park",
+        status=TaskStatus.PENDING,
+    )
+    paint_park = reactive_paint(TaskStatus.PENDING)
+    assert park.color == paint_park.accent
+    assert park.title == paint_park.stage
+    assert _labels(park.rows[0]) == list(PARKED_BUTTONS)
+
+    live = reactive_progress_card(
+        stage="start",
+        message="On it.",
+        percent=1,
+        run_id="run-live",
+    )
+    paint_run = reactive_paint(TaskStatus.RUNNING)
+    assert live.color == paint_run.accent
+    assert _labels(live.rows[0]) == list(RUNNING_BUTTONS)
+
+    idle = reactive_receipt_card(
+        RunReceipt(
+            task_id="t",
+            run_id="run-idle",
+            status=TaskStatus.COMPLETED,
+            summary="shipped",
+        ),
+        has_thread=True,
+    )
+    assert _labels(idle.rows[0]) == list(IDLE_BUTTONS)
+
+    done = reactive_receipt_card(
+        RunReceipt(
+            task_id="t",
+            run_id="run-done",
+            status=TaskStatus.COMPLETED,
+            summary="shipped",
+        ),
+        has_thread=False,
+    )
+    assert _labels(done.rows[0]) == list(DONE_BUTTONS)
+    assert reactive_paint(TaskStatus.COMPLETED, has_thread=False).actions == ACTIONS_DONE
+
+    failed = reactive_receipt_card(
+        RunReceipt(
+            task_id="t",
+            run_id="run-fail",
+            status=TaskStatus.FAILED,
+            summary="Denied.",
+            error="Denied.",
+        ),
+        has_thread=True,
+    )
+    assert _labels(failed.rows[0]) == list(IDLE_BUTTONS)
+    assert failed.color == COLOR_FAIL
+
+
+def test_ask_gate_parked_row_uses_reactive_paint():
+    card = tool_gate_card("run-gate", tool_class="shell", detail="ls")
+    paint = reactive_paint(awaiting_approval=True)
+    assert paint.actions == ACTIONS_PARKED
+    assert _labels(card.rows[0]) == list(PARKED_BUTTONS)
+    assert [item["custom_id"] for item in card.rows[0]["components"]] == [
+        "discord-os:job:approve:run-gate",
+        "discord-os:job:always:run-gate",
+        "discord-os:job:deny:run-gate",
+    ]
+

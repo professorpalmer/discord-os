@@ -1,11 +1,12 @@
 """Reactive job-card paint: state → button set, accent, stage.
 
-Spike (P2.14). Not a widget framework. Callers that already know
-``actions=`` still pass it to card builders. This module is the named
-seam when a SQLite job row must become that mode plus accent and stage.
+P1.6 seam finish (spike P2.14). Not a widget framework. Park, live
+running, settle, and HOST Jobs reprint all go through
+``reactive_paint`` / ``reactive_for_job`` so button set / accent / stage
+stay one source of truth.
 
-Write-gate Allow / Always allow / Deny and Jobs Continue live here.
-Discord Activities and a full client UI do not.
+Write-gate Allow / Always allow / Deny, ask-gate parked rows, Cancel,
+and Jobs Continue live here. Discord Activities and a full client UI do not.
 """
 
 from __future__ import annotations
@@ -13,13 +14,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional, Union
 
-from agent_discord.contracts import TaskStatus
+from agent_discord.contracts import RunReceipt, TaskStatus
 from agent_discord.orchestration.cards import (
     COLOR_FAIL,
     COLOR_IDLE,
     COLOR_LIVE,
     COLOR_WORK,
+    CardMessage,
     job_action_row,
+    progress_card,
+    receipt_card,
+    working_card,
 )
 from agent_discord.orchestration.job_briefing import is_idle_job
 
@@ -96,6 +101,67 @@ def reactive_for_job(job: Mapping[str, Any]) -> ReactivePaint:
         job.get("status"),
         awaiting_approval=bool(job.get("awaiting_approval")),
         has_thread=bool(str(job.get("thread_id") or "").strip()),
+    )
+
+
+def reactive_working_card(
+    *,
+    message: str = "",
+    run_id: str = "",
+    percent: Optional[float] = None,
+    status: Union[str, TaskStatus, None] = None,
+    awaiting_approval: bool = False,
+) -> CardMessage:
+    """Park / allow-write paint owned by the seam."""
+
+    paint = reactive_paint(status, awaiting_approval=awaiting_approval)
+    return working_card(
+        task_label=paint.stage,
+        message=message,
+        percent=percent,
+        run_id=run_id,
+        actions=paint.actions,
+    )
+
+
+def reactive_progress_card(
+    *,
+    stage: str = "",
+    message: str = "",
+    percent: Optional[float] = None,
+    run_id: str = "",
+    thinking: str = "",
+    job_code: str = "",
+) -> CardMessage:
+    """Live cook flush — Cancel row from the seam."""
+
+    paint = reactive_paint(TaskStatus.RUNNING)
+    return progress_card(
+        stage=stage or paint.stage,
+        message=message,
+        percent=percent,
+        run_id=run_id,
+        actions=paint.actions,
+        thinking=thinking,
+        job_code=job_code,
+    )
+
+
+def reactive_receipt_card(
+    receipt: RunReceipt,
+    *,
+    has_thread: bool = False,
+    thinking: str = "",
+    max_progress: int = 5,
+) -> CardMessage:
+    """Settle / deny / Done paint — idle Continue when a job thread exists."""
+
+    paint = reactive_paint(receipt.status, has_thread=has_thread)
+    return receipt_card(
+        receipt,
+        thinking=thinking,
+        max_progress=max_progress,
+        actions=paint.actions,
     )
 
 

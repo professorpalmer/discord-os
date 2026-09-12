@@ -24,6 +24,7 @@ from agent_discord.orchestration.cards import (
     CardMessage,
     job_action_row,
 )
+from agent_discord.orchestration.reactive import reactive_paint
 from agent_discord.redaction import redact_text_markers
 
 ASK_ID_PREFIX = "discord-os:ask:"
@@ -252,7 +253,7 @@ def tool_gate_card(
             ("Class", f"`{klass}`", True),
             ("Detail", action, False),
         ),
-        rows=(job_action_row(run_id, actions="parked"),),
+        rows=(job_action_row(run_id, actions=reactive_paint(awaiting_approval=True).actions),),
     )
 
 
@@ -275,7 +276,7 @@ def ask_user_question_card(
             title=header or "Need input",
             description=q + "\n\nDenied. No options provided.",
             color=COLOR_WORK,
-            rows=(job_action_row(run_id, actions="parked"),),
+            rows=(job_action_row(run_id, actions=reactive_paint(awaiting_approval=True).actions),),
         )
     items = []
     fields: list[tuple[str, str, bool]] = []

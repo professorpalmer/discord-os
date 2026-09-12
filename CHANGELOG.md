@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+P1.6 Reactive seam finish.
+
+- Park / live running / settle / deny / ask-gate parked rows route through `reactive_paint` (`reactive_working_card` / `reactive_progress_card` / `reactive_receipt_card`).
+- HOST Jobs already used `reactive_for_job`; hardcoded `actions="parked"` / `"running"` dual-paths removed at those call sites.
+- Docs: [docs/cards/reactive.md](docs/cards/reactive.md). No version bump. Not Activities.
+
+
 ## 0.5.34
 
 P1.5 Operator bootstrap harden (REQUIRE_ALLOWLIST-style).
