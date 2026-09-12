@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+## 0.5.53
+
+Discord-half EXTRAS — forum-as-realm experiment, slash deepen, poll surfaces, voice honesty.
+
+### Forum-as-realm (scoped experiment)
+
+- Bind a Discord **forum** (type 15) as a normal realm; new forum posts →
+  existing **JobPool** intake with `thread_id = post thread`. Not a second job
+  system.
+- Fail closed with spoken **Need** when channel is not a forum (`--forum`) or
+  bot cannot list active threads (missing perms).
+- `discord-os add realm NAME --channel-id ID --forum`; in-channel `bind`
+  auto-marks forums after REST probe.
+- Catalog `forum-tags` rank **experiment** (was never). Docs:
+  [realms](docs/realms/README.md).
+
+### Slash deepen
+
+- Richer `/job` ephemeral (task/run/intake/settle/dest).
+- Optional `/clear-needs` (requires `failed=True`; optional `dry_run`).
+- Re-run `discord-os interactions --register` after upgrade. Docs:
+  [slash](docs/host/slash.md).
+
+### Polls (non-blocking only)
+
+- CLI `discord-os poll --channel-id … --question … --option …`
+- HOST More → **Post preference poll** modal.
+- Still never replaces live ask-gate cards (`live=True` refuses).
+
+### Voice honesty
+
+- Clearer spoken Deny when `DISCORD_OS_VOICE_JOIN` is set (not an unlock).
+- `discord-os host doctor` **WARN** while that env is set. Still no real join.
+
 ## 0.5.52
 
 Discord-half haul complete — P0–P2 from 0.5.50 through 0.5.52.

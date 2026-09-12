@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from importlib.resources import files
 from typing import Any, Mapping, Optional, Sequence
 
-RANKS = frozenset({"shipped", "now", "next", "never"})
+RANKS = frozenset({"shipped", "now", "next", "never", "experiment"})
 
 
 @dataclass(frozen=True)

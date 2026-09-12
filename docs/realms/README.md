@@ -36,18 +36,44 @@ The host scans GitHub on that checkout before dispatch. The worker prompt starts
 
 `.agent-discord` is never the subject repository.
 
+## Forum-as-realm (Discord-half EXTRAS — scoped experiment)
+
+**Experiment, not a second job system.** Bind a Discord **forum** channel
+(type 15 / `GUILD_FORUM`) as a normal realm checkout. New forum **posts**
+become JobPool intake with `thread_id = post thread` and
+`channel_id = forum parent` (cwd / bind key). Reuses `JobPool` + listen
+watermarks — no parallel ticket queue, no forum-tags-as-types product.
+
+```bash
+# Fail closed unless the channel is actually a forum + bot can list threads:
+discord-os add realm tickets --channel-id FORUM_ID --forum
+```
+
+In-channel `bind <name>` on a forum channel auto-marks `forum=true` in
+binding metadata after a REST type + active-threads probe. Text channels
+stay unmarked.
+
+| Fail closed (spoken **Need**) | When |
+|---|---|
+| Not a forum | `--forum` or probe sees type ≠ 15 |
+| Missing perms | Cannot `GET …/threads/active` (401/403) |
+| No token | `--forum` without resolvable bot token |
+
+**Limits (honest):**
+
+- Forum tags are **not** ticket types (catalog `forum-tags` = experiment for
+  post→JobPool intake only — not tag taxonomy).
+- The forum parent is **not** drained as a message channel; only post threads.
+- Categories still may group realms visually later; this does not invent a
+  desk-in-Discord or a second JobPool.
+- Missing ACL posts a Need and skips that forum's discovery that tick.
+
+Code: `src/agent_discord/host/forum_realm.py`. See [aws map](../aws/README.md).
+
 ## Code
 
 - `src/agent_discord/host/realms.py` — parse, seed, bind, listen ids
+- `src/agent_discord/host/forum_realm.py` — forum experiment (type 15 + JobPool)
 - `src/agent_discord/host/repos.py` — catalog, name match, host reach
 - `src/agent_discord/orchestration/listen.py` — `_absorb_bind`
 - `src/agent_discord/persistence/sqlite.py` — `merge_binding_metadata` (must merge, not wipe)
-
-## Forum-as-realm (Discord-half P2 — skipped)
-
-**Skipped (not S–M).** Discord forum channels as a second realm / job system
-would duplicate JobPool + session threads. The AWS catalog ranks
-`forum-tags` as **never** for that reason. Categories may later group realms
-visually; forums are not a checkout bind surface. See
-[aws map](../aws/README.md) and `src/agent_discord/data/aws_catalog.json`.
-

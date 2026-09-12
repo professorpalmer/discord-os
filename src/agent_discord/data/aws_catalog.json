@@ -367,9 +367,9 @@
     },
     {
       "id": "forum-tags",
-      "title": "Forum tags as ticket types, not a second job system",
-      "rank": "never",
-      "adapt": "Jobs already open a thread on the user message. Forum channels would duplicate JobPool. Categories may later group realms visually.",
+      "title": "Forum posts \u2192 JobPool intake (not tag taxonomy)",
+      "rank": "experiment",
+      "adapt": "Scoped experiment: bind a GUILD_FORUM channel as a realm; new forum posts become JobPool jobs with thread_id=post. Fail closed if not forum or missing thread-list perms (spoken Need). Not a second job system; forum tags are still not ticket types. Categories may later group realms visually.",
       "source": "job_7fbccfc4a5b8"
     },
     {

@@ -1237,6 +1237,14 @@ def _absorb_bind(
             name=name,
             repos=repos,
         )
+        _maybe_mark_forum_on_bind(
+            discord,
+            store,
+            workspace_id=workspace_id,
+            channel_id=channel_id,
+            thread_id=thread_id,
+            require_forum=False,
+        )
     realm = ""
     if chosen is not None:
         realm = chosen.name
@@ -1249,6 +1257,67 @@ def _absorb_bind(
         thread_id=thread_id,
         realm=realm or _realm_name(store, channel_id, workspace_id),
     )
+
+
+
+def _maybe_mark_forum_on_bind(
+    discord: Any,
+    store: Any,
+    *,
+    workspace_id: str,
+    channel_id: str,
+    thread_id: Optional[str],
+    require_forum: bool = False,
+) -> None:
+    """Forum-as-realm: auto-mark GUILD_FORUM binds; Need + refuse mark on ACL miss."""
+
+    from agent_discord.host.forum_realm import ForumRealmError, validate_and_mark_forum_bind
+
+    token = ""
+    for attr in ("bot_token", "token", "_token"):
+        raw = getattr(discord, attr, None)
+        if isinstance(raw, str) and raw.strip():
+            token = raw.strip()
+            break
+    provider = getattr(discord, "provider", None)
+    if not token and provider is not None:
+        for attr in ("bot_token", "token", "_token"):
+            raw = getattr(provider, attr, None)
+            if isinstance(raw, str) and raw.strip():
+                token = raw.strip()
+                break
+    if not token:
+        # No REST token on this facade (fake tests) — skip probe.
+        return
+    try:
+        validate_and_mark_forum_bind(
+            store,
+            workspace_id=workspace_id,
+            channel_id=channel_id,
+            token=token,
+            require_forum=require_forum,
+        )
+    except ForumRealmError as exc:
+        _post_forum_need(discord, channel_id, thread_id, exc.spoken)
+
+
+def _post_forum_need(
+    discord: Any, channel_id: str, thread_id: Optional[str], spoken: str
+) -> None:
+    body = (spoken or "").strip() or "Need: forum-as-realm — refused."
+    send = getattr(discord, "send_message", None)
+    if not callable(send):
+        return
+    try:
+        send(channel_id, body, thread_id=thread_id)
+    except TypeError:
+        try:
+            send(channel_id, body)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
 
 
 def _realm_name(store: Any, channel_id: str, workspace_id: str = "default") -> str:

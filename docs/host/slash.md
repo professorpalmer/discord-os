@@ -25,7 +25,8 @@ discord-os interactions --serve
 | Slash | Same as text | Notes |
 |---|---|---|
 | `/bind` | `bind` / `/bind` | Optional `name` with **autocomplete** (realms, `memory`, `host <id>`) |
-| `/job` | (read-only) | Required `code` with **DOS-*** autocomplete; ephemeral status line |
+| `/job` | (read-only) | Required `code` with **DOS-*** autocomplete; richer ephemeral (task/run/intake/settle/dest) |
+| `/clear-needs` | HOST More / `jobs clear-needs --failed` | Requires `failed=True` (fail-closed); optional `dry_run` |
 | `/status` | `/status` | Read-only digest; never mutates power |
 | `/on` | `/on` | Arms channel; may seed owner if empty |
 | `/off` | `/off` | Disarms |
@@ -34,6 +35,15 @@ discord-os interactions --serve
 | `/connect` | `/connect` | Existing; never accepts a secret option |
 
 **Not registered:** `/add`. Use `discord-os add …` or in-channel `bind`.
+
+After upgrading Discord OS, re-run:
+
+```bash
+discord-os interactions --register
+```
+
+so Discord picks up new commands (`/job` autocomplete, `/clear-needs`, richer
+option flags). Skipping re-register leaves the phone on the old command set.
 
 ## Autocomplete
 

@@ -102,6 +102,7 @@ def run_doctor(
         lines.append(f"OK discord token source={source}")
 
     fails += _check_host_allowlist(lines)
+    _warn_voice_join(lines)
 
     db = ws / "agent_discord.sqlite3" if ws.exists() else None
     if db is not None and db.is_file():
@@ -483,3 +484,16 @@ def _host_run_pids() -> list[int]:
             continue
         found.append(pid)
     return found
+
+
+def _warn_voice_join(lines: list[str]) -> None:
+    """WARN when DISCORD_OS_VOICE_JOIN is set — reserved Deny, not an unlock."""
+
+    from agent_discord.discord.tts import ENV_VOICE_JOIN
+
+    raw = str(os.environ.get(ENV_VOICE_JOIN) or "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        lines.append(
+            f"WARN {ENV_VOICE_JOIN}={raw} is reserved — voice join still Deny "
+            "(no gateway Opus/UDP; unset to silence this WARN)"
+        )

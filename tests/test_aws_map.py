@@ -129,3 +129,8 @@ def test_cli_map_prints_lifts_and_json_miss_fails(capsys):
     assert payload["analogs"] == []
     assert payload["lifts"] == []
 
+
+def test_forum_tags_lift_is_experiment():
+    world = {item.id: item.rank for item in lifts()}
+    assert world["forum-tags"] == "experiment"
+

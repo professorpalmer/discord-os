@@ -18,6 +18,7 @@ Ranks:
 | shipped | Already the product |
 | now | Fits Discord + one host; do next |
 | next | Fits, but needs a Discord primitive we do not use yet |
+| experiment | Scoped opt-in; honest limits; not a second product surface |
 | never | Breaks product truths (hosted fleet, CDN URL keys, second UI, MCP-inside-Discord) |
 
 ## How to read a row
@@ -31,7 +32,7 @@ World lifts (arxiv, OpenHands durable handles, Restate human-in-the-loop, Discor
 - A Temporal/Step Functions cluster (SQLite lineage on this Mac is the analog)
 - Discord Activities as a second dashboard (the live card cites lineage)
 - Per-realm bot tokens or VPC-style isolation of the Mac disk
-- Forum channels as a second job system
+- Forum channels as a **second job system** (forum-as-realm experiment reuses JobPool only)
 - Persisting Discord CDN URLs
 
 ## Code

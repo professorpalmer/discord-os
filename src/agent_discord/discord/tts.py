@@ -96,7 +96,10 @@ def spoken_tts_deny(*, reason: str = "no local say/espeak CLI on PATH") -> str:
 
 def spoken_voice_join_deny(*, reason: str = "not implemented in this spike") -> str:
     why = (reason or "unavailable").strip() or "unavailable"
-    return f"Denied. Voice channel join is {why}."
+    return (
+        f"Denied. Voice channel join is {why}. "
+        "No gateway voice / Opus / UDP in this build — spoken Deny only."
+    )
 
 
 def speak_done(
@@ -192,8 +195,8 @@ def join_voice_channel(
     elif join_opt in _TRUTHY:
         deny = spoken_voice_join_deny(
             reason=(
-                f"{ENV_VOICE_JOIN} is reserved but not implemented "
-                "(gateway voice + Opus/UDP deferred)"
+                f"{ENV_VOICE_JOIN}=1 is set but join is reserved/not implemented "
+                "(still Deny — not an unlock; gateway voice + Opus/UDP deferred)"
             )
         )
     else:

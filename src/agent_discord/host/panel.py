@@ -56,6 +56,10 @@ GITHUB_ID = "discord-os:github"
 CLEAR_NEEDS_ID = "discord-os:clear-needs"
 CLEAR_NEEDS_CONFIRM_ID = "discord-os:clear-needs-confirm"
 CLEAR_NEEDS_CANCEL_ID = "discord-os:clear-needs-cancel"
+POLL_ID = "discord-os:poll"
+POLL_MODAL_ID = "discord-os:poll-modal"
+POLL_QUESTION_ID = "discord-os:poll-question"
+POLL_OPTIONS_ID = "discord-os:poll-options"
 COMPONENT_ROW = 1
 BUTTON = 2
 STYLE_PRIMARY = 1
@@ -199,6 +203,13 @@ def _more_select_options(
             "description": "Dismiss stale failed Needs",
         }
     )
+    options.append(
+        {
+            "label": "Post preference poll",
+            "value": POLL_ID,
+            "description": "Non-blocking poll (not a live gate)",
+        }
+    )
     if write_gate:
         options.append(
             {
@@ -301,6 +312,50 @@ def ask_modal_payload() -> dict[str, Any]:
         "What should this host do?",
         max_length=4000,
     )
+
+
+def poll_modal_payload() -> dict[str, Any]:
+    """Non-blocking preference poll — never a live gate hold."""
+
+    return {
+        "type": CALLBACK_MODAL,
+        "data": {
+            "custom_id": POLL_MODAL_ID,
+            "title": "Preference poll",
+            "components": [
+                {
+                    "type": COMPONENT_ROW,
+                    "components": [
+                        {
+                            "type": 4,
+                            "custom_id": POLL_QUESTION_ID,
+                            "label": "Question",
+                            "style": 1,
+                            "min_length": 1,
+                            "max_length": 300,
+                            "required": True,
+                            "placeholder": "Preferred style?",
+                        }
+                    ],
+                },
+                {
+                    "type": COMPONENT_ROW,
+                    "components": [
+                        {
+                            "type": 4,
+                            "custom_id": POLL_OPTIONS_ID,
+                            "label": "Options (comma-separated, 2–10)",
+                            "style": 2,
+                            "min_length": 3,
+                            "max_length": 500,
+                            "required": True,
+                            "placeholder": "Concise, Detailed, Bullets",
+                        }
+                    ],
+                },
+            ],
+        },
+    }
 
 
 def roles_modal_payload() -> dict[str, Any]:
@@ -641,6 +696,8 @@ def panel_action_from_custom_id(custom_id: str) -> Optional[str]:
         return "clear-needs-confirm"
     if raw == CLEAR_NEEDS_CANCEL_ID:
         return "clear-needs-cancel"
+    if raw == POLL_ID:
+        return "poll"
     if raw == GATE_ID:
         return "gate"
     if raw == ROLES_ID:
@@ -1061,6 +1118,10 @@ def handle_gateway_interaction(
             print(f"panel job card failed: {exc}", flush=True)
         return action
 
+    if action == "poll":
+        _ack_interaction(payload, poll_modal_payload(), opener=opener)
+        return action
+
     if action == "clear-needs":
         matched = _count_dismissable_needs(store, channel_id)
         if matched <= 0:
@@ -1287,6 +1348,14 @@ def _handle_modal_submit(
         custom_id = str(data.get("custom_id") or "")
     text = _first_text_input(data.get("components") if isinstance(data, dict) else None)
     _ack_interaction(payload, {"type": CALLBACK_DEFERRED_UPDATE}, opener=opener)
+    if custom_id == POLL_MODAL_ID:
+        return _handle_poll_modal(
+            store,
+            channel_id,
+            payload,
+            token=token,
+            opener=opener,
+        )
     if custom_id == ASK_MODAL_ID:
         if text and callable(on_ask):
             try:
@@ -2034,3 +2103,75 @@ def _publish_job_card(
         flags=card.v2_payload()["flags"],
         opener=opener,
     )
+
+
+def _handle_poll_modal(
+    store: Any,
+    channel_id: str,
+    payload: Mapping[str, Any],
+    *,
+    token: str = "",
+    opener: Any = None,
+) -> str:
+    """Post a non-blocking preference poll from HOST More. Never live=True."""
+
+    _ = store
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    components = data.get("components") if isinstance(data, dict) else None
+    question = ""
+    options_raw = ""
+    if isinstance(components, list):
+        for row in components:
+            if not isinstance(row, dict):
+                continue
+            for comp in row.get("components") or ():
+                if not isinstance(comp, dict):
+                    continue
+                cid = str(comp.get("custom_id") or "")
+                val = str(comp.get("value") or "").strip()
+                if cid == POLL_QUESTION_ID:
+                    question = val
+                elif cid == POLL_OPTIONS_ID:
+                    options_raw = val
+    options = [p.strip() for p in options_raw.replace(";", ",").split(",") if p.strip()]
+    interaction_id, ix_token = interaction_ids(payload)
+    if interaction_id and ix_token:
+        try:
+            from agent_discord.discord.rest import callback_interaction
+
+            callback_interaction(
+                interaction_id=interaction_id,
+                interaction_token=ix_token,
+                payload={
+                    "type": CALLBACK_MESSAGE,
+                    "data": {
+                        "content": "Posting preference poll…",
+                        "flags": FLAG_EPHEMERAL,
+                    },
+                },
+                opener=opener,
+            )
+        except Exception:
+            pass
+    if len(options) < 2 or not question:
+        print("panel poll: need question + at least two options", flush=True)
+        return "poll"
+    bot = (token or "").strip()
+    if not bot:
+        print("panel poll: missing bot token", flush=True)
+        return "poll"
+    try:
+        from agent_discord.orchestration.ask_poll import post_nonblocking_ask_poll
+
+        post_nonblocking_ask_poll(
+            token=bot,
+            channel_id=channel_id,
+            question=question,
+            options=options,
+            live=False,
+            opener=opener,
+        )
+        print(f"panel poll posted q={question!r} n={len(options)}", flush=True)
+    except Exception as exc:
+        print(f"panel poll failed: {exc}", flush=True)
+    return "poll"

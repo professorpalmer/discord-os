@@ -57,6 +57,51 @@ def call_discord_json(
     )
 
 
+def fetch_channel(
+    *,
+    token: str,
+    channel_id: str,
+    opener: Optional[UrlOpener] = None,
+) -> dict[str, Any]:
+    """GET /channels/{channel.id}. Public channel fields only — never the token."""
+
+    cid = (channel_id or "").strip()
+    if not cid:
+        raise ToolInvocationError("Discord channel id required")
+    raw = call_discord_json(token, "GET", f"/channels/{cid}", opener=opener)
+    if not isinstance(raw, dict):
+        raise ToolInvocationError("Discord channel fetch was not an object")
+    return raw
+
+
+def list_active_threads(
+    *,
+    token: str,
+    channel_id: str,
+    opener: Optional[UrlOpener] = None,
+) -> tuple[dict[str, Any], ...]:
+    """GET /channels/{channel.id}/threads/active (forum / text parent).
+
+    Returns thread channel objects. Empty tuple when none. Callers map 403 →
+    spoken Need for forum-as-realm.
+    """
+
+    cid = (channel_id or "").strip()
+    if not cid:
+        raise ToolInvocationError("Discord channel id required")
+    raw = call_discord_json(
+        token, "GET", f"/channels/{cid}/threads/active", opener=opener
+    )
+    if not isinstance(raw, dict):
+        raise ToolInvocationError("Discord active threads was not an object")
+    threads = raw.get("threads") or ()
+    out: list[dict[str, Any]] = []
+    for item in threads:
+        if isinstance(item, dict) and str(item.get("id") or "").strip():
+            out.append(item)
+    return tuple(out)
+
+
 def fetch_bot_identity(
     *,
     token: str,

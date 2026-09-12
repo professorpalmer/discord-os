@@ -459,6 +459,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_add_realm = add_sub.add_parser("realm", help="Bind a Discord channel to a named checkout")
     p_add_realm.add_argument("name")
     p_add_realm.add_argument("--channel-id", required=True)
+    p_add_realm.add_argument(
+        "--forum",
+        action="store_true",
+        help="Require Discord forum channel (type 15); fail closed with Need if not",
+    )
     p_add_realm.add_argument("--workspace-id", default="default")
     p_add_realm.add_argument("--json", action="store_true")
     p_add_memory = add_sub.add_parser("memory", help="Mark a channel as think-tank")
@@ -527,6 +532,29 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print how the agentic worker attaches this hook",
     )
+
+    p_poll = sub.add_parser(
+        "poll",
+        help="Post a non-blocking Discord preference poll (never a live gate)",
+    )
+    p_poll.add_argument("--channel-id", required=True, help="Discord channel or thread id")
+    p_poll.add_argument("--question", required=True, help="Poll question text")
+    p_poll.add_argument(
+        "--option",
+        action="append",
+        dest="options",
+        default=[],
+        help="Answer label (repeatable; 2–10)",
+    )
+    p_poll.add_argument("--thread-id", default="", help="Optional thread id")
+    p_poll.add_argument(
+        "--hours",
+        type=int,
+        default=24,
+        help="Poll duration hours (Discord 1–768; default 24)",
+    )
+    p_poll.add_argument("--multiselect", action="store_true", help="Allow multiple answers")
+    p_poll.add_argument("--json", action="store_true")
 
     p_jobs = sub.add_parser(
         "jobs",
@@ -872,6 +900,7 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                     name=args.name,
                     channel_id=args.channel_id,
                     workspace_id=args.workspace_id,
+                    forum=bool(getattr(args, "forum", False)),
                 )
             finally:
                 store.close()
@@ -927,7 +956,8 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         return 0
     if kind == "realm":
         cwd = f" cwd={payload['cwd']}" if payload.get("cwd") else ""
-        print(f"added realm {payload['name']} #{payload['channel_id']}{cwd}", file=out)
+        forum = " forum" if payload.get("forum") else ""
+        print(f"added realm {payload['name']} #{payload['channel_id']}{cwd}{forum}", file=out)
     elif kind == "memory":
         print(f"added memory #{payload['channel_id']}", file=out)
     elif kind == "repo":
@@ -1566,14 +1596,53 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                     session_ids = tuple(lister(limit=32) or ())
                 except Exception:
                     session_ids = ()
+            forum_ids: tuple[str, ...] = ()
+            try:
+                from agent_discord.host.forum_realm import (
+                    binding_is_forum_realm,
+                    collect_forum_thread_dests,
+                )
+
+                token = (config.discord_bot_token or "").strip()
+                if token and not args.fake:
+
+                    def _forum_need(forum_id: str, spoken: str) -> None:
+                        try:
+                            discord.send_message(forum_id, spoken)
+                        except Exception:
+                            print(f"forum Need: {spoken}", flush=True)
+
+                    forum_ids = collect_forum_thread_dests(
+                        store,
+                        workspace_id=args.workspace_id,
+                        listen_ids=listen_ids,
+                        token=token,
+                        on_need=_forum_need,
+                    )
+            except Exception as exc:
+                print(f"forum discover skipped: {exc}", flush=True)
+                forum_ids = ()
+            merged_sessions = tuple(
+                dict.fromkeys([*session_ids, *forum_ids])
+            )
             dests = listen_destinations(
-                listen_ids, job_pool, orch, session_thread_ids=session_ids
+                listen_ids, job_pool, orch, session_thread_ids=merged_sessions
             )
             primary = {str(cid or "").strip() for cid in listen_ids if str(cid or "").strip()}
+            forum_primaries = {
+                cid
+                for cid in primary
+                if binding_is_forum_realm(
+                    store, cid, workspace_id=args.workspace_id
+                )
+            }
             receipts: list[Any] = []
             for listen_id in dests:
                 try:
                     if listen_id in primary:
+                        # Forum parent is not a message channel — posts live in threads.
+                        if listen_id in forum_primaries:
+                            continue
                         drain_channel = listen_id
                         drain_thread = (
                             args.thread_id if listen_id == args.channel_id else None
@@ -2506,6 +2575,54 @@ def cmd_interactions(args: argparse.Namespace, *, out: TextIO | None = None) -> 
     return 0
 
 
+def cmd_poll(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
+    """Post a non-blocking preference poll. Never replaces live ask-gate cards."""
+
+    out = out or sys.stdout
+    from agent_discord.orchestration.ask_poll import LiveGatePollError, post_nonblocking_ask_poll
+
+    options = list(getattr(args, "options", None) or [])
+    if len(options) < 2:
+        print("poll: need at least two --option labels", file=sys.stderr)
+        return 2
+    config = apply_runtime_secrets(load_config())
+    token = (config.discord_bot_token or "").strip()
+    if not token:
+        print("poll: DISCORD_BOT_TOKEN empty", file=sys.stderr)
+        return 2
+    try:
+        msg = post_nonblocking_ask_poll(
+            token=token,
+            channel_id=str(args.channel_id),
+            question=str(args.question),
+            options=options,
+            thread_id=(str(getattr(args, "thread_id", "") or "").strip() or None),
+            allow_multiselect=bool(getattr(args, "multiselect", False)),
+            duration_hours=int(getattr(args, "hours", 24) or 24),
+            live=False,
+        )
+    except LiveGatePollError as exc:
+        print(f"poll: {exc}", file=sys.stderr)
+        return 2
+    except Exception as exc:
+        print(f"poll: {exc}", file=sys.stderr)
+        return 1
+    payload = {
+        "ok": True,
+        "channel_id": str(args.channel_id),
+        "message_id": getattr(msg, "message_id", "") or "",
+        "question": str(args.question),
+        "options": options,
+        "live": False,
+    }
+    if getattr(args, "json", False):
+        print(json.dumps(payload, indent=2), file=out)
+    else:
+        mid = payload["message_id"] or "?"
+        print(f"poll posted message_id={mid} (non-blocking)", file=out)
+    return 0
+
+
 def cmd_jobs(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     out = out or sys.stdout
     if args.jobs_command != "clear-needs":
@@ -2657,6 +2774,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return cmd_schedule(args)
     if args.command == "spend":
         return cmd_spend(args)
+    if args.command == "poll":
+        return cmd_poll(args)
     if args.command == "jobs":
         return cmd_jobs(args)
     if args.command == "add":

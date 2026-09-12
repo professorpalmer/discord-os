@@ -740,7 +740,11 @@ class SQLiteStore:
         return tuple(out)
 
     def parent_channel_for_thread(self, thread_id: str) -> str:
-        """Parent channel that opened this job thread (realm bind key)."""
+        """Parent channel that opened this job thread (realm bind key).
+
+        Prefer a prior task row; else forum-post binding metadata
+        (``parent_channel_id``) so new forum posts resolve before first job.
+        """
 
         tid = (thread_id or "").strip()
         if not tid:
@@ -754,7 +758,18 @@ class SQLiteStore:
             """,
             (tid,),
         ).fetchone()
-        return str(row["channel_id"] or "").strip() if row else ""
+        if row and str(row["channel_id"] or "").strip():
+            return str(row["channel_id"] or "").strip()
+        # Forum-as-realm: thread id may be bound as a pseudo-channel with parent.
+        try:
+            from agent_discord.host.forum_realm import parent_from_forum_thread_binding
+
+            parent = parent_from_forum_thread_binding(self, tid)
+            if parent:
+                return parent
+        except Exception:
+            pass
+        return ""
 
     def latest_run_id_for_thread(
         self, thread_id: str, *, excluding_run_id: str = ""

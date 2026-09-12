@@ -12,3 +12,13 @@ Hard guard: `refuse_live_gate_poll(live=True)` raises `LiveGatePollError`.
 
 Code: `src/agent_discord/orchestration/ask_poll.py`.
 REST: optional `poll=` on `send_channel_message`.
+
+## Surfaces (EXTRAS)
+
+| Surface | Notes |
+|---|---|
+| CLI | `discord-os poll --channel-id ID --question "…" --option A --option B` |
+| HOST More | **Post preference poll** → modal (question + comma-separated options) |
+
+Both call `post_nonblocking_ask_poll(..., live=False)`. Live ask-gate cards are untouched.
+

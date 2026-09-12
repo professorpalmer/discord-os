@@ -144,6 +144,8 @@ def add_realm(
     workspace_id: str = "default",
     env_file: Optional[Path] = None,
     repos: Optional[tuple[HostRepo, ...]] = None,
+    forum: bool = False,
+    bot_token: str = "",
 ) -> dict[str, Any]:
     catalog = repos if repos is not None else load_host_repos()
     chosen = bind_channel_realm(
@@ -153,6 +155,26 @@ def add_realm(
         name=name,
         repos=catalog,
     )
+    forum_meta: dict[str, Any] = {"forum": False}
+    if forum:
+        from agent_discord.host.forum_realm import (
+            ForumRealmError,
+            validate_and_mark_forum_bind,
+        )
+
+        token = (bot_token or "").strip() or (
+            os.environ.get("DISCORD_BOT_TOKEN") or ""
+        ).strip()
+        try:
+            forum_meta = validate_and_mark_forum_bind(
+                store,
+                workspace_id=workspace_id,
+                channel_id=channel_id,
+                token=token,
+                require_forum=True,
+            )
+        except ForumRealmError as exc:
+            raise ValueError(exc.spoken) from exc
     path = env_file or dotenv_path()
     current = read_dotenv(path)
     upsert_dotenv(
@@ -172,6 +194,7 @@ def add_realm(
         "cwd": str(chosen.path) if chosen is not None else "",
         "env": str(path),
         "live": chosen is not None,
+        "forum": bool(forum_meta.get("forum")),
     }
 
 

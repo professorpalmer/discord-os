@@ -253,3 +253,130 @@ def test_voice_join_honesty_reserved_env() -> None:
     assert reserved.ok is False
     assert "Denied" in reserved.spoken
     assert "reserved" in reserved.spoken.lower() or "not implemented" in reserved.spoken.lower()
+
+
+def test_clear_needs_slash_fail_closed_and_dry_run(tmp_path: Path) -> None:
+    from agent_discord.discord.interactions import (
+        CLEAR_NEEDS_COMMAND,
+        INTERACTION_APPLICATION_COMMAND,
+        OPT_IN_COMMANDS,
+        handle_interaction_payload,
+    )
+    from agent_discord.contracts import TaskStatus
+    from agent_discord.persistence.sqlite import SQLiteStore
+
+    assert any(c["name"] == "clear-needs" for c in OPT_IN_COMMANDS)
+    assert CLEAR_NEEDS_COMMAND["options"][0]["name"] == "failed"
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    store = SQLiteStore(ws / "agent_discord.sqlite3")
+    store.initialize()
+    store.create_task(
+        task_id="t-fail",
+        workspace_id="default",
+        channel_id="ch1",
+        intake_text="boom",
+        requester_id="u1",
+    )
+    store.create_run(
+        run_id="r-fail",
+        task_id="t-fail",
+        model="test",
+        adapter_name="fake",
+    )
+    store.update_run("r-fail", status=TaskStatus.FAILED, summary="nope")
+    store.close()
+
+    refused = handle_interaction_payload(
+        {
+            "type": INTERACTION_APPLICATION_COMMAND,
+            "channel_id": "ch1",
+            "data": {
+                "name": "clear-needs",
+                "options": [{"name": "failed", "value": False, "type": 5}],
+            },
+        },
+        workspace=ws,
+        roots=[ws],
+    )
+    assert "refused" in refused["data"]["content"].lower()
+
+    dry = handle_interaction_payload(
+        {
+            "type": INTERACTION_APPLICATION_COMMAND,
+            "channel_id": "ch1",
+            "data": {
+                "name": "clear-needs",
+                "options": [
+                    {"name": "failed", "value": True, "type": 5},
+                    {"name": "dry_run", "value": True, "type": 5},
+                ],
+            },
+        },
+        workspace=ws,
+        roots=[ws],
+    )
+    assert "matched=" in dry["data"]["content"]
+
+
+def test_job_slash_richer_ephemeral(tmp_path: Path) -> None:
+    from agent_discord.discord.interactions import (
+        INTERACTION_APPLICATION_COMMAND,
+        handle_interaction_payload,
+    )
+    from agent_discord.contracts import TaskStatus
+    from agent_discord.persistence.sqlite import SQLiteStore
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    store = SQLiteStore(ws / "agent_discord.sqlite3")
+    store.initialize()
+    store.create_task(
+        task_id="t-rich",
+        workspace_id="default",
+        channel_id="ch-rich",
+        intake_text="ship forum extras",
+        requester_id="u1",
+        thread_id="th-rich",
+    )
+    task = store.get_task("t-rich")
+    code = str(task.get("job_code") or "")
+    store.create_run(
+        run_id="r-rich",
+        task_id="t-rich",
+        model="test",
+        adapter_name="fake",
+    )
+    store.update_run("r-rich", status=TaskStatus.COMPLETED, summary="landed")
+    store.close()
+
+    lookup = handle_interaction_payload(
+        {
+            "type": INTERACTION_APPLICATION_COMMAND,
+            "channel_id": "ch-rich",
+            "data": {
+                "name": "job",
+                "options": [{"name": "code", "value": code}],
+            },
+        },
+        workspace=ws,
+        roots=[ws],
+    )
+    body = lookup["data"]["content"]
+    assert code in body
+    assert "task:" in body
+    assert "intake:" in body
+    assert "settle:" in body or "landed" in body
+
+
+def test_voice_join_spoken_mentions_no_gateway() -> None:
+    from agent_discord.discord.tts import ENV_VOICE_JOIN, join_voice_channel
+
+    reserved = join_voice_channel("g", "c", env={ENV_VOICE_JOIN: "1"})
+    assert reserved.ok is False
+    spoken = reserved.spoken.lower()
+    assert "denied" in spoken
+    assert "not an unlock" in spoken or "reserved" in spoken
+    assert "opus" in spoken or "gateway" in spoken
+

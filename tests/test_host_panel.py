@@ -17,6 +17,7 @@ from agent_discord.host.panel import (
     ASK_ID,
     ASK_MODAL_ID,
     CLEAR_NEEDS_ID,
+    POLL_ID,
     CANCEL_OFF_ID,
     CONFIRM_OFF_ID,
     BROWSER_ID,
@@ -90,10 +91,10 @@ def test_panel_buttons_and_interaction_parse():
     more = buttons[1]["components"][0]
     assert more["custom_id"] == MORE_ID
     more_values = [item["value"] for item in more["options"]]
-    assert more_values == [PAIR_ID, HALT_ID, CLEAR_NEEDS_ID, GATE_ID, ROLES_ID, GITHUB_ID]
-    assert more["options"][3]["label"] == "Gate writes"
+    assert more_values == [PAIR_ID, HALT_ID, CLEAR_NEEDS_ID, POLL_ID, GATE_ID, ROLES_ID, GITHUB_ID]
+    assert more["options"][4]["label"] == "Gate writes"
     gated = host_panel_components(False, write_gate=True)
-    assert gated[1]["components"][0]["options"][3]["label"] == "Auto writes"
+    assert gated[1]["components"][0]["options"][4]["label"] == "Auto writes"
     armed = host_panel_components(True)
     assert ASK_ID in [item["custom_id"] for item in armed[0]["components"]]
     armed_more = [item["value"] for item in armed[1]["components"][0]["options"]]
@@ -101,6 +102,7 @@ def test_panel_buttons_and_interaction_parse():
         PAIR_ID,
         HALT_ID,
         CLEAR_NEEDS_ID,
+        POLL_ID,
         GATE_ID,
         ROLES_ID,
         GITHUB_ID,

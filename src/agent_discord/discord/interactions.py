@@ -6,11 +6,12 @@ host verbs behind slash chrome. It does not open a second Gateway.
 Discord requires a public HTTPS URL and a 3s ACK. Bind loopback; tunnel if
 you opt in. Slash ``/connect`` never accepts a secret option.
 
-P2.9 / Discord-half P2: thin slash aliases ``/bind`` ``/status`` ``/on``
-``/off`` ``/stop`` plus read-only ``/job`` mirror text verbs when
+P2.9 / Discord-half EXTRAS: slash aliases ``/bind`` ``/status`` ``/on``
+``/off`` ``/stop`` plus read-only ``/job`` and ``/clear-needs`` when
 ``AGENT_DISCORD_INTERACTIONS=http`` and commands are registered. Opt-in
 autocomplete enriches ``/bind`` names and ``/job`` ``DOS-*`` codes.
-Text + HOST panel remain the default. No slash ``/add``.
+Re-run ``discord-os interactions --register`` after upgrade. Text + HOST
+panel remain the default. No slash ``/add``.
 """
 
 from __future__ import annotations
@@ -121,6 +122,25 @@ STOP_COMMAND = {
     "description": "Disarm this channel (alias of /off)",
     "type": 1,
 }
+CLEAR_NEEDS_COMMAND = {
+    "name": "clear-needs",
+    "description": "Dismiss failed Needs (same as HOST More / jobs clear-needs --failed)",
+    "type": 1,
+    "options": [
+        {
+            "name": "failed",
+            "description": "Required confirm — must be True (fail-closed)",
+            "type": 5,
+            "required": True,
+        },
+        {
+            "name": "dry_run",
+            "description": "Count matches only (default false)",
+            "type": 5,
+            "required": False,
+        },
+    ],
+}
 
 OPT_IN_COMMANDS = (
     CONNECT_COMMAND,
@@ -131,6 +151,7 @@ OPT_IN_COMMANDS = (
     ON_COMMAND,
     OFF_COMMAND,
     STOP_COMMAND,
+    CLEAR_NEEDS_COMMAND,
 )
 
 
@@ -219,6 +240,8 @@ def handle_interaction_payload(
             code=str(options.get("code") or "").strip(),
             workspace=workspace,
         )
+    if name == "clear-needs":
+        return _handle_clear_needs_slash(payload, workspace=workspace)
     return _ephemeral("unknown command")
 
 
@@ -675,15 +698,99 @@ def _handle_job_slash(
             return _ephemeral(f"No job for {raw}")
         job_code = str(task.get("job_code") or raw).strip()
         status = str(task.get("status") or "").strip() or "unknown"
+        channel = str(task.get("channel_id") or "").strip()
+        thread = str(task.get("thread_id") or "").strip()
         summary = str(task.get("intake_text") or "").strip().replace("\n", " ")
-        if len(summary) > 120:
-            summary = summary[:119].rstrip() + "…"
-        line = f"{job_code} · {status}"
+        if len(summary) > 160:
+            summary = summary[:159].rstrip() + "…"
+        tip = ""
+        run_status = ""
+        run_summary = ""
+        try:
+            rows = store._connection().execute(
+                """
+                SELECT run_id, status, summary FROM runs
+                WHERE task_id=?
+                ORDER BY created_at DESC, run_id DESC
+                LIMIT 1
+                """,
+                (str(task.get("task_id") or ""),),
+            ).fetchone()
+            if rows:
+                tip = str(rows["run_id"] or "").strip()
+                run_status = str(rows["status"] or "").strip()
+                run_summary = str(rows["summary"] or "").strip().replace("\n", " ")
+                if len(run_summary) > 120:
+                    run_summary = run_summary[:119].rstrip() + "…"
+        except Exception:
+            pass
+        lines = [f"{job_code} · task:{status}"]
+        if run_status:
+            lines.append(f"run:{run_status}" + (f" · {tip}" if tip else ""))
         if summary:
-            line += f" · {summary}"
-        return _ephemeral(line)
+            lines.append(f"intake: {summary}")
+        if run_summary:
+            lines.append(f"settle: {run_summary}")
+        dest_bits = []
+        if channel:
+            dest_bits.append(f"#{channel}")
+        if thread:
+            dest_bits.append(f"thread {thread}")
+        if dest_bits:
+            lines.append(" · ".join(dest_bits))
+        return _ephemeral("\n".join(lines))
     except Exception as exc:  # noqa: BLE001
         return _ephemeral(f"job failed: {exc}")
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
+
+
+def _handle_clear_needs_slash(
+    payload: Mapping[str, Any],
+    *,
+    workspace: Path,
+) -> dict[str, Any]:
+    """Bulk dismiss failed Needs. Requires failed=true (fail-closed)."""
+
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    options = data.get("options") if isinstance(data, dict) else None
+    failed = False
+    dry_run = False
+    if isinstance(options, list):
+        for opt in options:
+            if not isinstance(opt, dict):
+                continue
+            oname = str(opt.get("name") or "")
+            if oname == "failed":
+                failed = bool(opt.get("value"))
+            elif oname == "dry_run":
+                dry_run = bool(opt.get("value"))
+    if not failed:
+        return _ephemeral(
+            "refused: set failed=True (same fail-closed as jobs clear-needs --failed)"
+        )
+    channel_id = _channel_id(payload)
+    store = None
+    try:
+        store = _open_store(workspace)
+        from agent_discord.host.panel import _store_clear_failed_needs
+
+        if dry_run:
+            lister = getattr(store, "list_dismissable_needs", None)
+            matched = 0
+            if callable(lister):
+                matched = len(lister(channel_id=channel_id) or [])
+            return _ephemeral(f"clear-needs dry-run matched={matched}")
+        result = _store_clear_failed_needs(store, channel_id=channel_id)
+        cleared = int(result.get("cleared") or 0)
+        matched = int(result.get("matched") or cleared)
+        return _ephemeral(f"clear-needs cleared={cleared} matched={matched}")
+    except Exception as exc:  # noqa: BLE001
+        return _ephemeral(f"clear-needs failed: {exc}")
     finally:
         if store is not None:
             try:

@@ -131,7 +131,7 @@ def test_register_opt_in_commands_posts_connect_and_open():
         guild_id="guild-1",
         opener=opener,
     )
-    expected = ["connect", "open", "bind", "job", "status", "on", "off", "stop"]
+    expected = ["connect", "open", "bind", "job", "status", "on", "off", "stop", "clear-needs"]
     assert names == expected
     assert [item["name"] for item in posted] == expected
     assert "options" not in posted[0]

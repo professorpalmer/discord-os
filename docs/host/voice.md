@@ -51,8 +51,10 @@ Blockers for this spike (why we stub):
   Local `say` covers the "spoken reply on the Mac" ask without joining.
 
 Setting `DISCORD_OS_VOICE_JOIN=1` today is an **honest Deny** (spoken:
-reserved but not implemented). A future implement would still need an explicit
-allowlist of guild/channel ids and must never put the bot token in argv.
+reserved/not implemented — **not an unlock**; no gateway voice / Opus / UDP).
+`discord-os host doctor` emits a **WARN** while that env is set. A future
+implement would still need an explicit allowlist of guild/channel ids and must
+never put the bot token in argv.
 
 ## Code
 
