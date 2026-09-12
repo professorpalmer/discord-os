@@ -1950,6 +1950,49 @@ class AgentOrchestrator:
             "tool_class": held.tool_class,
         }
 
+    def request_plan_hold(
+        self,
+        run_id: str,
+        *,
+        plan_text: str = "",
+        plan_status: str = "ready",
+        summary: str = "",
+        timeout_seconds: float | None = None,
+        poll_seconds: float = 0.05,
+        sleeper: Any = None,
+        clock: Any = None,
+    ) -> dict[str, Any]:
+        """Block this worker until plan Approve / Cancel or timeout.
+
+        ExitPlanMode live path. Parks Approve / Cancel (no Always). Fail
+        closed on empty plan / deny / timeout.
+        """
+
+        from agent_discord.orchestration.gate_hook import hold_plan_decision
+
+        held = hold_plan_decision(
+            self.store,
+            self,
+            run_id=run_id,
+            plan_text=plan_text,
+            plan_status=plan_status,
+            summary=summary,
+            timeout_seconds=timeout_seconds,
+            poll_seconds=poll_seconds,
+            sleeper=sleeper,
+            clock=clock,
+        )
+        return {
+            "run_id": run_id,
+            "request_id": held.request_id,
+            "decision": held.decision,
+            "gate_result": held.decision,
+            "gate_answer": held.gate_answer,
+            "reason": held.reason,
+            "tool_class": held.tool_class or "plan",
+            "gate_kind": "plan_approve",
+        }
+
     def gate_result_for(self, run_id: str) -> dict[str, Any]:
         """Adapter poll: gate_result / gate_answer from task metadata."""
 
@@ -2344,11 +2387,17 @@ class AgentOrchestrator:
     ) -> None:
         from agent_discord.orchestration.service import (
             is_spend_halted,
+            mark_spend_cost_known,
+            provider_cost_usd,
             set_spend_halted,
-            spend_usd_from_usage,
         )
 
-        usd = spend_usd_from_usage(usage)
+        # Honest OpenRouter/PM-adapter: only record when cost_usd present.
+        # Omitted cost must not paint Halt / digest as $0.
+        usd = provider_cost_usd(usage)
+        if usd is None:
+            return
+        mark_spend_cost_known(self.store, True)
         writer = getattr(self.store, "record_spend", None)
         if callable(writer) and usd > 0:
             try:

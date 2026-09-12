@@ -60,3 +60,9 @@ Puppetmaster is the cook backend — unused here; digest is inline (same as live
 - Not Activities
 - Not a dashboard write API
 - Does not replace thin host liveness Need (P0.2) — that stays for FAIL/pid
+
+
+## Spend honesty
+
+When OpenRouter / PM-adapter usage omits `cost_usd`, the digest and Halt card
+show **unknown** — never `$0`. Real provider costs still display when present.

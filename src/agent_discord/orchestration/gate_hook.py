@@ -1,16 +1,20 @@
-"""Live ask-gate / PreToolUse hold — durable file queue.
+"""Live ask-gate + ExitPlanMode hold — durable file queue.
 
-Phone Allow / Deny / Always must block the live worker mid-cook, not only
-unit-test orch methods. Full Puppetmaster ``canUseTool`` is not available
-in-process on the agentic subprocess, so this module is the seam:
+Phone Allow / Deny / Always (tool-class) and Approve / Cancel (plan) must
+block the live worker mid-cook, not only unit-test orch methods. Full
+Puppetmaster ``canUseTool`` is not available in-process on the agentic
+subprocess, so this module is the seam:
 
 - ``tool_class_decision`` → park a Discord card → block until
   ``gate_result_for`` (or the result file) or approval timeout self-denies.
+- ExitPlanMode / plan-ready → ``raise_plan_approve`` (Approve / Cancel, no
+  Always) → block implement until allow / deny / timeout.
 - Durable file queue the agentic hook and Discord listen/orch share.
 - Hook CLI always exits 0 (dis-claude shape). Unanswered / timeout → deny.
 
 Stolen shapes (not clones): albertorsesc PreToolUse hold, DisCode CLI hooks,
-dis-claude atomic file-queue. Docs: ``docs/cards/ask-gate.md``.
+dis-claude atomic file-queue, c-lord ExitPlanMode. Docs:
+``docs/cards/ask-gate.md``, ``docs/cards/plan-approve.md``.
 """
 
 from __future__ import annotations
@@ -29,6 +33,11 @@ from agent_discord.orchestration.ask_gate import (
     GATE_KIND_TOOL,
     normalize_tool_class,
     tool_class_decision,
+)
+from agent_discord.orchestration.plan_approve import (
+    GATE_KIND_PLAN,
+    is_exit_plan_tool,
+    plan_text_from_tool_input,
 )
 from agent_discord.redaction import redact_text_markers
 
@@ -398,6 +407,20 @@ def build_request(
     request_id: str = "",
     created_at_ms: Optional[int] = None,
 ) -> GateRequest:
+    if is_exit_plan_tool(tool_name):
+        plan_body = plan_text_from_tool_input(tool_input) or detail_from_input(tool_input)
+        ts = int(created_at_ms if created_at_ms is not None else time.time() * 1000)
+        return GateRequest(
+            request_id=(request_id or new_request_id()).strip() or new_request_id(),
+            run_id=(run_id or "").strip(),
+            tool_name=(tool_name or "").strip(),
+            tool_class="plan",
+            detail=plan_body,
+            kind=GATE_KIND_PLAN,
+            question="",
+            options=(),
+            created_at_ms=ts,
+        )
     klass = normalize_tool_class(tool_name) or (tool_name or "").strip()
     detail = detail_from_input(tool_input)
     kind = GATE_KIND_ASK if klass == "ask" else GATE_KIND_TOOL
@@ -628,6 +651,123 @@ def hold_tool_decision(
     return held
 
 
+
+def hold_plan_decision(
+    store: Any,
+    orch: Any,
+    *,
+    run_id: str,
+    plan_text: str = "",
+    plan_status: str = "ready",
+    summary: str = "",
+    timeout_seconds: Optional[float] = None,
+    poll_seconds: float = DEFAULT_POLL_SECONDS,
+    sleeper: Optional[Sleeper] = None,
+    clock: Optional[Clock] = None,
+    env: Optional[Mapping[str, str]] = None,
+    request_id: str = "",
+) -> GateHoldResult:
+    """In-process ExitPlanMode: park Approve/Cancel, block until resolved.
+
+    Never Always. Fail closed on empty plan / timeout / deny.
+    """
+
+    source = env if env is not None else os.environ
+    req = build_request(
+        run_id=run_id,
+        tool_name="ExitPlanMode",
+        tool_input={"plan": plan_text, "summary": summary},
+        request_id=request_id,
+    )
+    if plan_text:
+        req = GateRequest(
+            request_id=req.request_id,
+            run_id=req.run_id,
+            tool_name=req.tool_name,
+            tool_class="plan",
+            detail=redact_text_markers(plan_text)[:4000],
+            kind=GATE_KIND_PLAN,
+            question="",
+            options=(),
+            created_at_ms=req.created_at_ms,
+        )
+    if not req.run_id:
+        return deny_result(req.request_id, "missing run_id", "plan")
+    if not (req.detail or "").strip():
+        return deny_result(req.request_id, "unknown plan", "plan")
+
+    run_dir = ensure_run_gate_dir(
+        resolve_run_gate_dir(
+            run_id=run_id,
+            workspace=getattr(orch, "workspace", None) if orch is not None else None,
+            store=store,
+            env=source,
+        )
+    )
+    enqueue_request(run_dir, req)
+    if orch is not None:
+        raiser = getattr(orch, "raise_plan_approve", None)
+        if callable(raiser):
+            parked = raiser(
+                run_id,
+                plan_text=req.detail,
+                summary=summary,
+                plan_status=plan_status or "ready",
+            )
+            if isinstance(parked, dict) and parked.get("status") == "denied":
+                denied = deny_result(
+                    req.request_id,
+                    str(parked.get("summary") or "denied"),
+                    "plan",
+                )
+                complete_request(run_dir, denied)
+                return denied
+
+    def _poll() -> Optional[GateHoldResult]:
+        if orch is None:
+            return None
+        polled = orch.gate_result_for(run_id)
+        result = str(polled.get("gate_result") or "").strip().lower()
+        # Plan card: allow | deny only (Always is write-gate).
+        if result == "always":
+            result = "allow"
+        if result not in {"allow", "deny"}:
+            return None
+        return GateHoldResult(
+            request_id=req.request_id,
+            decision=result,
+            gate_answer=str(polled.get("gate_answer") or ""),
+            reason=result,
+            tool_class="plan",
+        )
+
+    held = wait_for_result(
+        run_dir,
+        req.request_id,
+        timeout_seconds=(
+            float(timeout_seconds)
+            if timeout_seconds is not None
+            else gate_timeout_seconds(source)
+        ),
+        poll_seconds=poll_seconds,
+        sleeper=sleeper,
+        clock=clock,
+        poller=_poll,
+        tool_class="plan",
+    )
+    if (
+        held.decision == "deny"
+        and held.reason == "timeout"
+        and orch is not None
+    ):
+        try:
+            if orch.gate_result_for(run_id).get("awaiting_gate"):
+                orch.expire_parked_run(run_id)
+        except Exception:
+            pass
+    return held
+
+
 def drain_gate_queue(
     orchestrator: Any,
     *,
@@ -697,6 +837,13 @@ def drain_gate_queue(
                         options=req.options or ("Yes", "No"),
                         live=True,
                         request_id=req.request_id,
+                    )
+                elif req.kind == GATE_KIND_PLAN or is_exit_plan_tool(req.tool_name):
+                    orchestrator.raise_plan_approve(
+                        req.run_id,
+                        plan_text=req.detail,
+                        summary="Plan ready. Approve to implement.",
+                        plan_status="ready",
                     )
                 else:
                     klass = normalize_tool_class(req.tool_class or req.tool_name)
@@ -781,6 +928,22 @@ def run_hook(
         req = build_request(run_id=run_id, tool_name=tool_name, tool_input=tool_input)
         if not req.run_id or not tool_name:
             result = deny_result(req.request_id or "unknown", "missing run_id or tool")
+        elif req.kind == GATE_KIND_PLAN or is_exit_plan_tool(tool_name):
+            if not (req.detail or "").strip():
+                result = deny_result(req.request_id, "unknown plan", "plan")
+            else:
+                run_dir = ensure_run_gate_dir(
+                    resolve_run_gate_dir(run_id=req.run_id, env=source)
+                )
+                enqueue_request(run_dir, req)
+                result = wait_for_result(
+                    run_dir,
+                    req.request_id,
+                    timeout_seconds=gate_timeout_seconds(source),
+                    sleeper=sleeper,
+                    clock=clock,
+                    tool_class="plan",
+                )
         else:
             klass = normalize_tool_class(tool_name)
             if klass is None:
@@ -819,13 +982,17 @@ def run_hook(
     return 0
 
 
-ATTACH_TEXT = """# Live ask-gate hook attach
+ATTACH_TEXT = """# Live ask-gate + ExitPlanMode hook attach
 
 Product compute is OpenRouter / puppetmaster agentic. The worker is a
 subprocess, so Discord OS cannot call canUseTool in-process. Attach this
-hook so a tool-class decision parks a Discord Allow / Always / Deny card
-and **blocks the worker** until the phone resolves it (or the approval
-timeout self-denies).
+hook so:
+
+- tool-class decisions park Allow / Always / Deny and **block the worker**
+- ExitPlanMode / plan-ready parks Approve / Cancel (no Always) and
+  **blocks implement** until the phone resolves it
+
+Timeout self-denies (same DISCORD_OS_APPROVAL_TIMEOUT_MINUTES).
 
 Env stamped on every agentic spawn:
 
@@ -839,7 +1006,8 @@ PreToolUse-shaped command (stdin JSON, stdout permissionDecision, exit 0):
   discord-os gate-hook
 
 Listen/orch drains pending/ , parks the card, and writes results/ when
-Allow / Deny / Always (or expire) lands. Fail closed: no result → deny.
+Allow / Deny / Always / Approve / Cancel (or expire) lands. Fail closed:
+no result → deny.
 
-In-process adapters call AgentOrchestrator.request_tool_hold instead.
+In-process adapters: request_tool_hold / request_plan_hold.
 """

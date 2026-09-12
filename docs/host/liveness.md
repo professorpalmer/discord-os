@@ -44,6 +44,41 @@ how the phone learns. While the host is up but degraded (stale gateway, bad
 LaunchAgent workspace, etc.), the listen tick posts on change and the HOST card
 shows Need.
 
+## Listen-dead phone notify (watchdog)
+
+When the listen / host KeepAlive process is already dead, desk
+`discord-os host doctor --notify` (or a cron / LaunchAgent that runs it) is
+how the phone learns. REST-up on another machine does not help — this posts
+from the desk using the bot token + `host.json` channel id.
+
+Example crontab (every 2 minutes):
+
+```cron
+*/2 * * * * discord-os host doctor --notify >>/tmp/discord-os-doctor-notify.log 2>&1
+```
+
+Example LaunchAgent (StartInterval, **not** KeepAlive — intentional Off stays
+quiet once `host.pid` is cleared). `setup` writes
+`com.discord-os.doctor-notify.plist.example` into the workspace; or:
+
+```bash
+# After editing paths, bootstrap:
+# cp …/com.discord-os.doctor-notify.plist.example ~/Library/LaunchAgents/com.discord-os.doctor-notify.plist
+# launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.discord-os.doctor-notify.plist
+```
+
+Helpers: `render_doctor_notify_plist` / `write_doctor_notify_example` /
+`doctor_notify_cron_example` in `src/agent_discord/host/install.py`.
+
+## Gateway WS ACK liveness
+
+On/Off buttons need the Discord Gateway heartbeat ACK path. REST-up ≠
+receiving. Discord OS tracks READY + last op-11 ACK age (Hermes-shaped).
+Unhealthy ACK age / closed socket ranks as HOST **Need** (`gateway BAD`) and
+doctor **FAIL**. Cold start / never-READY stays quiet (low false-positive).
+
+Code: `src/agent_discord/discord/gateway_health.py` + listen digest / doctor.
+
 ## Not this
 
 - Not a second product / status board

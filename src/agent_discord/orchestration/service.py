@@ -55,19 +55,46 @@ def _coerce_usd(raw: Any) -> Optional[float]:
         return None
 
 
-def spend_usd_from_usage(usage: Optional[UsageReceipt]) -> float:
-    """Provider cost first; otherwise a conservative token estimate. Never $0-snap."""
+def provider_cost_usd(usage: Optional[UsageReceipt]) -> Optional[float]:
+    """OpenRouter / PM-adapter cost when present. None when usage omits cost.
+
+    Honest spend: missing ``cost_usd`` is **unknown**, not ``$0``. Token
+    estimates are separate (``spend_usd_from_usage``) and must not paint Halt
+    / status digest as zero when the provider never reported cost.
+    """
 
     if usage is None:
-        return 0.0
+        return None
     meta = usage.metadata if isinstance(usage.metadata, Mapping) else {}
+    found_key = False
     for key in ("cost", "total_cost", "cost_usd", "usd", "total_cost_usd"):
+        if key not in meta:
+            continue
+        found_key = True
         raw = meta.get(key)
-        if raw is None:
+        if raw is None or raw == "":
             continue
         value = _coerce_usd(raw)
         if value is not None and value >= 0:
             return value
+    if found_key:
+        # Explicit null/empty cost keys → unknown
+        return None
+    return None
+
+
+def spend_usd_from_usage(usage: Optional[UsageReceipt]) -> float:
+    """Provider cost when known; else conservative token estimate for caps.
+
+    Display paths should prefer ``format_spend`` / ``provider_cost_usd`` so
+    omitted OpenRouter cost shows **unknown**, not ``$0``.
+    """
+
+    known = provider_cost_usd(usage)
+    if known is not None:
+        return known
+    if usage is None:
+        return 0.0
     inbound = _token_count(usage.input_tokens)
     outbound = _token_count(usage.output_tokens)
     if inbound is None and outbound is None:
@@ -83,6 +110,31 @@ def format_usd(amount: float) -> str:
     if value >= 0.01:
         return f"${value:.2f}"
     return f"${value:.4f}"
+
+
+def format_spend(amount: Optional[float], *, known: bool = True) -> str:
+    """Status digest / Halt display. Unknown when provider omitted cost."""
+
+    if not known or amount is None:
+        return "unknown"
+    return format_usd(float(amount))
+
+
+SPEND_COST_KNOWN_KEY = "spend_cost_known"
+
+
+def mark_spend_cost_known(store: Any, known: bool = True) -> None:
+    writer = getattr(store, "set_preference", None)
+    if not callable(writer):
+        return
+    try:
+        writer(HOST_PREFS_WORKSPACE, SPEND_COST_KNOWN_KEY, "1" if known else "0")
+    except Exception:
+        pass
+
+
+def spend_cost_known(store: Any) -> bool:
+    return _truthy(_host_pref(store, SPEND_COST_KNOWN_KEY))
 
 
 def session_spend_usd(store: Any, workspace_id: str = "") -> float:

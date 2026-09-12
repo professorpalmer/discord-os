@@ -1,12 +1,14 @@
-"""P2.8 Plan-mode Approve card — c-lord ExitPlanMode shape.
+"""Plan-mode Approve card — c-lord ExitPlanMode shape (live hold).
 
 Implement Gate (write-gate) is binary Allow / Always / Deny for writes.
 Plan → Approve is safer phone cowork: park when a plan is ready, greenlight
-implement with **Approve / Cancel** (no Always unless intentional write-gate).
+implement with **Approve / Cancel** (no Always).
 
-Full Puppetmaster ExitPlanMode / plan-hook wiring is deferred. Adapters call
-``plan_ready_decision`` then ``AgentOrchestrator.raise_plan_approve``. Fail
-closed when plan text or status is unknown. Docs: ``docs/cards/plan-approve.md``.
+Live path: agentic PreToolUse / ExitPlanMode (or in-process
+``request_plan_hold``) calls ``plan_ready_decision`` then parks via
+``raise_plan_approve`` and **blocks implement** until Allow / Deny / timeout.
+Reuse approval timeout; never Always on this card. Fail closed when plan
+text or status is unknown. Docs: ``docs/cards/plan-approve.md``.
 """
 
 from __future__ import annotations
@@ -23,6 +25,63 @@ from agent_discord.orchestration.reactive import reactive_paint
 from agent_discord.redaction import redact_text_markers
 
 GATE_KIND_PLAN = "plan_approve"
+
+# PreToolUse / agentic tool names that mean "plan ready — park Approve".
+_EXIT_PLAN_ALIASES = frozenset(
+    {
+        "exitplanmode",
+        "exit_plan_mode",
+        "exit-plan-mode",
+        "exitplan",
+        "exit_plan",
+        "plan_approve",
+        "planapprove",
+        "raise_plan_approve",
+    }
+)
+
+
+def is_exit_plan_tool(tool_name: str) -> bool:
+    """True when the tool is ExitPlanMode / plan-ready (not a write tool)."""
+
+    text = (tool_name or "").strip()
+    if not text:
+        return False
+    compact = text.lower().replace("-", "_")
+    if compact in _EXIT_PLAN_ALIASES:
+        return True
+    if "__" in compact:
+        tail = compact.rsplit("__", 1)[-1]
+        if tail in _EXIT_PLAN_ALIASES:
+            return True
+    # CamelCase ExitPlanMode
+    if text.replace("_", "").replace("-", "").lower() == "exitplanmode":
+        return True
+    return False
+
+
+def plan_text_from_tool_input(tool_input: Any) -> str:
+    """Extract plan body from ExitPlanMode / plan-ready tool input."""
+
+    if isinstance(tool_input, str):
+        return redact_text_markers(tool_input.strip())[:4000]
+    if not isinstance(tool_input, Mapping):
+        return ""
+    for key in (
+        "plan",
+        "plan_text",
+        "planText",
+        "summary",
+        "message",
+        "text",
+        "content",
+        "body",
+    ):
+        value = tool_input.get(key)
+        if isinstance(value, str) and value.strip():
+            return redact_text_markers(value.strip())[:4000]
+    return ""
+
 
 # Statuses adapters may pass when signalling plan-ready. Unknown → fail closed.
 KNOWN_PLAN_STATUSES = frozenset(

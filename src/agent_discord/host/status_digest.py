@@ -106,11 +106,18 @@ def digest_signature(snapshot: Mapping[str, Any]) -> str:
     armed = host.get("armed")
     power = "on" if armed else "off" if armed is False else "na"
     running = "1" if host.get("running") else "0"
+    known = spend.get("spend_known")
+    if known is None:
+        # Prefer honesty: zero with no recorded provider cost → unknown.
+        known = bool(spend.get("spend_usd"))
     spent = spend.get("spend_usd")
-    try:
-        spend_s = f"{float(spent):.4f}"
-    except (TypeError, ValueError):
-        spend_s = "0.0000"
+    if not known:
+        spend_s = "unknown"
+    else:
+        try:
+            spend_s = f"{float(spent):.4f}"
+        except (TypeError, ValueError):
+            spend_s = "unknown"
     cap = spend.get("cap_usd")
     try:
         cap_s = f"{float(cap):.4f}" if cap is not None else "none"
@@ -150,11 +157,18 @@ def format_status_digest(snapshot: Mapping[str, Any]) -> str:
     armed = host.get("armed")
     power = "on" if armed else "off" if armed is False else "n/a"
     running = "running" if host.get("running") else "stopped"
+    known = spend.get("spend_known")
+    if known is None:
+        # Prefer honesty: zero with no recorded provider cost → unknown.
+        known = bool(spend.get("spend_usd"))
     spent = spend.get("spend_usd")
-    try:
-        spend_s = f"{float(spent):.4f}"
-    except (TypeError, ValueError):
-        spend_s = "0.0000"
+    if not known:
+        spend_s = "unknown"
+    else:
+        try:
+            spend_s = f"{float(spent):.4f}"
+        except (TypeError, ValueError):
+            spend_s = "unknown"
     cap = spend.get("cap_usd")
     try:
         cap_s = f"{float(cap):.4f}" if cap is not None else "none"
@@ -254,6 +268,7 @@ def save_digest_state(
         if isinstance(raw_spend, Mapping):
             spend = {
                 "spend_usd": raw_spend.get("spend_usd"),
+                "spend_known": raw_spend.get("spend_known"),
                 "cap_usd": raw_spend.get("cap_usd"),
                 "halted": raw_spend.get("halted"),
             }

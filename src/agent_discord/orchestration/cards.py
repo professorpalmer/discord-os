@@ -533,6 +533,7 @@ def host_card(
     realm: str = "",
     bank: bool = False,
     github: str = "",
+    spend_known: bool = True,
 ) -> CardMessage:
     _ = channel_id
     fields = _host_status_fields(
@@ -546,6 +547,7 @@ def host_card(
         realm=realm,
         bank=bank,
         github=github,
+        spend_known=spend_known,
     )
     if confirm_off:
         return CardMessage(
@@ -578,8 +580,9 @@ def _host_status_fields(
     realm: str,
     bank: bool,
     github: str = "",
+    spend_known: bool = True,
 ) -> tuple[tuple[str, str, bool], ...]:
-    from agent_discord.orchestration.service import format_usd
+    from agent_discord.orchestration.service import format_spend, format_usd
 
     acl = "open"
     if paired:
@@ -592,7 +595,10 @@ def _host_status_fields(
         ("acl", acl, True),
         ("writes", "gate" if write_gate else "auto", True),
     ]
-    spend = format_usd(spend_usd)
+    spend = format_spend(
+        float(spend_usd) if spend_known else None,
+        known=bool(spend_known),
+    )
     if cap_usd is not None:
         spend = f"{spend} / {format_usd(cap_usd)}"
     if halted:

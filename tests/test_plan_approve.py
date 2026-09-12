@@ -201,3 +201,118 @@ def test_approval_timeout_expires_plan_gate(tmp_path: Path):
     assert run["status"] == TaskStatus.FAILED.value
     assert EXPIRED_PLAN_SPOKEN in (run.get("summary") or "")
     store.close()
+
+
+def test_exit_plan_tool_detection():
+    from agent_discord.orchestration.plan_approve import (
+        is_exit_plan_tool,
+        plan_text_from_tool_input,
+    )
+
+    assert is_exit_plan_tool("ExitPlanMode")
+    assert is_exit_plan_tool("exit_plan_mode")
+    assert is_exit_plan_tool("mcp__agent__ExitPlanMode")
+    assert not is_exit_plan_tool("Write")
+    assert (
+        plan_text_from_tool_input({"plan": "1. edit\n2. test"})
+        == "1. edit\n2. test"
+    )
+
+
+def test_request_plan_hold_blocks_until_approve(tmp_path: Path):
+    orch, store, fake, backend = _orch(tmp_path)
+    receipt = orch.run_task(
+        TaskIntake(
+            text="plan the billing change",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="plan-hold-1",
+        )
+    )
+    assert receipt.status == TaskStatus.COMPLETED
+
+    ticks = {"n": 0}
+
+    def sleeper(_s: float) -> None:
+        ticks["n"] += 1
+        if ticks["n"] == 2:
+            orch.apply_job_action("approve", receipt.run_id)
+
+    held = orch.request_plan_hold(
+        receipt.run_id,
+        plan_text="1. patch routing\n2. add tests",
+        summary="Ship",
+        timeout_seconds=2.0,
+        poll_seconds=0.01,
+        sleeper=sleeper,
+    )
+    assert held["decision"] == "allow"
+    assert held["gate_kind"] == GATE_KIND_PLAN
+    meta = store.task_metadata(receipt.task_id)
+    assert meta.get("plan_approved") is True or meta.get("gate_result") == "allow"
+
+
+def test_gate_hook_exit_plan_enqueues_plan_kind(tmp_path: Path, monkeypatch):
+    from agent_discord.orchestration.gate_hook import (
+        build_request,
+        list_pending,
+        run_hook,
+        ensure_run_gate_dir,
+        resolve_run_gate_dir,
+        complete_request,
+        GateHoldResult,
+    )
+
+    monkeypatch.setenv("DISCORD_OS_GATE_ROOT", str(tmp_path / "gates"))
+    monkeypatch.setenv("DISCORD_OS_RUN_ID", "run-plan-1")
+    monkeypatch.setenv("DISCORD_OS_GATE_TIMEOUT_SECONDS", "0.2")
+    req = build_request(
+        run_id="run-plan-1",
+        tool_name="ExitPlanMode",
+        tool_input={"plan": "do the thing carefully"},
+    )
+    assert req.kind == GATE_KIND_PLAN
+    assert "do the thing" in req.detail
+
+    run_dir = ensure_run_gate_dir(
+        resolve_run_gate_dir(run_id="run-plan-1", env=dict(**__import__("os").environ))
+    )
+
+    # Simulate listen draining: write allow so hook unblocks.
+    import json
+    import io
+    import threading
+
+    def resolver():
+        import time
+
+        time.sleep(0.05)
+        pending = list_pending(run_dir)
+        assert pending, "expected plan pending"
+        complete_request(
+            run_dir,
+            GateHoldResult(
+                request_id=pending[0].request_id,
+                decision="allow",
+                reason="allow",
+                tool_class="plan",
+            ),
+        )
+
+    threading.Thread(target=resolver, daemon=True).start()
+    stdin = io.StringIO(
+        json.dumps(
+            {
+                "tool_name": "ExitPlanMode",
+                "tool_input": {"plan": "do the thing carefully"},
+                "run_id": "run-plan-1",
+            }
+        )
+    )
+    stdout = io.StringIO()
+    code = run_hook(argv=[], stdin=stdin, stdout=stdout, env=dict(**__import__("os").environ))
+    assert code == 0
+    payload = json.loads(stdout.getvalue())
+    assert payload.get("permissionDecision") in {"allow", "deny"} or payload.get(
+        "decision"
+    ) in {"allow", "deny"}

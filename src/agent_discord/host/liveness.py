@@ -1,8 +1,9 @@
 """Phone-visible host liveness / status Need (P0.2).
 
 Desk ``doctor`` and the loopback dashboard do not wake the phone when the
-LaunchAgent / pid dies mid-cowork. This module keeps a thin digest
-(power / pid / doctor) and surfaces it as:
+LaunchAgent / pid dies mid-cowork, or when Gateway WS ACK goes stale.
+This module keeps a thin digest (power / pid / doctor / gateway) and
+surfaces it as:
 
 * a HOST **Need** line on the Jobs ranking / HOST card description
 * an on-change spoken status post in the host channel (Discord mobile already
@@ -39,6 +40,11 @@ DOCTOR_OK = "OK"
 DOCTOR_FAIL = "FAIL"
 
 
+GATEWAY_OK = "OK"
+GATEWAY_BAD = "BAD"
+GATEWAY_NA = "NA"
+
+
 @dataclass(frozen=True)
 class HostDigest:
     """Thin host health digest. Never carries tokens or SSH targets."""
@@ -48,20 +54,29 @@ class HostDigest:
     doctor: str
     fail_summary: str = ""
     checked_at: float = 0.0
+    gateway: str = GATEWAY_NA
 
     @property
     def ok(self) -> bool:
-        return self.doctor == DOCTOR_OK and self.pid != PID_DEAD
+        if self.doctor != DOCTOR_OK or self.pid == PID_DEAD:
+            return False
+        if self.gateway == GATEWAY_BAD:
+            return False
+        return True
 
     @property
     def signature(self) -> str:
-        return f"power={self.power}|pid={self.pid}|doctor={self.doctor}"
+        return (
+            f"power={self.power}|pid={self.pid}|doctor={self.doctor}"
+            f"|gateway={self.gateway}"
+        )
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
             "power": self.power,
             "pid": self.pid,
             "doctor": self.doctor,
+            "gateway": self.gateway,
             "ok": self.ok,
             "fail_summary": self.fail_summary,
             "signature": self.signature,
@@ -141,12 +156,57 @@ def compute_host_digest(
     if len(summary) > 120:
         summary = summary[:117] + "..."
 
+    gateway_state = GATEWAY_NA
+    try:
+        from agent_discord.discord.gateway_health import (
+            gateway_need_fragment,
+            load_gateway_health,
+            persist_gateway_health,
+            snapshot_gateway_health,
+        )
+
+        live = snapshot_gateway_health(now=checked)
+        if ws is not None:
+            try:
+                persist_gateway_health(ws, live)
+            except Exception:
+                pass
+        # Prefer live process snapshot; fall back to persisted file (desk --notify).
+        health = live
+        if health.ok and not health.ready and ws is not None:
+            cached = load_gateway_health(ws)
+            if cached is not None and not cached.ok:
+                health = cached
+        if health.ready and not health.ok:
+            gateway_state = GATEWAY_BAD
+            frag = gateway_need_fragment(health)
+            if frag and frag not in summary:
+                fails = ([f"FAIL {frag}"] + fails) if fails is not None else [f"FAIL {frag}"]
+                # rebuild summary tip
+                extra = frag
+                summary = "; ".join(
+                    part
+                    for part in (
+                        summary,
+                        extra,
+                    )
+                    if part
+                )
+                if len(summary) > 120:
+                    summary = summary[:117] + "..."
+                doctor_state = DOCTOR_FAIL
+        elif health.ready and health.ok:
+            gateway_state = GATEWAY_OK
+    except Exception:
+        gateway_state = GATEWAY_NA
+
     return HostDigest(
         power=power,
         pid=pid_state,
         doctor=doctor_state,
         fail_summary=summary,
         checked_at=checked,
+        gateway=gateway_state,
     )
 
 
@@ -156,6 +216,8 @@ def host_need_line(digest: HostDigest) -> Optional[str]:
     if digest.ok:
         return None
     bits = [f"power {digest.power}", f"pid {digest.pid}", f"doctor {digest.doctor}"]
+    if getattr(digest, "gateway", GATEWAY_NA) == GATEWAY_BAD:
+        bits.append(f"gateway {digest.gateway}")
     head = "Need: HOST " + " · ".join(bits)
     if digest.fail_summary:
         return f"{head} · {digest.fail_summary}"
@@ -173,6 +235,8 @@ def digest_spoken_message(digest: HostDigest) -> str:
         f"pid {digest.pid}",
         f"doctor {digest.doctor}",
     ]
+    if getattr(digest, "gateway", GATEWAY_NA) == GATEWAY_BAD:
+        bits.append(f"gateway {digest.gateway}")
     if not digest.ok and digest.fail_summary:
         bits.append(digest.fail_summary)
     body = " · ".join(bits) + mobile_push_suffix()
@@ -195,7 +259,13 @@ def should_announce(
     if digest.ok and not prev:
         # First healthy observation — stay quiet.
         return False
-    if digest.ok and prev and "doctor=FAIL" not in prev and "pid=DEAD" not in prev:
+    if (
+        digest.ok
+        and prev
+        and "doctor=FAIL" not in prev
+        and "pid=DEAD" not in prev
+        and "gateway=BAD" not in prev
+    ):
         # Healthy → healthy (field shuffle only) — quiet.
         return False
     return True
@@ -270,6 +340,7 @@ def last_digest_from_state(workspace: Path) -> Optional[HostDigest]:
             doctor=str(data.get("doctor") or DOCTOR_OK),
             fail_summary=str(data.get("fail_summary") or ""),
             checked_at=float(data.get("checked_at") or 0.0),
+            gateway=str(data.get("gateway") or GATEWAY_NA),
         )
     except (TypeError, ValueError):
         return None
@@ -483,15 +554,42 @@ def resolve_digest_for_panel(
             doctor=DOCTOR_FAIL,
             fail_summary=summary,
             checked_at=time.time(),
+            gateway=getattr(cached, "gateway", GATEWAY_NA) if cached else GATEWAY_NA,
         )
     if cached is None:
         return None
+    # Overlay gateway health from live snapshot / persisted file.
+    gateway = getattr(cached, "gateway", GATEWAY_NA)
+    try:
+        from agent_discord.discord.gateway_health import (
+            load_gateway_health,
+            snapshot_gateway_health,
+        )
+
+        live = snapshot_gateway_health()
+        if live.ready and not live.ok:
+            gateway = GATEWAY_BAD
+        elif live.ready and live.ok:
+            gateway = GATEWAY_OK
+        elif ws.exists():
+            file_h = load_gateway_health(ws)
+            if file_h is not None and file_h.ready and not file_h.ok:
+                gateway = GATEWAY_BAD
+    except Exception:
+        pass
+    doctor = cached.doctor
+    summary = cached.fail_summary
+    if gateway == GATEWAY_BAD and doctor == DOCTOR_OK:
+        doctor = DOCTOR_FAIL
+        if "gateway" not in summary:
+            summary = (summary + "; gateway WS unhealthy").strip("; ")
     return HostDigest(
         power=power,
         pid=pid_state if pid_state != PID_NONE else cached.pid,
-        doctor=cached.doctor,
-        fail_summary=cached.fail_summary,
+        doctor=doctor,
+        fail_summary=summary,
         checked_at=cached.checked_at,
+        gateway=gateway,
     )
 
 

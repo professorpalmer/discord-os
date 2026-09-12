@@ -10,6 +10,7 @@ from typing import Optional
 
 
 SERVICE_LABEL = "com.discord-os.host"
+DOCTOR_NOTIFY_LABEL = "com.discord-os.doctor-notify"
 SERVICE_ENV = "DISCORD_OS_SERVICE"
 
 
@@ -212,3 +213,93 @@ def _vbs_quote(text: str) -> str:
 
 def _vbs_string(text: str) -> str:
     return '"' + text.replace('"', '""') + '"'
+
+
+
+def doctor_notify_plist_path() -> Path:
+    return Path.home() / "Library" / "LaunchAgents" / f"{DOCTOR_NOTIFY_LABEL}.plist"
+
+
+def render_doctor_notify_plist(
+    *,
+    argv: list[str],
+    workspace: Path,
+    cwd: Path,
+    log: Path,
+    start_interval_s: int = 120,
+) -> str:
+    """Periodic LaunchAgent for ``discord-os host doctor --notify``.
+
+    Runs even when the listen/host KeepAlive agent is dead so the phone still
+    wakes. StartInterval (not KeepAlive) — intentional Off stays quiet once
+    host.pid is cleared.
+    """
+
+    args = "\n".join(f"      <string>{_xml(item)}</string>" for item in argv)
+    interval = max(60, int(start_interval_s))
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+        '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+        "<plist version=\"1.0\">\n"
+        "<dict>\n"
+        "  <key>Label</key>\n"
+        f"  <string>{DOCTOR_NOTIFY_LABEL}</string>\n"
+        "  <key>RunAtLoad</key>\n"
+        "  <true/>\n"
+        "  <key>StartInterval</key>\n"
+        f"  <integer>{interval}</integer>\n"
+        "  <key>WorkingDirectory</key>\n"
+        f"  <string>{_xml(str(cwd))}</string>\n"
+        "  <key>EnvironmentVariables</key>\n"
+        "  <dict>\n"
+        "    <key>PYTHONUNBUFFERED</key>\n"
+        "    <string>1</string>\n"
+        "    <key>AGENT_DISCORD_WORKSPACE</key>\n"
+        f"    <string>{_xml(str(workspace))}</string>\n"
+        "  </dict>\n"
+        "  <key>ProgramArguments</key>\n"
+        "  <array>\n"
+        f"{args}\n"
+        "  </array>\n"
+        "  <key>StandardOutPath</key>\n"
+        f"  <string>{_xml(str(log))}</string>\n"
+        "  <key>StandardErrorPath</key>\n"
+        f"  <string>{_xml(str(log))}</string>\n"
+        "</dict>\n"
+        "</plist>\n"
+    )
+
+
+def doctor_notify_cron_example(*, python: str = "discord-os") -> str:
+    """One crontab line: wake phone when listen pid is dead / doctor FAIL."""
+
+    return (
+        f"*/2 * * * * {python} host doctor --notify "
+        ">>/tmp/discord-os-doctor-notify.log 2>&1"
+    )
+
+
+def write_doctor_notify_example(
+    *,
+    workspace: Path,
+    dest: Optional[Path] = None,
+    python_exe: str = "",
+) -> Path:
+    """Write an example LaunchAgent plist the operator can bootstrap."""
+
+    exe = python_exe or sys.executable
+    argv = [exe, "-m", "agent_discord", "host", "doctor", "--notify"]
+    cwd = Path(workspace).resolve().parent if Path(workspace).name == ".agent-discord" else Path(workspace)
+    log = Path(workspace) / "doctor-notify.log"
+    body = render_doctor_notify_plist(
+        argv=argv,
+        workspace=Path(workspace),
+        cwd=cwd,
+        log=log,
+        start_interval_s=120,
+    )
+    path = dest or (Path(workspace) / "com.discord-os.doctor-notify.plist.example")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+    return path

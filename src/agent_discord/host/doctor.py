@@ -107,16 +107,30 @@ def run_doctor(
     if db is not None and db.is_file():
         fails += _check_operators(db, lines)
         fails += _check_gateway(db, fix=fix, lines=lines, channel_id=channel_id)
+        fails += _check_gateway_ws(ws, lines)
     else:
         lines.append("WARN sqlite database missing; skip gateway/power checks")
         fails += _check_operators(None, lines)
+        fails += _check_gateway_ws(ws, lines)
 
     return (1 if fails else 0, lines)
 
 
 
+def _interactions_public() -> bool:
+    """True when slash Interactions endpoint is opted in (public HTTPS path)."""
+
+    raw = str(os.environ.get("AGENT_DISCORD_INTERACTIONS") or "").strip().lower()
+    return raw in {"http", "https", "public", "on", "1", "true", "yes"}
+
+
 def _check_operators(db: Optional[Path], lines: list[str]) -> int:
-    """FAIL when REQUIRE_OPERATORS is on and the operators table is empty."""
+    """FAIL when REQUIRE_OPERATORS is on (or interactions public) and empty.
+
+    Single-user Mac (interactions off, require unset): stay workable — OK / WARN
+    recommend only. Public interactions escalate WARN→FAIL even when require is
+    unset (phone-visible slash surface).
+    """
 
     from agent_discord.orchestration.service import (
         REQUIRE_ALLOWLIST_ENV,
@@ -125,33 +139,63 @@ def _check_operators(db: Optional[Path], lines: list[str]) -> int:
         require_operators,
     )
 
-    if not require_operators():
-        lines.append(
-            f"OK operators require off ({REQUIRE_OPERATORS_ENV} unset)"
-        )
-        return 0
+    public = _interactions_public()
+    required = require_operators()
     flag = REQUIRE_OPERATORS_ENV
     if _truthy_env(REQUIRE_ALLOWLIST_ENV) and not _truthy_env(REQUIRE_OPERATORS_ENV):
         flag = REQUIRE_ALLOWLIST_ENV
-    if db is None or not db.is_file():
+
+    ops_count = 0
+    configured = False
+    if db is not None and db.is_file():
+        store = SQLiteStore(db)
+        store.initialize()
+        try:
+            configured = operators_configured(store)
+            if configured:
+                ops_count = len(store.list_operators())
+        finally:
+            store.close()
+
+    if configured:
+        if required:
+            lines.append(f"OK operators {ops_count} ({flag}=1)")
+        elif public:
+            lines.append(
+                f"OK operators {ops_count} (interactions public; {flag} recommended)"
+            )
+        else:
+            lines.append(
+                f"OK operators {ops_count} ({REQUIRE_OPERATORS_ENV} unset; "
+                "desk single-user OK)"
+            )
+        return 0
+
+    # Empty operators
+    if required:
+        if db is None or not db.is_file():
+            lines.append(f"FAIL operators empty while {flag}=1 (no sqlite)")
+        else:
+            lines.append(
+                f"FAIL operators empty while {flag}=1 — pair via Pair / "
+                f"discord-os pair / DISCORD_OWNER_ID before dispatch"
+            )
+        return 1
+
+    if public:
         lines.append(
-            f"FAIL operators empty while {flag}=1 (no sqlite)"
+            "FAIL operators empty while AGENT_DISCORD_INTERACTIONS is public — "
+            f"set {REQUIRE_OPERATORS_ENV}=1 and pair before slash dispatch "
+            "(desk-only Mac can leave interactions=off)"
         )
         return 1
-    store = SQLiteStore(db)
-    store.initialize()
-    try:
-        if operators_configured(store):
-            ops = store.list_operators()
-            lines.append(f"OK operators {len(ops)} ({flag}=1)")
-            return 0
-        lines.append(
-            f"FAIL operators empty while {flag}=1 — pair via Pair / "
-            f"discord-os pair / DISCORD_OWNER_ID before dispatch"
-        )
-        return 1
-    finally:
-        store.close()
+
+    lines.append(
+        f"WARN operators empty — recommend {REQUIRE_OPERATORS_ENV}=1 when "
+        "sharing the bot or enabling public interactions; desk single-user "
+        "may seed on first On / Pair"
+    )
+    return 0
 
 
 def _truthy_env(name: str) -> bool:
@@ -320,6 +364,41 @@ def _check_gateway(
         store.close()
     return fails
 
+
+
+
+def _check_gateway_ws(workspace: Path, lines: list[str]) -> int:
+    """FAIL when persisted Gateway WS ACK health is unhealthy (REST ≠ receiving)."""
+
+    try:
+        from agent_discord.discord.gateway_health import (
+            load_gateway_health,
+            snapshot_gateway_health,
+        )
+    except Exception:
+        lines.append("WARN gateway WS health module unavailable")
+        return 0
+
+    live = snapshot_gateway_health()
+    health = live
+    if health.ok and not health.ready:
+        cached = load_gateway_health(workspace) if workspace.exists() else None
+        if cached is not None:
+            health = cached
+    if not health.ready:
+        lines.append("OK gateway WS not READY this process (REST intake OK; buttons need panel)")
+        return 0
+    if health.ok:
+        age = health.ack_age_s
+        tip = f"ack_age={age:.0f}s" if age is not None else "ack fresh"
+        lines.append(f"OK gateway WS READY ({tip})")
+        return 0
+    reason = health.reason or "heartbeat ACK stale / socket unhealthy"
+    lines.append(
+        f"FAIL gateway WS unhealthy — {reason} "
+        "(REST-up ≠ receiving; On/Off buttons need ACK liveness)"
+    )
+    return 1
 
 def _owner_pid(owner_id: str) -> Optional[int]:
     # Typical owner: discord-os-cli-28914-de4ae580

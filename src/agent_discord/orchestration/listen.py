@@ -1298,11 +1298,15 @@ def publish_host_card(
 
     armed = _channel_is_armed(store, channel_id)
     spend = 0.0
+    spend_known = False
     cap = None
     halted = False
     write_gate = False
     try:
+        from agent_discord.orchestration.service import spend_cost_known
+
         spend = session_spend_usd(store)
+        spend_known = spend_cost_known(store)
         cap = spend_cap_usd(store)
         halted = is_spend_halted(store)
         write_gate = writes_need_approval(store)

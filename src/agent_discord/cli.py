@@ -1849,6 +1849,39 @@ def cmd_setup(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         print(f"invite: {invite}", file=out)
         print("Press On in the HOST card after the bot is in the channel.", file=out)
         print("Then: discord-os add realm <name> --channel-id ID   (or type bind <name> in Discord)", file=out)
+    if not args.json:
+        from agent_discord.orchestration.service import REQUIRE_OPERATORS_ENV, require_operators
+
+        interactions = str(getattr(config, "interactions", "") or "").strip().lower()
+        public = interactions in {"http", "https", "public", "on", "1", "true", "yes"}
+        if public and not require_operators():
+            print(
+                f"recommend: set {REQUIRE_OPERATORS_ENV}=1 — interactions are public; "
+                "pair via Pair / discord-os pair before slash dispatch "
+                "(desk single-user may leave unset)",
+                file=out,
+            )
+        elif not require_operators():
+            print(
+                f"tip: {REQUIRE_OPERATORS_ENV}=1 refuses silent first-armed-human seed "
+                "(recommended when the bot is shared; default off keeps single-user Mac UX)",
+                file=out,
+            )
+        # Write listen-dead notify example into workspace for LaunchAgent/cron.
+        try:
+            from agent_discord.host.install import (
+                doctor_notify_cron_example,
+                write_doctor_notify_example,
+            )
+
+            example = write_doctor_notify_example(workspace=config.workspace)
+            print(
+                f"watchdog: example LaunchAgent at {example} "
+                f"(or cron: {doctor_notify_cron_example()})",
+                file=out,
+            )
+        except Exception:
+            pass
     return code
 
 

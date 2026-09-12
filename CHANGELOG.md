@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+Round-3 full P1 pack (no version bump — parent cuts 0.5.42).
+
+### Plan ExitPlanMode → `raise_plan_approve` (live)
+
+- Agentic PreToolUse / `ExitPlanMode` and in-process `request_plan_hold` park
+  **Approve / Cancel** (no Always), reuse approval timeout, and **block
+  implement** until allow / deny / expire.
+- Gate-hook file queue drains plan kind via `raise_plan_approve`.
+- Docs: [docs/cards/plan-approve.md](docs/cards/plan-approve.md).
+
+### Listen-dead phone notify watchdog
+
+- LaunchAgent / cron-ready `doctor --notify` helpers
+  (`render_doctor_notify_plist`, example plist + crontab). Phone wakes without
+  a live listen process when `host.pid` is stale / doctor FAIL.
+- Docs: [docs/host/liveness.md](docs/host/liveness.md).
+
+### Gateway WS ACK liveness
+
+- Heartbeat ACK age / READY / socket health (Hermes-shaped). HOST Need +
+  doctor FAIL when unhealthy. REST-up ≠ receiving. Cold start stays quiet
+  (low false-positive).
+- Code: `src/agent_discord/discord/gateway_health.py`.
+
+### REQUIRE_OPERATORS push
+
+- Setup recommends the flag; doctor WARN→FAIL when interactions are public
+  and operators are empty. Single-user Mac (interactions off) stays workable.
+- Docs: [docs/host/README.md](docs/host/README.md).
+
+### Honest OpenRouter / PM-adapter spend
+
+- When usage omits `cost_usd`, status digest + Halt show **unknown** not `$0`.
+  Real OpenRouter costs still display when present.
+
+Tests: plan hold, gateway health, spend honesty, doctor-notify watchdog,
+operators public FAIL.
+
 ## 0.5.41
 
 P0 live ask-gate / PreToolUse hold.

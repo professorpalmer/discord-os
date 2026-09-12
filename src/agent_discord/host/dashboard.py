@@ -25,6 +25,7 @@ from agent_discord.orchestration.service import (
     seed_spend_cap_from_env,
     session_spend_usd,
     spend_cap_usd,
+    spend_cost_known,
 )
 from agent_discord.persistence.sqlite import SQLiteStore
 
@@ -199,6 +200,7 @@ def build_status_snapshot(
                 "spend_usd": spent,
                 "cap_usd": cap,
                 "halted": halted,
+                "spend_known": spend_cost_known(db),
             },
             "jobs": jobs,
             "doctor": doctor,

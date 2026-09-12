@@ -76,6 +76,12 @@ def run_discord_gateway(
         raise
     except Exception as exc:
         raise GatewayClosed(str(exc), fatal=False) from exc
+    try:
+        from agent_discord.discord.gateway_health import note_connected
+
+        note_connected()
+    except Exception:
+        pass
     seq: Optional[int] = None
     beat_stop = threading.Event()
     beater: Optional[threading.Thread] = None
@@ -108,6 +114,14 @@ def run_discord_gateway(
                         interval_ms = int(data.get("heartbeat_interval") or interval_ms)
                     except (TypeError, ValueError):
                         pass
+                try:
+                    from agent_discord.discord.gateway_health import (
+                        note_heartbeat_interval,
+                    )
+
+                    note_heartbeat_interval(interval_ms)
+                except Exception:
+                    pass
                 if beater is None:
                     beater = threading.Thread(
                         target=_heartbeat_loop,
@@ -136,11 +150,25 @@ def run_discord_gateway(
                 continue
             if op == 9:
                 raise GatewayClosed("identify rejected", fatal=True)
+            if op == 11:
+                try:
+                    from agent_discord.discord.gateway_health import note_heartbeat_ack
+
+                    note_heartbeat_ack()
+                except Exception:
+                    pass
+                continue
             if op == 0:
                 event = str(message.get("t") or "")
                 payload = data if isinstance(data, dict) else {}
                 if event == "READY":
                     print("panel gateway ready", flush=True)
+                    try:
+                        from agent_discord.discord.gateway_health import note_ready
+
+                        note_ready()
+                    except Exception:
+                        pass
                     if on_connected is not None:
                         def _set_presence(status: str, name: str) -> None:
                             try:
@@ -157,11 +185,29 @@ def run_discord_gateway(
                 except Exception as exc:
                     print(f"panel dispatch failed: {exc}", flush=True)
     except WebSocketError as exc:
+        try:
+            from agent_discord.discord.gateway_health import note_closed
+
+            note_closed(str(exc))
+        except Exception:
+            pass
         raise GatewayClosed(str(exc), fatal=False) from exc
     except (ConnectionResetError, BrokenPipeError, TimeoutError, OSError) as exc:
+        try:
+            from agent_discord.discord.gateway_health import note_closed
+
+            note_closed(str(exc))
+        except Exception:
+            pass
         raise GatewayClosed(str(exc), fatal=False) from exc
     finally:
         beat_stop.set()
+        try:
+            from agent_discord.discord.gateway_health import note_closed
+
+            note_closed("gateway loop ended")
+        except Exception:
+            pass
         closer = getattr(sock, "close", None)
         if callable(closer):
             try:
@@ -181,6 +227,12 @@ def _heartbeat_loop(
     while not stop.wait(delay):
         try:
             send({"op": 1, "d": seq_reader()})
+            try:
+                from agent_discord.discord.gateway_health import note_heartbeat_sent
+
+                note_heartbeat_sent()
+            except Exception:
+                pass
         except Exception:
             return
         time.sleep(0)

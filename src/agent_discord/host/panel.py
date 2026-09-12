@@ -365,6 +365,7 @@ def host_panel_payload(
     )
 
     spend_usd = 0.0
+    spend_known = False
     cap_usd = None
     halted = False
     write_gate = False
@@ -376,12 +377,16 @@ def host_panel_payload(
     bank = False
     if store is not None:
         try:
+            from agent_discord.orchestration.service import spend_cost_known as _spend_known
+
             spend_usd = session_spend_usd(store)
+            spend_known = _spend_known(store)
             cap_usd = spend_cap_usd(store)
             halted = is_spend_halted(store)
             write_gate = writes_need_approval(store)
         except Exception:
             spend_usd = 0.0
+            spend_known = False
             cap_usd = None
             halted = False
             write_gate = False
@@ -396,6 +401,7 @@ def host_panel_payload(
         confirm_off=confirm_off,
         avatar_url=avatar_url,
         spend_usd=spend_usd,
+        spend_known=spend_known,
         cap_usd=cap_usd,
         halted=halted,
         paired=paired,
