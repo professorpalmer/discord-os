@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.5.48
+
+Round-4 P1 pack: watchdog real install, never-READY Need, exact-tool Always, plan hold without ExitPlanMode, REQUIRE_OPERATORS when Interactions exposed, SSH gates honesty.
+
 ### Round-4 P1 pack
 
 - **Watchdog real install**: `install_doctor_notify_watchdog` + `host doctor
