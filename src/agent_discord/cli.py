@@ -528,6 +528,40 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print how the agentic worker attaches this hook",
     )
 
+    p_jobs = sub.add_parser(
+        "jobs",
+        help="Job hygiene: bulk clear failed Needs (Dismiss semantics)",
+    )
+    jobs_sub = p_jobs.add_subparsers(dest="jobs_command", required=True)
+    p_clear = jobs_sub.add_parser(
+        "clear-needs",
+        help="Dismiss matching failed / attention-need jobs (P0.1 semantics)",
+    )
+    p_clear.add_argument(
+        "--failed",
+        action="store_true",
+        help="Required. Clear failed Needs (and attention=need). Fail-closed without this.",
+    )
+    p_clear.add_argument(
+        "--older-than",
+        type=int,
+        default=None,
+        metavar="DAYS",
+        help="Only clear Needs whose task updated_at is at least DAYS old",
+    )
+    p_clear.add_argument(
+        "--channel-id",
+        default="",
+        help="Limit to one Discord channel (default: all channels)",
+    )
+    p_clear.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="List matches without dismissing",
+    )
+    p_clear.add_argument("--fake", action="store_true", help="Fake Discord/Puppetmaster")
+    p_clear.add_argument("--json", action="store_true")
+
     return parser
 
 
@@ -1778,6 +1812,20 @@ def _start_panel_gateway(
             except Exception:
                 print("Cancel unconfirmed", flush=True)
 
+        def on_clear_needs(**kwargs):
+            if orch is None:
+                return None
+            try:
+                return orch.clear_failed_needs(**kwargs)
+            except Exception as exc:
+                return {
+                    "action": "clear-needs",
+                    "status": "error",
+                    "summary": str(exc),
+                    "matched": 0,
+                    "cleared": 0,
+                }
+
         handle_gateway_interaction(
             store,
             channel_id,
@@ -1786,6 +1834,7 @@ def _start_panel_gateway(
             on_ask=on_ask_here,
             on_power=set_presence,
             on_job=on_job,
+            on_clear_needs=on_clear_needs,
             host_roots=list(host_roots),
         )
 
@@ -2457,6 +2506,112 @@ def cmd_interactions(args: argparse.Namespace, *, out: TextIO | None = None) -> 
     return 0
 
 
+def cmd_jobs(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
+    out = out or sys.stdout
+    if args.jobs_command != "clear-needs":
+        print(f"unknown jobs command {args.jobs_command}", file=sys.stderr)
+        return 2
+    return cmd_jobs_clear_needs(args, out=out)
+
+
+def cmd_jobs_clear_needs(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
+    """Bulk dismiss failed Needs; refresh HOST Jobs panel when Discord is available."""
+
+    out = out or sys.stdout
+    if not bool(getattr(args, "failed", False)):
+        msg = "refused: pass --failed to clear failed Needs (fail-closed)"
+        if getattr(args, "json", False):
+            print(
+                json.dumps(
+                    {
+                        "action": "clear-needs",
+                        "status": "refused",
+                        "summary": msg,
+                        "matched": 0,
+                        "cleared": 0,
+                    },
+                    indent=2,
+                ),
+                file=out,
+            )
+        else:
+            print(msg, file=sys.stderr)
+        return 2
+
+    config = apply_runtime_secrets(load_config())
+    config.workspace.mkdir(parents=True, exist_ok=True)
+    store = SQLiteStore(config.database_path)
+    store.initialize()
+    fake = bool(getattr(args, "fake", False))
+    try:
+        if fake:
+            provider = FakeDiscordMCPProvider()
+            backend = FakePuppetmasterBackend()
+        else:
+            provider = select_provider(config)
+            backend = _select_backend(config)
+        discord = DiscordFacade(
+            provider,
+            gateway=SqliteGatewayOwnerRegistry(store),
+            owner_id=f"{CLI_OWNER_PREFIX}{os.getpid()}-clear-needs",
+            bot_token_fingerprint=config.bot_token_fingerprint or "local-dev",
+        )
+        orch = AgentOrchestrator(
+            store=store,
+            backend=backend,
+            discord=discord,
+            post_progress_to_discord=not fake and bool(config.discord_bot_token),
+        )
+        result = orch.clear_failed_needs(
+            failed=True,
+            older_than_days=getattr(args, "older_than", None),
+            channel_id=str(getattr(args, "channel_id", "") or ""),
+            dry_run=bool(getattr(args, "dry_run", False)),
+        )
+        # Prefer P0.3 refresh when we have a token and a concrete channel.
+        channel_id = str(getattr(args, "channel_id", "") or "").strip()
+        if (
+            not result.get("dry_run")
+            and channel_id
+            and config.discord_bot_token
+            and not fake
+        ):
+            try:
+                from urllib.request import urlopen as rest_urlopen
+
+                from agent_discord.host.panel import refresh_host_jobs_panel
+
+                refresh_host_jobs_panel(
+                    store,
+                    channel_id,
+                    token=config.discord_bot_token,
+                    opener=rest_urlopen,
+                )
+            except Exception:
+                pass
+        if getattr(args, "json", False):
+            print(json.dumps(result, indent=2), file=out)
+        else:
+            status = str(result.get("status") or "")
+            matched = int(result.get("matched") or 0)
+            cleared = int(result.get("cleared") or 0)
+            if status == "dry-run":
+                print(f"clear-needs dry-run matched={matched}", file=out)
+                for item in result.get("runs") or ():
+                    code = str(item.get("job_code") or item.get("run_id") or "")
+                    st = str(item.get("status") or "")
+                    print(f"  {code} {st}", file=out)
+            else:
+                print(
+                    f"clear-needs {status} matched={matched} cleared={cleared}",
+                    file=out,
+                )
+        return 0 if str(result.get("status") or "") in {"ok", "dry-run"} else 1
+    finally:
+        store.close()
+
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -2502,6 +2657,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return cmd_schedule(args)
     if args.command == "spend":
         return cmd_spend(args)
+    if args.command == "jobs":
+        return cmd_jobs(args)
     if args.command == "add":
         return cmd_add(args)
     if args.command == "map":

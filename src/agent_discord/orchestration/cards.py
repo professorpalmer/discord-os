@@ -532,6 +532,7 @@ def host_card(
     armed: bool,
     channel_id: str = "",
     confirm_off: bool = False,
+    confirm_clear_needs: int = 0,
     avatar_url: str = "",
     spend_usd: float = 0.0,
     cap_usd: Optional[float] = None,
@@ -565,6 +566,19 @@ def host_card(
             kind="HOST",
             title="Stop?",
             description="Confirm to stop. Cancel keeps it running.",
+            color=COLOR_WORK,
+            avatar_url=avatar_url,
+            fields=fields,
+        )
+    if int(confirm_clear_needs or 0) > 0:
+        n = int(confirm_clear_needs)
+        return CardMessage(
+            kind="HOST",
+            title="Clear failed Needs?",
+            description=(
+                f"Dismiss {n} failed Need{'s' if n != 1 else ''} "
+                "(same as Dismiss on a job card). Cancel leaves them."
+            ),
             color=COLOR_WORK,
             avatar_url=avatar_url,
             fields=fields,

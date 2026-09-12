@@ -53,6 +53,9 @@ BROWSER_MODAL_ID = "discord-os:browser-modal"
 BROWSER_REMOTE_MODAL_ID = "discord-os:browser-modal:remote"
 BROWSER_TEXT_ID = "discord-os:browser-text"
 GITHUB_ID = "discord-os:github"
+CLEAR_NEEDS_ID = "discord-os:clear-needs"
+CLEAR_NEEDS_CONFIRM_ID = "discord-os:clear-needs-confirm"
+CLEAR_NEEDS_CANCEL_ID = "discord-os:clear-needs-cancel"
 COMPONENT_ROW = 1
 BUTTON = 2
 STYLE_PRIMARY = 1
@@ -70,6 +73,7 @@ def host_panel_components(
     armed: bool,
     *,
     confirm_off: bool = False,
+    confirm_clear_needs: int = 0,
     jobs: Optional[list[dict[str, Any]]] = None,
     paired: bool = False,
     write_gate: bool = False,
@@ -89,6 +93,28 @@ def host_panel_components(
                         "type": BUTTON,
                         "style": STYLE_PRIMARY,
                         "custom_id": CANCEL_OFF_ID,
+                        "label": "Cancel",
+                    },
+                ],
+            }
+        ]
+    elif int(confirm_clear_needs or 0) > 0:
+        n = int(confirm_clear_needs)
+        label = f"Clear {n} failed" if n != 1 else "Clear 1 failed"
+        rows = [
+            {
+                "type": COMPONENT_ROW,
+                "components": [
+                    {
+                        "type": BUTTON,
+                        "style": STYLE_DANGER,
+                        "custom_id": CLEAR_NEEDS_CONFIRM_ID,
+                        "label": label[:80],
+                    },
+                    {
+                        "type": BUTTON,
+                        "style": STYLE_PRIMARY,
+                        "custom_id": CLEAR_NEEDS_CANCEL_ID,
                         "label": "Cancel",
                     },
                 ],
@@ -157,6 +183,13 @@ def _more_select_options(
         )
     options.append(
         {"label": "Halt", "value": HALT_ID, "description": "Stop new jobs"}
+    )
+    options.append(
+        {
+            "label": "Clear failed Needs",
+            "value": CLEAR_NEEDS_ID,
+            "description": "Dismiss stale failed Needs",
+        }
     )
     if write_gate:
         options.append(
@@ -369,6 +402,7 @@ def host_panel_payload(
     *,
     channel_id: str = "",
     confirm_off: bool = False,
+    confirm_clear_needs: int = 0,
     jobs: Optional[list[dict[str, Any]]] = None,
     avatar_url: str = "",
     store: Any = None,
@@ -416,6 +450,7 @@ def host_panel_payload(
         armed=armed,
         channel_id=channel_id,
         confirm_off=confirm_off,
+        confirm_clear_needs=confirm_clear_needs,
         avatar_url=avatar_url,
         spend_usd=spend_usd,
         spend_known=spend_known,
@@ -434,6 +469,7 @@ def host_panel_payload(
         rows=host_panel_components(
             armed,
             confirm_off=confirm_off,
+            confirm_clear_needs=confirm_clear_needs,
             jobs=jobs,
             paired=paired,
             write_gate=write_gate,
@@ -461,6 +497,12 @@ def panel_action_from_custom_id(custom_id: str) -> Optional[str]:
         return "pair"
     if raw == HALT_ID:
         return "halt"
+    if raw == CLEAR_NEEDS_ID:
+        return "clear-needs"
+    if raw == CLEAR_NEEDS_CONFIRM_ID:
+        return "clear-needs-confirm"
+    if raw == CLEAR_NEEDS_CANCEL_ID:
+        return "clear-needs-cancel"
     if raw == GATE_ID:
         return "gate"
     if raw == ROLES_ID:
@@ -506,6 +548,7 @@ def interaction_callback_payload(
     *,
     channel_id: str = "",
     confirm_off: bool = False,
+    confirm_clear_needs: int = 0,
     store: Any = None,
     jobs: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
@@ -513,6 +556,7 @@ def interaction_callback_payload(
         armed,
         channel_id=channel_id,
         confirm_off=confirm_off,
+        confirm_clear_needs=confirm_clear_needs,
         jobs=jobs if jobs is not None else (_panel_jobs(store, channel_id) if store is not None else []),
         store=store,
     )
@@ -597,6 +641,7 @@ def handle_gateway_interaction(
     on_ask: Optional[Callable[[str], None]] = None,
     on_power: Optional[Callable[[bool], None]] = None,
     on_job: Optional[Callable[[str, str], None]] = None,
+    on_clear_needs: Optional[Callable[..., Any]] = None,
     host_roots: Optional[list[Any]] = None,
     host_runner: Any = None,
     browser_open: Any = None,
@@ -766,6 +811,99 @@ def handle_gateway_interaction(
             print(f"panel job card failed: {exc}", flush=True)
         return action
 
+    if action == "clear-needs":
+        matched = _count_dismissable_needs(store, channel_id)
+        if matched <= 0:
+            print("panel clear-needs: none matched", flush=True)
+            try:
+                _paint_after_ack(
+                    store,
+                    channel_id,
+                    payload,
+                    token=token,
+                    armed=_channel_armed(store, channel_id),
+                    confirm_off=False,
+                    confirm_clear_needs=0,
+                    opener=opener,
+                )
+            except Exception as exc:
+                print(f"panel paint failed: {exc}", flush=True)
+            return action
+        try:
+            _paint_after_ack(
+                store,
+                channel_id,
+                payload,
+                token=token,
+                armed=_channel_armed(store, channel_id),
+                confirm_off=False,
+                confirm_clear_needs=matched,
+                opener=opener,
+            )
+            print(f"panel clear-needs confirm n={matched}", flush=True)
+        except Exception as exc:
+            print(f"panel paint failed: {exc}", flush=True)
+        return action
+
+    if action == "clear-needs-cancel":
+        try:
+            _paint_after_ack(
+                store,
+                channel_id,
+                payload,
+                token=token,
+                armed=_channel_armed(store, channel_id),
+                confirm_off=False,
+                confirm_clear_needs=0,
+                opener=opener,
+            )
+        except Exception as exc:
+            print(f"panel paint failed: {exc}", flush=True)
+        return action
+
+    if action == "clear-needs-confirm":
+        result: dict[str, Any]
+        if callable(on_clear_needs):
+            try:
+                result = dict(
+                    on_clear_needs(
+                        failed=True,
+                        channel_id=channel_id,
+                        dry_run=False,
+                    )
+                    or {}
+                )
+            except Exception as exc:
+                print(f"panel clear-needs failed: {exc}", flush=True)
+                result = {"cleared": 0, "status": "error", "summary": str(exc)}
+        else:
+            result = _store_clear_failed_needs(store, channel_id=channel_id)
+        try:
+            refresh_host_jobs_panel(
+                store, channel_id, token=token, opener=opener
+            )
+        except Exception:
+            pass
+        try:
+            _paint_after_ack(
+                store,
+                channel_id,
+                payload,
+                token=token,
+                armed=_channel_armed(store, channel_id),
+                confirm_off=False,
+                confirm_clear_needs=0,
+                opener=opener,
+            )
+        except Exception as exc:
+            print(f"panel paint failed: {exc}", flush=True)
+        print(
+            f"panel clear-needs-confirm cleared={result.get('cleared', 0)} "
+            f"matched={result.get('matched', 0)}",
+            flush=True,
+        )
+        return action
+
     confirm_off = action == "off"
     if action in {"on", "off-confirm"}:
         apply_panel_action(store, channel_id, action)
@@ -794,6 +932,7 @@ def handle_gateway_interaction(
             token=token,
             armed=armed,
             confirm_off=confirm_off,
+            confirm_clear_needs=0,
             opener=opener,
         )
         print(
@@ -1049,6 +1188,69 @@ def _followup_open_card(
         print(f"panel open card failed: {exc}", flush=True)
 
 
+
+def _count_dismissable_needs(store: Any, channel_id: str) -> int:
+    lister = getattr(store, "list_dismissable_needs", None)
+    if not callable(lister):
+        return 0
+    try:
+        return len(list(lister(channel_id=channel_id or "", limit=500)))
+    except Exception:
+        return 0
+
+
+def _store_clear_failed_needs(
+    store: Any, *, channel_id: str = ""
+) -> dict[str, Any]:
+    """Fail-closed store-only bulk dismiss when no orchestrator callback is wired."""
+
+    from agent_discord.contracts import TaskStatus
+
+    lister = getattr(store, "list_dismissable_needs", None)
+    if not callable(lister):
+        return {"action": "clear-needs", "matched": 0, "cleared": 0, "status": "unsupported"}
+    try:
+        matches = list(lister(channel_id=channel_id or "", limit=500))
+    except Exception as exc:
+        return {
+            "action": "clear-needs",
+            "matched": 0,
+            "cleared": 0,
+            "status": "error",
+            "summary": str(exc),
+        }
+    cleared = 0
+    for item in matches:
+        rid = str(item.get("run_id") or "").strip()
+        task_id = str(item.get("task_id") or "").strip()
+        status = str(item.get("status") or "").strip().lower()
+        if not rid:
+            continue
+        if status == "failed":
+            try:
+                store.update_run(
+                    rid,
+                    status=TaskStatus.CANCELLED,
+                    summary="dismissed",
+                    error="dismissed",
+                )
+            except Exception:
+                continue
+        clearer = getattr(store, "set_job_github_attention", None)
+        if callable(clearer) and task_id:
+            try:
+                clearer(task_id, "")
+            except Exception:
+                pass
+        cleared += 1
+    return {
+        "action": "clear-needs",
+        "matched": len(matches),
+        "cleared": cleared,
+        "status": "ok",
+    }
+
+
 def _paint_interaction(
     store: Any,
     channel_id: str,
@@ -1057,6 +1259,7 @@ def _paint_interaction(
     token: str,
     opener: Any,
     confirm_off: bool,
+    confirm_clear_needs: int = 0,
 ) -> None:
     try:
         _paint_after_ack(
@@ -1066,6 +1269,7 @@ def _paint_interaction(
             token=token,
             armed=_channel_armed(store, channel_id),
             confirm_off=confirm_off,
+            confirm_clear_needs=confirm_clear_needs,
             opener=opener,
         )
     except Exception as exc:
@@ -1182,11 +1386,13 @@ def _paint_after_ack(
     armed: bool,
     confirm_off: bool,
     opener: Any,
+    confirm_clear_needs: int = 0,
 ) -> None:
     panel = host_panel_payload(
         armed,
         channel_id=channel_id,
         confirm_off=confirm_off,
+        confirm_clear_needs=confirm_clear_needs,
         jobs=_panel_jobs(store, channel_id),
         store=store,
     )
@@ -1452,6 +1658,7 @@ def _paint_host_panel(
     confirm_off: bool,
     opener: Any,
     panel: Optional[dict[str, Any]] = None,
+    confirm_clear_needs: int = 0,
 ) -> None:
     if not token.strip() or not message_id:
         return
@@ -1462,6 +1669,7 @@ def _paint_host_panel(
             armed,
             channel_id=channel_id,
             confirm_off=confirm_off,
+            confirm_clear_needs=confirm_clear_needs,
             jobs=_panel_jobs(store, channel_id),
             store=store,
         )

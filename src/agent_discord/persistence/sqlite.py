@@ -831,6 +831,81 @@ class SQLiteStore:
         ranked.sort(key=lambda pair: pair[0])
         return [item for _rank, item in ranked][:capped]
 
+    def list_dismissable_needs(
+        self,
+        *,
+        channel_id: str = "",
+        older_than_days: int | None = None,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        """Failed runs and attention=need jobs eligible for dismiss / bulk clear.
+
+        Latest run per task. Optional ``older_than_days`` filters on task
+        ``updated_at`` (SQLite utc datetime). Empty ``channel_id`` = all channels.
+        """
+
+        capped = max(1, min(int(limit), 2000))
+        channel = (channel_id or "").strip()
+        days: int | None = None
+        if older_than_days is not None:
+            try:
+                days = max(0, int(older_than_days))
+            except (TypeError, ValueError):
+                days = None
+        params: list[Any] = [channel, channel]
+        age_sql = ""
+        if days is not None:
+            age_sql = " AND t.updated_at <= datetime('now', ?)"
+            params.append(f"-{days} days")
+        params.append(max(capped * 4, 100))
+        rows = self._connection().execute(
+            f"""
+            SELECT t.task_id, t.intake_text, t.status AS task_status,
+                   t.metadata_json, t.job_code, t.thread_id, t.channel_id,
+                   t.updated_at,
+                   r.run_id, r.summary, r.status AS run_status
+            FROM tasks t
+            LEFT JOIN runs r ON r.run_id = (
+                SELECT run_id FROM runs
+                WHERE task_id = t.task_id
+                ORDER BY created_at DESC, run_id DESC
+                LIMIT 1
+            )
+            WHERE (? = '' OR t.channel_id=?){age_sql}
+            ORDER BY t.updated_at ASC
+            LIMIT ?
+            """,
+            tuple(params),
+        ).fetchall()
+        seen: set[str] = set()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            run_id = str(row["run_id"] or "")
+            if not run_id or run_id in seen:
+                continue
+            seen.add(run_id)
+            status = str(row["run_status"] or row["task_status"] or "").strip().lower()
+            attention = _github_attention(row["metadata_json"])
+            if status != TaskStatus.FAILED.value and attention != "need":
+                continue
+            out.append(
+                {
+                    "task_id": str(row["task_id"] or ""),
+                    "run_id": run_id,
+                    "channel_id": str(row["channel_id"] or ""),
+                    "intake_text": str(row["intake_text"] or ""),
+                    "summary": str(row["summary"] or ""),
+                    "status": status,
+                    "job_code": str(row["job_code"] or ""),
+                    "thread_id": str(row["thread_id"] or ""),
+                    "attention": attention,
+                    "updated_at": str(row["updated_at"] or ""),
+                }
+            )
+            if len(out) >= capped:
+                break
+        return out
+
     def list_parked_approvals(self) -> list[dict[str, Any]]:
         """Pending runs still awaiting write-gate Allow."""
 

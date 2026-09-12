@@ -1628,7 +1628,9 @@ class AgentOrchestrator:
             "summary": spoken,
         }
 
-    def _dismiss_failed_need(self, run_id: str) -> dict[str, Any]:
+    def _dismiss_failed_need(
+        self, run_id: str, *, refresh_host: bool = True
+    ) -> dict[str, Any]:
         """Ack a failed Need: mark cancelled so briefing ranks Last, not Need."""
 
         rid = (run_id or "").strip()
@@ -1712,7 +1714,7 @@ class AgentOrchestrator:
                 channel_id = str(task.get("channel_id") or "").strip()
         except Exception:
             channel_id = ""
-        if channel_id:
+        if channel_id and refresh_host:
             self._refresh_host_jobs_after_rank_change(channel_id)
         return {
             "action": "dismiss",
@@ -1733,6 +1735,117 @@ class AgentOrchestrator:
             publish_host_card(self.discord, self.store, cid)
         except Exception:
             return
+
+    def clear_failed_needs(
+        self,
+        *,
+        failed: bool = False,
+        older_than_days: int | None = None,
+        channel_id: str = "",
+        dry_run: bool = False,
+        limit: int = 500,
+    ) -> dict[str, Any]:
+        """Bulk dismiss stale failed (and attention-need) jobs; refresh HOST panels.
+
+        Fail-closed: ``failed`` must be True. Same dismiss semantics as P0.1.
+        """
+
+        if not failed:
+            return {
+                "action": "clear-needs",
+                "status": "refused",
+                "summary": "Pass --failed to clear failed Needs (fail-closed).",
+                "matched": 0,
+                "cleared": 0,
+                "dry_run": bool(dry_run),
+                "runs": [],
+            }
+        lister = getattr(self.store, "list_dismissable_needs", None)
+        if not callable(lister):
+            return {
+                "action": "clear-needs",
+                "status": "unsupported",
+                "summary": "Store cannot list dismissable needs.",
+                "matched": 0,
+                "cleared": 0,
+                "dry_run": bool(dry_run),
+                "runs": [],
+            }
+        try:
+            matches = list(
+                lister(
+                    channel_id=channel_id or "",
+                    older_than_days=older_than_days,
+                    limit=limit,
+                )
+            )
+        except Exception as exc:
+            return {
+                "action": "clear-needs",
+                "status": "error",
+                "summary": str(exc),
+                "matched": 0,
+                "cleared": 0,
+                "dry_run": bool(dry_run),
+                "runs": [],
+            }
+        preview = [
+            {
+                "run_id": str(item.get("run_id") or ""),
+                "task_id": str(item.get("task_id") or ""),
+                "channel_id": str(item.get("channel_id") or ""),
+                "status": str(item.get("status") or ""),
+                "attention": str(item.get("attention") or ""),
+                "job_code": str(item.get("job_code") or ""),
+                "summary": str(item.get("summary") or item.get("intake_text") or "")[:120],
+            }
+            for item in matches
+        ]
+        if dry_run:
+            return {
+                "action": "clear-needs",
+                "status": "dry-run",
+                "matched": len(preview),
+                "cleared": 0,
+                "dry_run": True,
+                "older_than_days": older_than_days,
+                "channel_id": (channel_id or "").strip(),
+                "runs": preview,
+            }
+        cleared = 0
+        results: list[dict[str, Any]] = []
+        channels: set[str] = set()
+        for item in matches:
+            rid = str(item.get("run_id") or "").strip()
+            if not rid:
+                continue
+            result = self._dismiss_failed_need(rid, refresh_host=False)
+            results.append(
+                {
+                    "run_id": rid,
+                    "status": str(result.get("status") or ""),
+                    "channel_id": str(item.get("channel_id") or ""),
+                    "job_code": str(item.get("job_code") or ""),
+                }
+            )
+            if str(result.get("status") or "") in {"cancelled", "cleared"}:
+                cleared += 1
+            cid = str(item.get("channel_id") or "").strip()
+            if cid:
+                channels.add(cid)
+        # Dismiss already refreshes per-job; one more pass covers any missed channel.
+        for cid in sorted(channels):
+            self._refresh_host_jobs_after_rank_change(cid)
+        return {
+            "action": "clear-needs",
+            "status": "ok",
+            "matched": len(preview),
+            "cleared": cleared,
+            "dry_run": False,
+            "older_than_days": older_than_days,
+            "channel_id": (channel_id or "").strip(),
+            "runs": results,
+        }
 
     def _continue_idle_run(self, run_id: str, *, prompt: str = "") -> dict[str, Any]:
         """Start a new tip-parented job in the prior idle Discord thread."""

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Discord-half P0.4 — Bulk clear stale failed Needs
+
+- CLI `discord-os jobs clear-needs --failed` with optional `--older-than DAYS`,
+  `--channel-id`, `--dry-run`. Same dismiss semantics as P0.1 (failed →
+  cancelled/`dismissed`; attention=need cleared). Fail-closed without `--failed`.
+- HOST More → **Clear failed Needs** shows a confirm (count) then clears for that
+  channel; cancels leave Needs untouched. Refreshes HOST Jobs panel (P0.3).
+- Docs: [cli](docs/cli/README.md), [jobs](docs/jobs/README.md),
+  [host](docs/host/README.md). Tests: `test_clear_failed_needs.py`.
+- No version bump in this change — ship cadence / parent pack cuts the tag.
+
 ### Discord-half P0.3 — HOST Jobs panel refresh after dismiss/status change
 
 - After dismiss / ack / cancel settle (ranking-affecting flips), immediately edit
