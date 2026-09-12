@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.24
+
+Host doctor. Spend strings parse. Idle sessions soak two follow-ups.
+
+- `discord-os host doctor [--fix]` checks LaunchAgent workspace, pid, gateway locks.
+- Halt spend accepts `$0.04`-style provider costs.
+- Two sequential idle-thread follow-ups each mint a job and advance the thread watermark.
+
 ## 0.5.23
 
 Parallel cooks no longer collide on DOS-* job codes.
