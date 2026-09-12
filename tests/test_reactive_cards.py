@@ -14,11 +14,15 @@ from agent_discord.orchestration.cards import (
 from agent_discord.orchestration.ask_gate import tool_gate_card
 from agent_discord.orchestration.reactive import (
     ACTIONS_DONE,
+    ACTIONS_FAILED,
+    ACTIONS_FAILED_DONE,
     ACTIONS_IDLE,
     ACTIONS_PARKED,
     ACTIONS_PLAN,
     ACTIONS_RUNNING,
     DONE_BUTTONS,
+    FAILED_BUTTONS,
+    FAILED_DONE_BUTTONS,
     IDLE_BUTTONS,
     PARKED_BUTTONS,
     PLAN_BUTTONS,
@@ -107,9 +111,13 @@ def test_reactive_for_job_matches_host_jobs_mapping():
     )
     assert reactive_for_job({"status": "running"}).actions == ACTIONS_RUNNING
     failed = reactive_for_job({"status": "failed", "thread_id": "th"})
-    assert failed.actions == ACTIONS_IDLE
+    assert failed.actions == ACTIONS_FAILED
     assert failed.accent == COLOR_FAIL
     assert failed.stage == "Failed"
+    assert action_labels(failed.actions) == FAILED_BUTTONS
+    failed_done = reactive_for_job({"status": "failed"})
+    assert failed_done.actions == ACTIONS_FAILED_DONE
+    assert action_labels(failed_done.actions) == FAILED_DONE_BUTTONS
     # No thread: settled receipt, not a session Continue-only row.
     done = reactive_for_job({"status": "completed"})
     assert done.actions == "done"
@@ -173,8 +181,12 @@ def test_reactive_helpers_own_park_running_settle_buttons():
         ),
         has_thread=True,
     )
-    assert _labels(failed.rows[0]) == list(IDLE_BUTTONS)
+    assert _labels(failed.rows[0]) == list(FAILED_BUTTONS)
     assert failed.color == COLOR_FAIL
+    assert [item["custom_id"] for item in failed.rows[0]["components"]] == [
+        "discord-os:job:continue:run-fail",
+        "discord-os:job:dismiss:run-fail",
+    ]
 
 
 def test_ask_gate_parked_row_uses_reactive_paint():

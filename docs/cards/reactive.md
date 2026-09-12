@@ -13,12 +13,14 @@ The live card is a `FLAG_COMPONENTS_V2` container edited in the job thread (`sen
 | parked | write-gate implement, HOST Jobs on `pending`, or mid-run tool/ask gate ([ask-gate](ask-gate.md)) | Allow / Always allow / Deny | work gold | Allow write / tool |
 | plan | plan-ready park ([plan-approve](plan-approve.md)) | Approve / Cancel | work gold | Approve plan |
 | running | live cook | **Cancel** (phone interrupt on the live v2 card) | work gold | Working |
-| idle | Done / Failed / Cancelled **and** a job thread | Continue | live / fail / idle | Done / Failed / Cancelled |
+| idle | Done / Cancelled **and** a job thread | Continue | live / idle | Done / Cancelled |
+| failed | Failed **and** a job thread | Continue + **Dismiss** | fail | Failed |
+| failed_done | Failed without a session thread | Continue + Retry + **Dismiss** | fail | Failed |
 | done | settled receipt without a session thread | Continue + Retry | receipt chrome | receipt title |
 
-`progress` without a live-running flag still paints **done** (Continue + Retry). Live flushes go through `reactive_progress_card` (Cancel). Settle with a job thread paints **idle** Continue; without a thread paints **done** Continue + Retry. That split is owned by `reactive_paint(..., has_thread=)`.
+`progress` without a live-running flag still paints **done** (Continue + Retry). Live flushes go through `reactive_progress_card` (Cancel). Settle with a job thread paints **idle** Continue (Done / Cancelled); **failed** paints Continue + Dismiss (or Continue + Retry + Dismiss without a thread). That split is owned by `reactive_paint(..., has_thread=)`.
 
-Custom ids stay `discord-os:job:<verb>:<run_id>`. Verbs are approve / always / deny / cancel / retry / continue. They never toggle HOST power and they never dispatch Puppetmaster by themselves — `apply_job_action` does that. Cancel is the phone interrupt for a live cook — tap the job-thread card, not HOST Off.
+Custom ids stay `discord-os:job:<verb>:<run_id>`. Verbs are approve / always / deny / cancel / retry / continue / dismiss (ack alias). They never toggle HOST power and they never dispatch Puppetmaster by themselves — `apply_job_action` does that. Cancel is the phone interrupt for a live cook — tap the job-thread card, not HOST Off. **Dismiss** acks a failed Need (marks cancelled / clears attention) so HOST briefing ranks Last.
 
 Parked Allow expires after `DISCORD_OS_APPROVAL_TIMEOUT_MINUTES` (default 20) with spoken `Expired. Write was not started.`
 
@@ -42,7 +44,7 @@ Do not hardcode `actions="parked"` / `"running"` / `"idle"` / `"done"` at park, 
 - Discord Activities. The v2 card is the console. Presence `working_presence` is a status line, not an Activity app.
 - A full client UI, a dashboard rewrite of the card, or a React/web component that mirrors buttons.
 - Per-token re-layout, inner-scroll APIs Discord does not have, or a generic reactive widget kit.
-- New verbs. Allow / Always / Deny / Continue / Cancel / Retry are the set.
+- New verbs beyond Allow / Always / Deny / Continue / Cancel / Retry / **Dismiss**.
 - Voice join + TTS — see [../host/voice.md](../host/voice.md) (P2.13 spike; out of scope for cards).
 
 ## Code

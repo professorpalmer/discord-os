@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Discord-half P0.1 — Dismiss / Ack failed Need
+
+- Failed job cards show **Dismiss** (Continue still available; Retry when no
+  session thread). `apply_job_action("dismiss"|"ack")` marks task+run
+  `cancelled` (summary `dismissed`), clears GitHub attention Need, and
+  briefing ranks **Last** instead of **Need**.
+- HOST Jobs select → failed card → Dismiss; cheap HOST panel Jobs refresh
+  after dismiss when the panel message id is known.
+- Docs: [jobs](docs/jobs/README.md), [host](docs/host/README.md),
+  [reactive](docs/cards/reactive.md). Tests: `test_dismiss_failed_need.py`.
+- No version bump in this change — ship cadence / parent pack cuts the tag.
+
 ## 0.5.49
 
 Round-4 complete — reliability haul from 0.5.43 through 0.5.49 (P0–P2).

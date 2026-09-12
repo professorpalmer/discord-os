@@ -369,6 +369,17 @@ def job_action_row(run_id: str, *, actions: str = "parked") -> dict[str, Any]:
         ]
     elif mode == "idle":
         items = [button("Continue", job_custom_id("continue", rid), style=STYLE_PRIMARY)]
+    elif mode == "failed":
+        items = [
+            button("Continue", job_custom_id("continue", rid), style=STYLE_PRIMARY),
+            button("Dismiss", job_custom_id("dismiss", rid), style=STYLE_SECONDARY),
+        ]
+    elif mode == "failed_done":
+        items = [
+            button("Continue", job_custom_id("continue", rid), style=STYLE_PRIMARY),
+            button("Retry", job_custom_id("retry", rid), style=STYLE_SECONDARY),
+            button("Dismiss", job_custom_id("dismiss", rid), style=STYLE_SECONDARY),
+        ]
     elif mode == "plan":
         # P2.8 plan Approve / Cancel — no Always (write-gate only)
         items = [

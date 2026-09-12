@@ -1340,7 +1340,7 @@ class AgentOrchestrator:
         *,
         prompt: str = "",
     ) -> dict[str, Any]:
-        """Allow / Always allow / Deny / cancel / retry / Continue. Best-effort."""
+        """Allow / Always allow / Deny / cancel / retry / Continue / Dismiss. Best-effort."""
 
         verb = (action or "").strip().lower()
         run = self.store.get_run(run_id) or {}
@@ -1403,6 +1403,8 @@ class AgentOrchestrator:
             return self.expire_parked_run(run_id)
         if verb == "continue":
             return self._continue_idle_run(run_id, prompt=prompt)
+        if verb in {"dismiss", "ack"}:
+            return self._dismiss_failed_need(run_id)
         return {"action": verb, "run_id": run_id, "status": "ignored"}
 
     def _approve_parked_run(self, run_id: str) -> dict[str, Any]:
@@ -1563,6 +1565,90 @@ class AgentOrchestrator:
             "run_id": run_id,
             "status": TaskStatus.FAILED.value,
             "summary": spoken,
+        }
+
+    def _dismiss_failed_need(self, run_id: str) -> dict[str, Any]:
+        """Ack a failed Need: mark cancelled so briefing ranks Last, not Need."""
+
+        rid = (run_id or "").strip()
+        run = self.store.get_run(rid) or {}
+        if not run:
+            return {"action": "dismiss", "run_id": rid, "status": "missing"}
+        status = str(run.get("status") or "").strip().lower()
+        task_id = str(run.get("task_id") or "")
+        attention = ""
+        reader = getattr(self.store, "task_metadata", None)
+        if callable(reader) and task_id:
+            try:
+                meta = reader(task_id) or {}
+                github = meta.get("github") if isinstance(meta, dict) else None
+                if isinstance(github, dict):
+                    attention = str(github.get("attention") or "").strip().lower()
+            except Exception:
+                attention = ""
+        if status != "failed" and attention != "need":
+            return {
+                "action": "dismiss",
+                "run_id": rid,
+                "status": "ignored",
+                "summary": "Only failed Needs can be dismissed.",
+            }
+        if status == "failed":
+            try:
+                self.store.update_run(
+                    rid,
+                    status=TaskStatus.CANCELLED,
+                    summary="dismissed",
+                    error="dismissed",
+                )
+            except Exception:
+                pass
+            self._run_status[rid] = TaskStatus.CANCELLED
+        clearer = getattr(self.store, "set_job_github_attention", None)
+        if callable(clearer) and task_id:
+            try:
+                clearer(task_id, "")
+            except Exception:
+                pass
+        # Best-effort: repaint the job card as Cancelled / Last.
+        try:
+            task = self.store.get_task(task_id) if task_id else None
+            thread_id = ""
+            if isinstance(task, dict):
+                thread_id = str(task.get("thread_id") or "").strip()
+            if self.post_progress_to_discord and self.discord is not None:
+                card = reactive_receipt_card(
+                    RunReceipt(
+                        task_id=task_id,
+                        run_id=rid,
+                        status=TaskStatus.CANCELLED if status == "failed" else TaskStatus.COMPLETED,
+                        summary="dismissed",
+                        error="dismissed" if status == "failed" else None,
+                    ),
+                    has_thread=bool(thread_id),
+                )
+                meta = {}
+                if callable(reader) and task_id:
+                    try:
+                        meta = reader(task_id) or {}
+                    except Exception:
+                        meta = {}
+                if not isinstance(meta, dict):
+                    meta = {}
+                card_mid = str(meta.get("card_message_id") or "").strip()
+                channel_id = ""
+                if isinstance(task, dict):
+                    channel_id = str(task.get("channel_id") or "").strip()
+                dest = thread_id or channel_id
+                if card_mid and dest:
+                    edit_card(self.discord, dest, card_mid, card)
+        except Exception:
+            pass
+        return {
+            "action": "dismiss",
+            "run_id": rid,
+            "status": "cancelled" if status == "failed" else "cleared",
+            "summary": "dismissed",
         }
 
     def _continue_idle_run(self, run_id: str, *, prompt: str = "") -> dict[str, Any]:

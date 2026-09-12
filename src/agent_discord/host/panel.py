@@ -660,6 +660,13 @@ def handle_gateway_interaction(
                 on_job(job.action, job.run_id)
             except Exception:
                 pass
+        if job.action in {"dismiss", "ack"}:
+            try:
+                _refresh_host_jobs_panel(
+                    store, channel_id, token=token, opener=opener
+                )
+            except Exception:
+                pass
         return job.action
 
     if int(payload.get("type") or 0) == INTERACTION_MODAL_SUBMIT:
@@ -1193,7 +1200,47 @@ def _paint_after_ack(
     )
 
 
+def _refresh_host_jobs_panel(
+    store: Any,
+    channel_id: str,
+    *,
+    token: str,
+    opener: Any,
+) -> None:
+    """Cheap HOST Jobs repaint after dismiss so Need leaves the select."""
+
+    if not (token or "").strip():
+        return
+    reader = getattr(store, "get_host_control", None)
+    if not callable(reader):
+        return
+    try:
+        control = reader(channel_id) or {}
+    except Exception:
+        return
+    if not isinstance(control, dict):
+        return
+    message_id = str(control.get("card_message_id") or "").strip()
+    if not message_id:
+        return
+    armed = True
+    try:
+        armed = bool(control.get("armed", True))
+    except Exception:
+        armed = True
+    _paint_host_panel(
+        store,
+        channel_id,
+        token=token,
+        message_id=message_id,
+        armed=armed,
+        confirm_off=False,
+        opener=opener,
+    )
+
+
 def _paint_host_panel(
+
     store: Any,
     channel_id: str,
     *,
@@ -1286,7 +1333,7 @@ def _publish_job_card(
         ),
         actions=paint.actions,
     )
-    if paint.actions == "idle":
+    if paint.actions in {"idle", "failed", "failed_done"}:
         try:
             from agent_discord.orchestration.service import set_preference_safe
         except Exception:

@@ -6,7 +6,7 @@ running, settle, and HOST Jobs reprint all go through
 stay one source of truth.
 
 Write-gate Allow / Always allow / Deny, plan Approve / Cancel, ask-gate
-parked rows, Cancel, and Jobs Continue live here. Discord Activities and a full client UI do not.
+parked rows, Cancel, Jobs Continue, and failed Need Dismiss live here. Discord Activities and a full client UI do not.
 """
 
 from __future__ import annotations
@@ -33,6 +33,8 @@ ACTIONS_PLAN = "plan"
 ACTIONS_RUNNING = "running"
 ACTIONS_IDLE = "idle"
 ACTIONS_DONE = "done"
+ACTIONS_FAILED = "failed"
+ACTIONS_FAILED_DONE = "failed_done"
 
 # Labels the write-gate and Continue rows must keep. Styles stay in cards.py.
 PARKED_BUTTONS = ("Allow", "Always allow", "Deny")
@@ -40,6 +42,8 @@ PLAN_BUTTONS = ("Approve", "Cancel")
 RUNNING_BUTTONS = ("Cancel",)
 IDLE_BUTTONS = ("Continue",)
 DONE_BUTTONS = ("Continue", "Retry")
+FAILED_BUTTONS = ("Continue", "Dismiss")
+FAILED_DONE_BUTTONS = ("Continue", "Retry", "Dismiss")
 
 _STAGE_CHROME: dict[TaskStatus, tuple[str, int]] = {
     TaskStatus.COMPLETED: ("Done", COLOR_LIVE),
@@ -73,7 +77,9 @@ def reactive_paint(
 
     - awaiting_plan → plan Approve / Cancel (P2.8; not write-gate Always)
     - pending (or explicit awaiting_approval) → parked Allow / Always / Deny
-    - completed / failed / cancelled with a thread → idle Continue
+    - failed with a thread → Continue + Dismiss (ack failed Need)
+    - failed without a thread → Continue + Retry + Dismiss
+    - completed / cancelled with a thread → idle Continue
     - running → Cancel
     - otherwise → done Continue + Retry (receipt chrome)
     """
@@ -91,6 +97,11 @@ def reactive_paint(
             accent=COLOR_WORK,
             stage="Allow write",
         )
+    if state is TaskStatus.FAILED:
+        stage, accent = _STAGE_CHROME[TaskStatus.FAILED]
+        if has_thread:
+            return ReactivePaint(actions=ACTIONS_FAILED, accent=accent, stage=stage)
+        return ReactivePaint(actions=ACTIONS_FAILED_DONE, accent=accent, stage=stage)
     if state is not None and is_idle_job({"status": state.value}) and has_thread:
         stage, accent = _STAGE_CHROME[state]
         return ReactivePaint(actions=ACTIONS_IDLE, accent=accent, stage=stage)
@@ -194,6 +205,10 @@ def action_labels(actions: str) -> tuple[str, ...]:
         return IDLE_BUTTONS
     if mode == ACTIONS_DONE:
         return DONE_BUTTONS
+    if mode == ACTIONS_FAILED:
+        return FAILED_BUTTONS
+    if mode == ACTIONS_FAILED_DONE:
+        return FAILED_DONE_BUTTONS
     if mode == ACTIONS_PLAN:
         return PLAN_BUTTONS
     return PARKED_BUTTONS
