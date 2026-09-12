@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.34
 
 P1.5 Operator bootstrap harden (REQUIRE_ALLOWLIST-style).
 
@@ -8,7 +8,7 @@ P1.5 Operator bootstrap harden (REQUIRE_ALLOWLIST-style).
 - Default remains off (single-user Mac UX: first On / first armed human may seed owner).
 - Intentional bootstrap kept: HOST **Pair**, `discord-os pair`, `DISCORD_OWNER_ID` / `DISCORD_OPERATOR_ROLE_IDS`.
 - Doctor **FAIL**s when require is on and operators are empty.
-- Docs: [docs/host/README.md](docs/host/README.md). No version bump.
+- Docs: [docs/host/README.md](docs/host/README.md).
 
 
 ## 0.5.33
