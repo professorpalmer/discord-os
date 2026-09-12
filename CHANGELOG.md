@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+P0.1 SSH cook-or-Deny (honesty). Fail closed.
+
+- Cook that resolves to `kind=ssh` spoken Denies (`routing only / Deny until remote cook`) — no silent local cook on the control-plane Mac.
+- `kind=local` / path hosts may still supply a local cwd. Empty allowlist single-host unchanged.
+- Doctor **WARN**s ssh hosts with that status; `host_runner_argv` kept as Path A building block (credentials never in argv).
+- Docs: [docs/host/README.md](docs/host/README.md).
+
 ## 0.5.29
 
 Voice channel join + TTS spike (P2.13). Thin. Fail closed.

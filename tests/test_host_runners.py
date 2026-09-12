@@ -11,8 +11,10 @@ from agent_discord.host.doctor import run_doctor
 from agent_discord.host.install import SERVICE_LABEL
 from agent_discord.host.power import is_power_command, parse_power_command
 from agent_discord.host.runners import (
+    SSH_COOK_STATUS,
     HostAllowlistError,
     RemoteHost,
+    assert_host_cook_allowed,
     bind_channel_host,
     get_host,
     host_runner_argv,
@@ -22,6 +24,7 @@ from agent_discord.host.runners import (
     power_stays_local,
     resolve_channel_host,
     spoken_host_deny,
+    spoken_ssh_cook_deny,
     validate_host_allowlist,
 )
 from agent_discord.persistence.sqlite import SQLiteStore
@@ -212,6 +215,9 @@ def test_validate_and_doctor_allowlist(tmp_path: Path, monkeypatch) -> None:
     )
     code, lines = run_doctor(workspace=ws, plist_path=plist, home=home)
     assert any("host allowlist 1: lab" in line for line in lines), lines
+    assert any(
+        "WARN host ssh lab:" in line and SSH_COOK_STATUS in line for line in lines
+    ), lines
 
     monkeypatch.setenv(
         "DISCORD_OS_HOSTS",
@@ -239,4 +245,74 @@ def test_bind_unknown_host_raises(tmp_path: Path) -> None:
             host_id="nope",
             allowlist=(),
         )
+    store.close()
+
+
+def test_ssh_cook_denied_local_path_allowed(tmp_path: Path) -> None:
+    """P0.1: ssh bind must not cook locally; local/path still may."""
+
+    ssh = RemoteHost(id="lab", label="Lab", kind="ssh", target="cary@lab.local")
+    with pytest.raises(HostAllowlistError) as exc:
+        assert_host_cook_allowed(ssh)
+    spoken = str(exc.value.spoken)
+    assert spoken.startswith("Denied.")
+    assert "lab" in spoken
+    assert SSH_COOK_STATUS in spoken
+    assert SSH_COOK_STATUS in spoken_ssh_cook_deny("lab")
+
+    # Empty / None: single-host unchanged.
+    assert_host_cook_allowed(None)
+
+    local = RemoteHost(
+        id="nas",
+        label="NAS",
+        kind="local",
+        target=str(tmp_path),
+    )
+    assert_host_cook_allowed(local)  # no raise
+
+    # host_runner_argv still builds mockable remote path (Path A building block).
+    argv = host_runner_argv(ssh, ["puppetmaster", "cursor", "status"])
+    assert argv[:3] == ["ssh", "-o", "BatchMode=yes"]
+    joined = " ".join(argv)
+    assert "ghp_" not in joined
+    assert "token=" not in joined
+
+
+def test_ssh_bound_channel_cook_gate(tmp_path: Path) -> None:
+    """resolve + assert: bound ssh channel fails closed before local cook."""
+
+    allow = (
+        RemoteHost(id="lab", label="Lab", kind="ssh", target="cary@lab.local"),
+        RemoteHost(id="nas", label="NAS", kind="local", target=str(tmp_path)),
+    )
+    store = SQLiteStore(tmp_path / "cook.sqlite3")
+    store.initialize()
+    bind_channel_host(
+        store,
+        workspace_id="ws",
+        channel_id="ch-ssh",
+        host_id="lab",
+        allowlist=allow,
+    )
+    host = resolve_channel_host(
+        store, "ch-ssh", workspace_id="ws", allowlist=allow
+    )
+    assert host is not None and host.kind == "ssh"
+    with pytest.raises(HostAllowlistError) as exc:
+        assert_host_cook_allowed(host)
+    assert SSH_COOK_STATUS in str(exc.value.spoken)
+
+    bind_channel_host(
+        store,
+        workspace_id="ws",
+        channel_id="ch-local",
+        host_id="nas",
+        allowlist=allow,
+    )
+    local = resolve_channel_host(
+        store, "ch-local", workspace_id="ws", allowlist=allow
+    )
+    assert local is not None and local.kind == "local"
+    assert_host_cook_allowed(local)
     store.close()

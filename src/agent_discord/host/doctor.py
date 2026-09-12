@@ -116,7 +116,11 @@ def run_doctor(
 def _check_host_allowlist(lines: list[str]) -> int:
     """Report allowlist status. Refuse unsafe configs (FAIL)."""
 
-    from agent_discord.host.runners import load_host_allowlist, validate_host_allowlist
+    from agent_discord.host.runners import (
+        SSH_COOK_STATUS,
+        load_host_allowlist,
+        validate_host_allowlist,
+    )
 
     hosts = load_host_allowlist()
     if not hosts:
@@ -129,6 +133,19 @@ def _check_host_allowlist(lines: list[str]) -> int:
     for problem in problems:
         lines.append(f"FAIL host allowlist: {problem}")
         fails += 1
+    ssh_ids = [host.id for host in hosts if (host.kind or "").strip().lower() == "ssh"]
+    if ssh_ids:
+        # Honesty: bind/route works; cook Denies until remote cook (Path A).
+        lines.append(
+            f"WARN host ssh {','.join(ssh_ids)}: {SSH_COOK_STATUS}"
+        )
+    local_ids = [
+        host.id for host in hosts if (host.kind or "").strip().lower() == "local"
+    ]
+    if local_ids:
+        lines.append(
+            f"OK host local {','.join(local_ids)}: cook may use path cwd on this Mac"
+        )
     return fails
 
 

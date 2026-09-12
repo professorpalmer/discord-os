@@ -625,6 +625,7 @@ class AgentOrchestrator:
         repos = self.host_repos if self.host_repos is not None else load_host_repos()
         from agent_discord.host.runners import (
             HostAllowlistError,
+            assert_host_cook_allowed,
             load_host_allowlist,
             resolve_channel_host,
         )
@@ -636,6 +637,8 @@ class AgentOrchestrator:
                 workspace_id=intake.workspace_id,
                 allowlist=load_host_allowlist(),
             )
+            # kind=ssh must not silently cook on the control-plane Mac.
+            assert_host_cook_allowed(remote_host)
         except HostAllowlistError as exc:
             receipt = self._close_without_worker(
                 intake,
@@ -653,7 +656,8 @@ class AgentOrchestrator:
             extra_meta["host_kind"] = remote_host.kind
             if remote_host.workdir:
                 extra_meta["host_workdir"] = remote_host.workdir
-            # Local path-root hosts may supply the run cwd; ssh stays a routing seam.
+            # Local path-root hosts may supply the run cwd. ssh never reaches
+            # here (assert_host_cook_allowed Denies until remote cook).
             if remote_host.kind == "local" and remote_host.target:
                 root = Path(remote_host.target).expanduser()
                 if root.is_dir():

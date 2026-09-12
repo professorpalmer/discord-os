@@ -2017,3 +2017,56 @@ def test_idle_session_two_sequential_followups_advance_thread_watermark(tmp_path
     assert store.get_listen_watermark("parent-ch")["last_message_id"] == "1174110260428800000"
     store.close()
 
+
+
+def test_ssh_host_cook_denies_without_local_worker(tmp_path: Path, monkeypatch):
+    """P0.1: bound kind=ssh must spoken-Deny; Fake backend must not run."""
+
+    import json
+
+    orch, store, fake_discord, backend = _orch(tmp_path)
+    monkeypatch.setenv(
+        "DISCORD_OS_HOSTS",
+        json.dumps([{"id": "lab", "label": "Lab", "ssh": "cary@lab.local"}]),
+    )
+    store.merge_binding_metadata("ws", "ch", {"host_id": "lab", "host_label": "Lab"})
+    receipt = orch.run_task(
+        TaskIntake(
+            text="review invoices",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="inbound-ssh-deny",
+        )
+    )
+    assert backend.last_request is None
+    assert "Denied" in receipt.summary
+    assert "routing only" in receipt.summary or "Deny until remote cook" in receipt.summary
+    assert "lab" in receipt.summary
+
+
+def test_local_path_host_still_cooks(tmp_path: Path, monkeypatch):
+    """P0.1: kind=local / path host still reaches the worker."""
+
+    import json
+
+    root = tmp_path / "nas"
+    root.mkdir()
+    orch, store, fake_discord, backend = _orch(tmp_path)
+    monkeypatch.setenv(
+        "DISCORD_OS_HOSTS",
+        json.dumps([{"id": "nas", "label": "NAS", "path": str(root)}]),
+    )
+    store.merge_binding_metadata("ws", "ch", {"host_id": "nas", "host_label": "NAS"})
+    receipt = orch.run_task(
+        TaskIntake(
+            text="review invoices",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="inbound-local-host",
+        )
+    )
+    assert backend.last_request is not None
+    assert receipt.status == TaskStatus.COMPLETED
+    assert "Denied" not in (receipt.summary or "")
+    assert backend.last_request.metadata.get("host_id") == "nas"
+    assert backend.last_request.metadata.get("host_kind") == "local"

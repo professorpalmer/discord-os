@@ -10,6 +10,8 @@ Security posture first. Multi-host is an **explicit allowlist** seam — never a
 |---|---|
 | Empty `DISCORD_OS_HOSTS` | Current single-host behavior only (this Mac is the computer). |
 | Unknown host id | **Fail closed** — spoken `Denied. Host '…' is not allowlisted.` No silent local fallback. |
+| `kind=ssh` cook | **Fail closed** — spoken Deny (`routing only / Deny until remote cook`). Bind still works; cook does **not** silently run on the control-plane Mac. |
+| `kind=local` / path | May supply a local cwd on this Mac (documented; not a remote runner). |
 | On / Off / status | Always local on the control-plane Mac. Power never routes remotely. |
 | Credentials | Never in argv. SSH uses agent / `~/.ssh/config` only (`BatchMode=yes`). |
 
@@ -21,9 +23,9 @@ DISCORD_OS_HOSTS=[{"id":"lab","label":"Lab Mac","ssh":"cary@lab.local","channels
 DISCORD_OS_HOSTS=lab:ssh:cary@lab.local,nas:path:/Volumes/work
 ```
 
-Bind a channel: `bind host lab` (or `/bind host lab`). Doctor reports allowlist status and **FAIL**s unsafe entries (duplicate ids, empty target, ssh targets that look like flag/password soup).
+Bind a channel: `bind host lab` (or `/bind host lab`). Doctor reports allowlist status, **WARN**s ssh hosts as `routing only / Deny until remote cook`, and **FAIL**s unsafe entries (duplicate ids, empty target, ssh targets that look like flag/password soup).
 
-This commit is the allowlist + routing seam. A later daemon can plug into `host_runner_argv` — full SSH fleet productization is out of scope here.
+**Honesty (P0.1).** `DISCORD_OS_HOSTS` + `bind host` for `kind=ssh` is a routing seam only today. Cook that would target an ssh host is spoken Deny — never a silent local cook on this Mac. `host_runner_argv` (ssh `BatchMode=yes`, no credentials in argv) is the building block for real remote cook; that Path A is not wired yet. Do not treat an ssh bind as “work happens on the lab.”
 
 
 `discord-os setup` / `host start` detaches it and posts the HOST card: On, Off, Ask, a More menu (Pair / Halt / Gate / Roles / GitHub / Files here or on host / Terminal on host / Browser here or on host), and Jobs. Dest is a noun: **here** stays in Discord (the tapping client — phone or desktop — opens the link or reads the listing). **host** opens a GUI on the listen machine. Discord does not send which client tapped; presence `client_status` is not a dest. The job line and select are a deterministic briefing over SQLite: parked / failed first, then waiting-on-CI, then live, then last Done. Not a second board. Message intake is REST. A Gateway is open **only** so those controls work. Do not run a second bot process on the same token. Discord has no tabs — the More select is the grouping.
