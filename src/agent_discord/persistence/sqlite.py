@@ -973,6 +973,17 @@ class SQLiteStore:
         ).fetchone()
         return str(row["run_id"] or "") if row else ""
 
+    def list_runs_for_task(self, task_id: str) -> list[dict[str, Any]]:
+        rows = self._connection().execute(
+            """
+            SELECT * FROM runs
+            WHERE task_id=?
+            ORDER BY created_at DESC, run_id DESC
+            """,
+            (task_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def bind_job_pull_request(
         self,
         task_id: str,

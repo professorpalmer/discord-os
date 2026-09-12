@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Discord-half P1 (5–9) — chrome, File, dos: router, ACK-first, ephemeral menus
+
+- **Accent + Section by job state**: job cards and HOST Jobs chrome use Need /
+  Live / Done Section layout + matching `accent_color` (Waiting ranks Live).
+- **File on settle/fail**: size-capped Components V2 File for last log/diff when
+  present (`error.log` fallback on fail).
+- **Persistent `dos:<verb>:<jobCode>:<nonce>` router**: restart-safe job buttons
+  (legacy `discord-os:job:` still parses). Resolve via SQLite job_code + nonce.
+- **ACK-first then edit-in-place**: panel / Jobs / gates defer (type 6) then
+  edit; ephemeral Confirm paths repaint HOST by `card_message_id`.
+- **Ephemeral operator menus**: Pair / Gate Confirm-Cancel menus; Roles keeps
+  modal (feasible). Docs: [reactive](docs/cards/reactive.md),
+  [host](docs/host/README.md), [jobs](docs/jobs/README.md).
+  Tests: `test_discord_half_p1.py`.
+- No version bump — parent pack cuts 0.5.51.
+
 ## 0.5.50
 
 Discord-half P0 pack — Dismiss, thread bind, panel refresh, clear-needs.

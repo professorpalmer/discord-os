@@ -26,7 +26,15 @@ from agent_discord.orchestration.cards import (
     receipt_card,
     working_card,
 )
-from agent_discord.orchestration.job_briefing import is_idle_job
+from agent_discord.orchestration.job_briefing import (
+    ACCENT_DONE,
+    ACCENT_LIVE,
+    ACCENT_NEED,
+    CHROME_DONE,
+    CHROME_LIVE,
+    CHROME_NEED,
+    is_idle_job,
+)
 
 ACTIONS_PARKED = "parked"
 ACTIONS_PLAN = "plan"
@@ -46,22 +54,23 @@ FAILED_BUTTONS = ("Continue", "Dismiss")
 FAILED_DONE_BUTTONS = ("Continue", "Retry", "Dismiss")
 
 _STAGE_CHROME: dict[TaskStatus, tuple[str, int]] = {
-    TaskStatus.COMPLETED: ("Done", COLOR_LIVE),
-    TaskStatus.FAILED: ("Failed", COLOR_FAIL),
+    TaskStatus.COMPLETED: ("Done", ACCENT_DONE),
+    TaskStatus.FAILED: ("Failed", ACCENT_NEED),
     TaskStatus.CANCELLED: ("Cancelled", COLOR_IDLE),
-    TaskStatus.RUNNING: ("Working", COLOR_WORK),
-    TaskStatus.PROGRESS: ("Working", COLOR_WORK),
-    TaskStatus.PENDING: ("Allow write", COLOR_WORK),
+    TaskStatus.RUNNING: ("Working", ACCENT_LIVE),
+    TaskStatus.PROGRESS: ("Working", ACCENT_LIVE),
+    TaskStatus.PENDING: ("Allow write", ACCENT_LIVE),
 }
 
 
 @dataclass(frozen=True)
 class ReactivePaint:
-    """One paint: button mode, accent, spoken stage."""
+    """One paint: button mode, accent, spoken stage, Need/Live/Done chrome."""
 
     actions: str
     accent: int
     stage: str
+    chrome: str = CHROME_LIVE
 
 
 def reactive_paint(
@@ -88,31 +97,42 @@ def reactive_paint(
     if awaiting_plan:
         return ReactivePaint(
             actions=ACTIONS_PLAN,
-            accent=COLOR_WORK,
+            accent=ACCENT_LIVE,
             stage="Approve plan",
+            chrome=CHROME_NEED,
         )
     if awaiting_approval or state is TaskStatus.PENDING:
         return ReactivePaint(
             actions=ACTIONS_PARKED,
-            accent=COLOR_WORK,
+            accent=ACCENT_LIVE,
             stage="Allow write",
+            chrome=CHROME_NEED,
         )
     if state is TaskStatus.FAILED:
         stage, accent = _STAGE_CHROME[TaskStatus.FAILED]
         if has_thread:
-            return ReactivePaint(actions=ACTIONS_FAILED, accent=accent, stage=stage)
-        return ReactivePaint(actions=ACTIONS_FAILED_DONE, accent=accent, stage=stage)
+            return ReactivePaint(
+                actions=ACTIONS_FAILED, accent=accent, stage=stage, chrome=CHROME_NEED
+            )
+        return ReactivePaint(
+            actions=ACTIONS_FAILED_DONE, accent=accent, stage=stage, chrome=CHROME_NEED
+        )
     if state is not None and is_idle_job({"status": state.value}) and has_thread:
         stage, accent = _STAGE_CHROME[state]
-        return ReactivePaint(actions=ACTIONS_IDLE, accent=accent, stage=stage)
+        chrome = CHROME_NEED if state is TaskStatus.FAILED else CHROME_DONE
+        return ReactivePaint(
+            actions=ACTIONS_IDLE, accent=accent, stage=stage, chrome=chrome
+        )
     if state is TaskStatus.RUNNING:
         return ReactivePaint(
             actions=ACTIONS_RUNNING,
-            accent=COLOR_WORK,
+            accent=ACCENT_LIVE,
             stage="Working",
+            chrome=CHROME_LIVE,
         )
     stage, accent = _STAGE_CHROME.get(state, ("Receipt", COLOR_IDLE))
-    return ReactivePaint(actions=ACTIONS_DONE, accent=accent, stage=stage)
+    chrome = CHROME_NEED if state is TaskStatus.FAILED else CHROME_DONE
+    return ReactivePaint(actions=ACTIONS_DONE, accent=accent, stage=stage, chrome=chrome)
 
 
 def reactive_for_job(job: Mapping[str, Any]) -> ReactivePaint:
@@ -147,6 +167,7 @@ def reactive_working_card(
         percent=percent,
         run_id=run_id,
         actions=paint.actions,
+        chrome=paint.chrome,
     )
 
 
@@ -170,6 +191,7 @@ def reactive_progress_card(
         actions=paint.actions,
         thinking=thinking,
         job_code=job_code,
+        chrome=paint.chrome,
     )
 
 
@@ -179,22 +201,44 @@ def reactive_receipt_card(
     has_thread: bool = False,
     thinking: str = "",
     max_progress: int = 5,
+    job_code: str = "",
 ) -> CardMessage:
     """Settle / deny / Done paint — idle Continue when a job thread exists."""
 
     paint = reactive_paint(receipt.status, has_thread=has_thread)
-    return receipt_card(
+    card = receipt_card(
         receipt,
         thinking=thinking,
         max_progress=max_progress,
         actions=paint.actions,
+        job_code=job_code,
+    )
+    # Align accent + chrome from the seam (Need/Live/Done).
+    return CardMessage(
+        kind=card.kind,
+        title=card.title,
+        description=card.description,
+        color=paint.accent,
+        fields=card.fields,
+        percent=card.percent,
+        file_name=card.file_name,
+        file_data=card.file_data,
+        link_url=card.link_url,
+        updated_ts=card.updated_ts,
+        avatar_url=card.avatar_url,
+        rows=card.rows,
+        thinking=card.thinking,
+        chrome=paint.chrome,
+        job_code=card.job_code,
     )
 
 
-def reactive_action_row(run_id: str, paint: ReactivePaint) -> dict[str, Any]:
+def reactive_action_row(
+    run_id: str, paint: ReactivePaint, *, job_code: str = ""
+) -> dict[str, Any]:
     """Same action row ``job_action_row`` would emit for ``paint.actions``."""
 
-    return job_action_row(run_id, actions=paint.actions)
+    return job_action_row(run_id, actions=paint.actions, job_code=job_code)
 
 
 def action_labels(actions: str) -> tuple[str, ...]:

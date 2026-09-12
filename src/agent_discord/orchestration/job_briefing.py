@@ -17,6 +17,16 @@ PREFIX_WAITING = "Waiting"
 PREFIX_LIVE = "Live"
 PREFIX_LAST = "Last"
 
+# Discord-half P1 chrome buckets (Need / Live / Done). Last ranks as Done chrome.
+CHROME_NEED = "Need"
+CHROME_LIVE = "Live"
+CHROME_DONE = "Done"
+
+# Accent colors shared with cards/reactive (duplicated ints — avoid import cycle).
+ACCENT_NEED = 0xDA373C  # fail red
+ACCENT_LIVE = 0xC27C0E  # work gold
+ACCENT_DONE = 0x248046  # live green
+
 DEFAULT_CONTINUE_PROMPT = "Continue from the last tip in this thread."
 
 
@@ -34,6 +44,26 @@ def briefing_prefix(job: Mapping[str, Any]) -> str:
     if status in {"running", "progress"}:
         return PREFIX_LIVE
     return PREFIX_LAST
+
+
+def chrome_bucket(job: Mapping[str, Any]) -> str:
+    """Need / Live / Done for accent + Section chrome (Waiting ranks Need-adjacent Live)."""
+
+    prefix = briefing_prefix(job)
+    if prefix == PREFIX_NEED:
+        return CHROME_NEED
+    if prefix in {PREFIX_LIVE, PREFIX_WAITING}:
+        return CHROME_LIVE
+    return CHROME_DONE
+
+
+def accent_for_chrome(bucket: str) -> int:
+    raw = (bucket or "").strip()
+    if raw == CHROME_NEED:
+        return ACCENT_NEED
+    if raw == CHROME_LIVE:
+        return ACCENT_LIVE
+    return ACCENT_DONE
 
 
 def briefing_line(job: Mapping[str, Any]) -> str:

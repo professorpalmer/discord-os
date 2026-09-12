@@ -64,9 +64,17 @@ STYLE_SUCCESS = 3
 STYLE_DANGER = 4
 INTERACTION_MESSAGE_COMPONENT = 3
 INTERACTION_MODAL_SUBMIT = 5
+CALLBACK_MESSAGE = 4
 CALLBACK_DEFERRED_UPDATE = 6
 CALLBACK_UPDATE_MESSAGE = 7
 CALLBACK_MODAL = 9
+FLAG_EPHEMERAL = 64
+PAIR_CONFIRM_ID = "discord-os:pair-confirm"
+PAIR_CANCEL_ID = "discord-os:pair-cancel"
+GATE_CONFIRM_ID = "discord-os:gate-confirm"
+GATE_CANCEL_ID = "discord-os:gate-cancel"
+ROLES_OPEN_ID = "discord-os:roles-open"
+ROLES_CANCEL_ID = "discord-os:roles-cancel"
 
 
 def host_panel_components(
@@ -255,6 +263,8 @@ def _more_select_options(
 
 
 def _job_select_options(jobs: list[dict[str, Any]] | tuple[dict[str, Any], ...]) -> list[dict[str, str]]:
+    from agent_discord.orchestration.job_briefing import chrome_bucket
+
     options: list[dict[str, str]] = []
     seen: set[str] = set()
     for job in jobs:
@@ -265,16 +275,21 @@ def _job_select_options(jobs: list[dict[str, Any]] | tuple[dict[str, Any], ...])
         label = str(job.get("intake_text") or job.get("summary") or run_id).replace("\n", " ")
         status = str(job.get("status") or "").strip()
         code = str(job.get("job_code") or "").strip()
+        bucket = chrome_bucket(job)
         if code:
-            label = f"{code} {label}".strip()
+            label = f"{bucket} · {code} {label}".strip()
+        else:
+            label = f"{bucket} · {label}".strip()
+        desc = " · ".join(part for part in (bucket, code, status) if part)
         options.append(
             {
                 "label": label[:80] or run_id[:80],
                 "value": run_id[:100],
-                "description": (f"{code} {status}".strip() if code else status)[:100],
+                "description": desc[:100],
             }
         )
     return options
+
 
 
 def ask_modal_payload() -> dict[str, Any]:
@@ -296,6 +311,83 @@ def roles_modal_payload() -> dict[str, Any]:
         "Discord role id",
         "Snowflake role id",
         max_length=32,
+    )
+
+
+def _ephemeral_operator_menu(
+    *,
+    content: str,
+    confirm_id: str,
+    cancel_id: str,
+    confirm_label: str,
+    cancel_label: str = "Cancel",
+    confirm_style: int = STYLE_SUCCESS,
+) -> dict[str, Any]:
+    """ACK with an ephemeral Confirm/Cancel row (Pair / Gate operator menus)."""
+
+    return {
+        "type": CALLBACK_MESSAGE,
+        "data": {
+            "content": (content or "")[:2000],
+            "flags": FLAG_EPHEMERAL,
+            "components": [
+                {
+                    "type": COMPONENT_ROW,
+                    "components": [
+                        {
+                            "type": BUTTON,
+                            "style": int(confirm_style),
+                            "custom_id": confirm_id,
+                            "label": (confirm_label or "Confirm")[:80],
+                        },
+                        {
+                            "type": BUTTON,
+                            "style": STYLE_SECONDARY,
+                            "custom_id": cancel_id,
+                            "label": (cancel_label or "Cancel")[:80],
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+
+
+def pair_menu_payload() -> dict[str, Any]:
+    return _ephemeral_operator_menu(
+        content="Pair this Discord user as the Discord OS owner?",
+        confirm_id=PAIR_CONFIRM_ID,
+        cancel_id=PAIR_CANCEL_ID,
+        confirm_label="Pair",
+        confirm_style=STYLE_SUCCESS,
+    )
+
+
+def gate_menu_payload(*, write_gate: bool) -> dict[str, Any]:
+    if write_gate:
+        content = "Writes are gated (Approve required). Switch to Auto writes?"
+        label = "Auto writes"
+    else:
+        content = "Writes are automatic. Switch to Gate writes (Require Approve)?"
+        label = "Gate writes"
+    return _ephemeral_operator_menu(
+        content=content,
+        confirm_id=GATE_CONFIRM_ID,
+        cancel_id=GATE_CANCEL_ID,
+        confirm_label=label,
+        confirm_style=STYLE_PRIMARY,
+    )
+
+
+def roles_menu_payload() -> dict[str, Any]:
+    """Ephemeral Roles entry — Confirm opens the role-id modal on next tap path."""
+
+    return _ephemeral_operator_menu(
+        content="Add an operator role id? Confirm opens the role form.",
+        confirm_id=ROLES_OPEN_ID,
+        cancel_id=ROLES_CANCEL_ID,
+        confirm_label="Add role",
+        confirm_style=STYLE_PRIMARY,
     )
 
 
@@ -465,6 +557,40 @@ def host_panel_payload(
         bank=bank,
         github=_panel_github(),
     )
+    # Discord-half P1: HOST Jobs chrome accent follows top Need/Live/Done bucket.
+    if (
+        jobs
+        and not confirm_off
+        and int(confirm_clear_needs or 0) <= 0
+        and not halted
+    ):
+        try:
+            from agent_discord.orchestration.cards import CardMessage
+            from agent_discord.orchestration.job_briefing import (
+                accent_for_chrome,
+                chrome_bucket,
+            )
+
+            bucket = chrome_bucket(jobs[0])
+            card = CardMessage(
+                kind=card.kind,
+                title=card.title,
+                description=card.description,
+                color=accent_for_chrome(bucket),
+                fields=card.fields,
+                percent=card.percent,
+                file_name=card.file_name,
+                file_data=card.file_data,
+                link_url=card.link_url,
+                updated_ts=card.updated_ts,
+                avatar_url=card.avatar_url,
+                rows=card.rows,
+                thinking=card.thinking,
+                chrome=bucket,
+                job_code=card.job_code,
+            )
+        except Exception:
+            pass
     return card.v2_payload(
         rows=host_panel_components(
             armed,
@@ -495,6 +621,18 @@ def panel_action_from_custom_id(custom_id: str) -> Optional[str]:
         return None
     if raw == PAIR_ID:
         return "pair"
+    if raw == PAIR_CONFIRM_ID:
+        return "pair-confirm"
+    if raw == PAIR_CANCEL_ID:
+        return "pair-cancel"
+    if raw == GATE_CONFIRM_ID:
+        return "gate-confirm"
+    if raw == GATE_CANCEL_ID:
+        return "gate-cancel"
+    if raw == ROLES_OPEN_ID:
+        return "roles"
+    if raw == ROLES_CANCEL_ID:
+        return "roles-cancel"
     if raw == HALT_ID:
         return "halt"
     if raw == CLEAR_NEEDS_ID:
@@ -702,8 +840,11 @@ def handle_gateway_interaction(
             except Exception:
                 pass
         return "ask"
+    from agent_discord.host.actions import resolve_job_run_id
+
     job = job_action_from_custom_id(custom_id)
     if job is not None:
+        # Discord-half P1: ACK-first (defer), then edit-in-place / apply.
         interaction_id, ix_token = interaction_ids(payload)
         if interaction_id and ix_token:
             try:
@@ -717,9 +858,10 @@ def handle_gateway_interaction(
                 )
             except Exception:
                 pass
+        rid = resolve_job_run_id(store, job) or job.run_id
         if callable(on_job):
             try:
-                on_job(job.action, job.run_id)
+                on_job(job.action, rid)
             except Exception:
                 pass
         if job.action in JOBS_PANEL_RANK_ACTIONS:
@@ -751,7 +893,124 @@ def handle_gateway_interaction(
         _ack_interaction(payload, ask_modal_payload(), opener=opener)
         return action
     if action == "roles":
+        # Feasible path: modal is the operator form (ephemeral menu Confirm → modal).
         _ack_interaction(payload, roles_modal_payload(), opener=opener)
+        return action
+    if action == "pair":
+        _ack_interaction(payload, pair_menu_payload(), opener=opener)
+        return action
+    if action == "pair-cancel":
+        _ack_interaction(
+            payload,
+            {
+                "type": CALLBACK_MESSAGE,
+                "data": {"content": "Pair cancelled.", "flags": FLAG_EPHEMERAL},
+            },
+            opener=opener,
+        )
+        return action
+    if action == "gate":
+        from agent_discord.orchestration.service import writes_need_approval
+
+        gated = False
+        try:
+            gated = bool(writes_need_approval(store))
+        except Exception:
+            gated = False
+        _ack_interaction(payload, gate_menu_payload(write_gate=gated), opener=opener)
+        return action
+    if action == "gate-cancel":
+        _ack_interaction(
+            payload,
+            {
+                "type": CALLBACK_MESSAGE,
+                "data": {"content": "Gate change cancelled.", "flags": FLAG_EPHEMERAL},
+            },
+            opener=opener,
+        )
+        return action
+    if action == "roles-cancel":
+        _ack_interaction(
+            payload,
+            {
+                "type": CALLBACK_MESSAGE,
+                "data": {"content": "Roles cancelled.", "flags": FLAG_EPHEMERAL},
+            },
+            opener=opener,
+        )
+        return action
+    if action in {"pair-confirm", "gate-confirm"}:
+        # Ephemeral Confirm: ACK the ephemeral, then edit HOST panel in place
+        # via card_message_id (do not edit_original — that would paint the ephemeral).
+        from agent_discord.orchestration.service import (
+            author_may_operate,
+            seed_owner_if_empty,
+            toggle_write_gate,
+        )
+
+        user_id = interaction_user_id(payload)
+        role_ids = interaction_role_ids(payload)
+        if action == "pair-confirm":
+            seeded = seed_owner_if_empty(store, user_id, intentional=True)
+            print(
+                f"panel pair-confirm user={user_id or '-'} seeded={int(bool(seeded))}",
+                flush=True,
+            )
+            _ack_interaction(
+                payload,
+                {
+                    "type": CALLBACK_MESSAGE,
+                    "data": {
+                        "content": "Paired." if seeded else "Already paired.",
+                        "flags": FLAG_EPHEMERAL,
+                    },
+                },
+                opener=opener,
+            )
+        else:
+            if not author_may_operate(store, user_id, "gate", role_ids=role_ids):
+                _ack_interaction(
+                    payload,
+                    {
+                        "type": CALLBACK_MESSAGE,
+                        "data": {
+                            "content": "Denied.",
+                            "flags": FLAG_EPHEMERAL,
+                        },
+                    },
+                    opener=opener,
+                )
+                return "denied"
+            toggle_write_gate(store)
+            _ack_interaction(
+                payload,
+                {
+                    "type": CALLBACK_MESSAGE,
+                    "data": {
+                        "content": "Write gate updated.",
+                        "flags": FLAG_EPHEMERAL,
+                    },
+                },
+                opener=opener,
+            )
+        try:
+            _paint_host_panel(
+                store,
+                channel_id,
+                token=token,
+                message_id=_remember_panel_message(store, channel_id, payload)
+                or str(
+                    (getattr(store, "get_host_control", lambda _c: {})(channel_id) or {}).get(
+                        "card_message_id"
+                    )
+                    or ""
+                ),
+                armed=_channel_armed(store, channel_id),
+                confirm_off=False,
+                opener=opener,
+            )
+        except Exception as exc:
+            print(f"panel paint failed: {exc}", flush=True)
         return action
     intent = _open_intent_from_payload(payload)
     if (
@@ -772,14 +1031,7 @@ def handle_gateway_interaction(
 
     user_id = interaction_user_id(payload)
     role_ids = interaction_role_ids(payload)
-    if action == "pair":
-        # Intentional bootstrap — allowed even when REQUIRE_OPERATORS is on.
-        seeded = seed_owner_if_empty(store, user_id, intentional=True)
-        print(
-            f"panel {action} user={user_id or '-'} seeded={int(bool(seeded))}",
-            flush=True,
-        )
-    elif action == "on":
+    if action == "on":
         # Silent first-On seed only when require flag is off (default Mac UX).
         seeded = seed_owner_if_empty(store, user_id)
         print(
@@ -790,8 +1042,6 @@ def handle_gateway_interaction(
         return "denied"
     if action == "halt":
         toggle_spend_halted(store)
-    if action == "gate":
-        toggle_write_gate(store)
     if intent is not None:
         if _channel_armed(store, channel_id):
             _dispatch_open_intent(
@@ -1733,6 +1983,7 @@ def _publish_job_card(
     if line and line not in summary:
         summary = f"{line}\n{summary}"
     paint = reactive_for_job(job_row)
+    code = str(task.get("job_code") or "")
     card = receipt_card(
         RunReceipt(
             task_id=task_id,
@@ -1742,6 +1993,27 @@ def _publish_job_card(
             error=str(run.get("error") or "") or None,
         ),
         actions=paint.actions,
+        job_code=code,
+    )
+    # Align Section chrome + accent from the reactive seam.
+    from agent_discord.orchestration.cards import CardMessage
+
+    card = CardMessage(
+        kind=card.kind,
+        title=card.title,
+        description=card.description,
+        color=paint.accent,
+        fields=card.fields,
+        percent=card.percent,
+        file_name=card.file_name,
+        file_data=card.file_data,
+        link_url=card.link_url,
+        updated_ts=card.updated_ts,
+        avatar_url=card.avatar_url,
+        rows=card.rows,
+        thinking=card.thinking,
+        chrome=paint.chrome,
+        job_code=code,
     )
     if paint.actions in {"idle", "failed", "failed_done"}:
         try:

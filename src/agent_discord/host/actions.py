@@ -84,17 +84,61 @@ class JobAction:
 
     action: str
     run_id: str
+    job_code: str = ""
+    nonce: str = ""
 
 
-def job_custom_id(action: str, run_id: str) -> str:
+# Persistent restart-safe router (miru/flare-shaped). Durable job_code + short nonce.
+DOS_ID_PREFIX = "dos:"
+_JOB_NONCE_LEN = 8
+
+
+def job_nonce_for_run(run_id: str) -> str:
+    rid = (run_id or "").strip()
+    if not rid:
+        return ""
+    return rid[:_JOB_NONCE_LEN]
+
+
+def job_custom_id(
+    action: str,
+    run_id: str,
+    *,
+    job_code: str = "",
+    nonce: str = "",
+) -> str:
+    """Mint a job button id.
+
+    Prefer ``dos:<verb>:<jobCode>:<nonce>`` when a speakable job_code is known
+    (restart-safe via SQLite lookup). Fall back to legacy
+    ``discord-os:job:<verb>:<run_id>``.
+    """
+
     verb = (action or "").strip().lower()
+    code = (job_code or "").strip().upper()
+    rid = (run_id or "").strip()
+    if code and verb in JOB_VERBS:
+        token = (nonce or job_nonce_for_run(rid) or "x").strip()
+        raw = f"{DOS_ID_PREFIX}{verb}:{code}:{token}"
+        return raw[:CUSTOM_ID_MAX]
     prefix = f"{JOB_ID_PREFIX}{verb}:"
     budget = max(0, CUSTOM_ID_MAX - len(prefix))
-    return prefix + (run_id or "").strip()[:budget]
+    return prefix + rid[:budget]
 
 
 def job_action_from_custom_id(custom_id: str) -> Optional[JobAction]:
     raw = (custom_id or "").strip()
+    if raw.startswith(DOS_ID_PREFIX):
+        rest = raw[len(DOS_ID_PREFIX) :]
+        parts = rest.split(":")
+        if len(parts) < 3:
+            return None
+        verb = parts[0].strip().lower()
+        code = parts[1].strip().upper()
+        token = ":".join(parts[2:]).strip()
+        if verb not in JOB_VERBS or not code or not token:
+            return None
+        return JobAction(action=verb, run_id=token, job_code=code, nonce=token)
     if not raw.startswith(JOB_ID_PREFIX):
         return None
     rest = raw[len(JOB_ID_PREFIX) :]
@@ -105,6 +149,59 @@ def job_action_from_custom_id(custom_id: str) -> Optional[JobAction]:
     if not run_id:
         return None
     return JobAction(action=verb, run_id=run_id)
+
+
+def resolve_job_run_id(store: Any, action: JobAction) -> str:
+    """Map a parsed JobAction to a concrete run_id (restart-safe for dos:)."""
+
+    if action is None:
+        return ""
+    rid = (action.run_id or "").strip()
+    code = (action.job_code or "").strip()
+    if not code:
+        return rid
+    getter = getattr(store, "get_run", None)
+    if callable(getter) and rid:
+        try:
+            row = getter(rid)
+        except Exception:
+            row = None
+        if row:
+            return rid
+    task_getter = getattr(store, "get_task_by_job_code", None)
+    if not callable(task_getter):
+        return rid
+    try:
+        task = task_getter(code)
+    except Exception:
+        task = None
+    if not isinstance(task, dict):
+        return rid
+    task_id = str(task.get("task_id") or "").strip()
+    if not task_id:
+        return rid
+    # Prefer a run whose id starts with the nonce (truncated run_id).
+    nonce = (action.nonce or rid).strip()
+    lister = getattr(store, "list_runs_for_task", None)
+    if callable(lister) and nonce:
+        try:
+            for row in list(lister(task_id)) or []:
+                if not isinstance(row, dict):
+                    continue
+                cand = str(row.get("run_id") or "").strip()
+                if cand == nonce or cand.startswith(nonce):
+                    return cand
+        except Exception:
+            pass
+    latest = getattr(store, "latest_run_id_for_task", None)
+    if callable(latest):
+        try:
+            found = str(latest(task_id) or "").strip()
+            if found:
+                return found
+        except Exception:
+            pass
+    return rid
 
 
 def open_custom_id(surface: str, dest: str) -> str:

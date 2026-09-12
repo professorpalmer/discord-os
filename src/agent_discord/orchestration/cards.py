@@ -46,6 +46,7 @@ COLOR_LIVE = 0x248046
 COLOR_WORK = 0xC27C0E
 COLOR_FAIL = 0xDA373C
 COLOR_FILE = 0x5865F2
+SETTLE_FILE_MAX = 512 * 1024
 CODE_BODY_MAX = 1800
 THINKING_BODY_MAX = 1000
 V2_TEXT_BUDGET = 3900
@@ -82,11 +83,14 @@ class CardMessage:
     fields: tuple[tuple[str, str, bool], ...] = ()
     percent: Optional[float] = None
     file_name: str = ""
+    file_data: bytes = b""
     link_url: str = ""
     updated_ts: Optional[int] = None
     avatar_url: str = ""
     rows: tuple[dict[str, Any], ...] = ()
     thinking: str = ""
+    chrome: str = ""  # Need / Live / Done Section label
+    job_code: str = ""
 
     @property
     def text(self) -> str:
@@ -120,16 +124,32 @@ class CardMessage:
         *,
         rows: Optional[list[dict[str, Any]]] = None,
     ) -> list[dict[str, Any]]:
-        """One Container: heading, optional thinking fence, spoken body, file, buttons."""
+        """One Container: Section-by-state heading, thinking, body, file, buttons."""
 
         heading = f"### {self.title}"
-        if self.avatar_url:
-            children: list[dict[str, Any]] = [
-                section([heading], thumbnail(self.avatar_url))
-            ]
+        chrome = (self.chrome or "").strip()
+        code = (self.job_code or "").strip()
+        children: list[dict[str, Any]] = []
+        if self.kind in {"RECEIPT", "PROGRESS", "WORKING", "ASK", "TOOL"} or chrome:
+            # Discord-half P1: Section layout by Need / Live / Done.
+            label = chrome or self.title
+            lines = [f"### {label}"]
+            if code:
+                lines.append(f"`{code}` · {self.title}" if chrome else f"`{code}`")
+            elif chrome and self.title and self.title != chrome:
+                lines.append(self.title)
+            if self.avatar_url:
+                children.append(section(lines[:3], thumbnail(self.avatar_url)))
+            else:
+                chip = button(label[:80] or "Job", f"discord-os:chrome:{label[:40]}", style=STYLE_SECONDARY, disabled=True)
+                children.append(section(lines[:3], chip))
+            used = sum(len(x) for x in lines)
+        elif self.avatar_url:
+            children = [section([heading], thumbnail(self.avatar_url))]
+            used = len(heading)
         else:
             children = [text_display(heading)]
-        used = len(heading)
+            used = len(heading)
         if self.kind == "HOST":
             live = self.title == "Running"
             table = [
@@ -295,7 +315,10 @@ def progress_card(
     actions: str = "running",
     thinking: str = "",
     job_code: str = "",
+    chrome: str = "",
 ) -> CardMessage:
+    from agent_discord.orchestration.job_briefing import CHROME_LIVE
+
     title = _title_case(stage) or "Working"
     code = (job_code or "").strip()
     if code:
@@ -309,8 +332,11 @@ def progress_card(
         thinking=think,
         color=COLOR_WORK,
         percent=percent,
-        rows=_job_rows(run_id, actions),
+        rows=_job_rows(run_id, actions, job_code=code),
+        chrome=(chrome or CHROME_LIVE),
+        job_code=code,
     )
+
 
 
 def working_card(
@@ -320,15 +346,23 @@ def working_card(
     percent: Optional[float] = None,
     run_id: str = "",
     actions: str = "running",
+    job_code: str = "",
+    chrome: str = "",
 ) -> CardMessage:
+    from agent_discord.orchestration.job_briefing import CHROME_LIVE, CHROME_NEED
+
     title = _title_case(task_label) or "Working"
+    mode = (actions or "").strip().lower()
+    bucket = chrome or (CHROME_NEED if mode in {"parked", "plan"} else CHROME_LIVE)
     return CardMessage(
         kind="WORKING",
         title=title,
         description=redact_text_markers(message or ""),
         color=COLOR_WORK,
         percent=percent,
-        rows=_job_rows(run_id, actions),
+        rows=_job_rows(run_id, actions, job_code=job_code),
+        chrome=bucket,
+        job_code=(job_code or "").strip(),
     )
 
 
@@ -357,49 +391,50 @@ def diff_card(
     )
 
 
-def job_action_row(run_id: str, *, actions: str = "parked") -> dict[str, Any]:
+def job_action_row(run_id: str, *, actions: str = "parked", job_code: str = "") -> dict[str, Any]:
     rid = (run_id or "").strip()
+    code = (job_code or "").strip()
     mode = (actions or "parked").strip().lower()
     if mode == "running":
-        items = [button("Cancel", job_custom_id("cancel", rid), style=STYLE_DANGER)]
+        items = [button("Cancel", job_custom_id("cancel", rid, job_code=code), style=STYLE_DANGER)]
     elif mode == "done":
         items = [
-            button("Continue", job_custom_id("continue", rid), style=STYLE_PRIMARY),
-            button("Retry", job_custom_id("retry", rid), style=STYLE_SECONDARY),
+            button("Continue", job_custom_id("continue", rid, job_code=code), style=STYLE_PRIMARY),
+            button("Retry", job_custom_id("retry", rid, job_code=code), style=STYLE_SECONDARY),
         ]
     elif mode == "idle":
-        items = [button("Continue", job_custom_id("continue", rid), style=STYLE_PRIMARY)]
+        items = [button("Continue", job_custom_id("continue", rid, job_code=code), style=STYLE_PRIMARY)]
     elif mode == "failed":
         items = [
-            button("Continue", job_custom_id("continue", rid), style=STYLE_PRIMARY),
-            button("Dismiss", job_custom_id("dismiss", rid), style=STYLE_SECONDARY),
+            button("Continue", job_custom_id("continue", rid, job_code=code), style=STYLE_PRIMARY),
+            button("Dismiss", job_custom_id("dismiss", rid, job_code=code), style=STYLE_SECONDARY),
         ]
     elif mode == "failed_done":
         items = [
-            button("Continue", job_custom_id("continue", rid), style=STYLE_PRIMARY),
-            button("Retry", job_custom_id("retry", rid), style=STYLE_SECONDARY),
-            button("Dismiss", job_custom_id("dismiss", rid), style=STYLE_SECONDARY),
+            button("Continue", job_custom_id("continue", rid, job_code=code), style=STYLE_PRIMARY),
+            button("Retry", job_custom_id("retry", rid, job_code=code), style=STYLE_SECONDARY),
+            button("Dismiss", job_custom_id("dismiss", rid, job_code=code), style=STYLE_SECONDARY),
         ]
     elif mode == "plan":
         # P2.8 plan Approve / Cancel — no Always (write-gate only)
         items = [
-            button("Approve", job_custom_id("approve", rid), style=STYLE_SUCCESS),
-            button("Cancel", job_custom_id("cancel", rid), style=STYLE_DANGER),
+            button("Approve", job_custom_id("approve", rid, job_code=code), style=STYLE_SUCCESS),
+            button("Cancel", job_custom_id("cancel", rid, job_code=code), style=STYLE_DANGER),
         ]
     elif mode == "all":
         items = [
-            button("Allow", job_custom_id("approve", rid), style=STYLE_SUCCESS),
-            button("Always allow", job_custom_id("always", rid), style=STYLE_PRIMARY),
-            button("Deny", job_custom_id("deny", rid), style=STYLE_DANGER),
-            button("Cancel", job_custom_id("cancel", rid), style=STYLE_SECONDARY),
-            button("Retry", job_custom_id("retry", rid), style=STYLE_SECONDARY),
+            button("Allow", job_custom_id("approve", rid, job_code=code), style=STYLE_SUCCESS),
+            button("Always allow", job_custom_id("always", rid, job_code=code), style=STYLE_PRIMARY),
+            button("Deny", job_custom_id("deny", rid, job_code=code), style=STYLE_DANGER),
+            button("Cancel", job_custom_id("cancel", rid, job_code=code), style=STYLE_SECONDARY),
+            button("Retry", job_custom_id("retry", rid, job_code=code), style=STYLE_SECONDARY),
         ]
     else:
         # parked write-gate: DisCode-style Allow / Always allow / Deny
         items = [
-            button("Allow", job_custom_id("approve", rid), style=STYLE_SUCCESS),
-            button("Always allow", job_custom_id("always", rid), style=STYLE_PRIMARY),
-            button("Deny", job_custom_id("deny", rid), style=STYLE_DANGER),
+            button("Allow", job_custom_id("approve", rid, job_code=code), style=STYLE_SUCCESS),
+            button("Always allow", job_custom_id("always", rid, job_code=code), style=STYLE_PRIMARY),
+            button("Deny", job_custom_id("deny", rid, job_code=code), style=STYLE_DANGER),
         ]
     return action_row(items)
 
@@ -414,6 +449,7 @@ def receipt_card(
     max_progress: int = 5,
     thinking: str = "",
     actions: str = "done",
+    job_code: str = "",
 ) -> CardMessage:
     title, color = _RECEIPT_TITLES.get(receipt.status, ("Receipt", COLOR_IDLE))
     summary = str(strip_forbidden_keys({"summary": receipt.summary}).get("summary", ""))
@@ -449,6 +485,8 @@ def receipt_card(
     if receipt.error:
         fields.append(("Error", redact_text_markers(receipt.error)[:1024], False))
     _ = max_progress
+    fname, fbytes = settle_file_attachment(receipt)
+    chrome = _receipt_chrome(receipt.status)
     return CardMessage(
         kind="RECEIPT",
         title=title,
@@ -457,7 +495,15 @@ def receipt_card(
         color=color,
         fields=tuple(fields),
         link_url=jump,
-        rows=_job_rows(receipt.run_id, actions),
+        rows=_job_rows(
+            receipt.run_id,
+            actions,
+            job_code=(job_code or str(getattr(receipt, "job_code", "") or "")).strip(),
+        ),
+        file_name=fname,
+        file_data=fbytes,
+        chrome=chrome,
+        job_code=(job_code or str(getattr(receipt, "job_code", "") or "")).strip(),
     )
 
 
@@ -721,10 +767,36 @@ def send_card(
     components: Optional[list[dict[str, Any]]] = None,
 ) -> Any:
     """Post a card. Prefer Components v2; embed/text only on TypeError."""
+    payload = card.v2_payload(rows=components)
+    if card.file_name and card.file_data:
+        uploader = getattr(discord, "send_attachment", None)
+        if callable(uploader):
+            try:
+                return uploader(
+                    channel_id,
+                    card.file_name,
+                    card.file_data,
+                    content="",
+                    thread_id=thread_id,
+                    components=payload["components"],
+                    flags=payload["flags"],
+                )
+            except TypeError:
+                try:
+                    return uploader(
+                        channel_id,
+                        card.file_name,
+                        card.file_data,
+                        content="",
+                        thread_id=thread_id,
+                    )
+                except Exception:
+                    pass
+            except Exception:
+                pass
     poster = getattr(discord, "send_message", None)
     if not callable(poster):
         return None
-    payload = card.v2_payload(rows=components)
     try:
         return poster(
             channel_id,
@@ -798,10 +870,10 @@ def _title_case(stage: str) -> str:
     return raw[:1].upper() + raw[1:] if raw else ""
 
 
-def _job_rows(run_id: str, actions: str = "running") -> tuple[dict[str, Any], ...]:
+def _job_rows(run_id: str, actions: str = "running", job_code: str = "") -> tuple[dict[str, Any], ...]:
     if not (run_id or "").strip():
         return ()
-    return (job_action_row(run_id, actions=actions),)
+    return (job_action_row(run_id, actions=actions, job_code=job_code),)
 
 
 def _fence_language(language: str) -> str:
@@ -825,6 +897,68 @@ def _bounded_fence(language: str, source: str, *, max_chars: int = CODE_BODY_MAX
             return f"{block}\n{_TRUNCATION_NOTE}"
         return f"{block}\nTruncated to {cap} characters."
     return block
+
+
+def _receipt_chrome(status: TaskStatus | str | None) -> str:
+    from agent_discord.orchestration.job_briefing import (
+        CHROME_DONE,
+        CHROME_LIVE,
+        CHROME_NEED,
+    )
+
+    state = status.value if isinstance(status, TaskStatus) else str(status or "").strip().lower()
+    if state in {"failed", "pending"}:
+        return CHROME_NEED
+    if state in {"running", "progress"}:
+        return CHROME_LIVE
+    return CHROME_DONE
+
+
+def settle_file_attachment(receipt: RunReceipt) -> tuple[str, bytes]:
+    """Last log/diff on settle/fail when present — size-capped File component bytes."""
+
+    from pathlib import Path as _Path
+
+    status = receipt.status
+    if status not in {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}:
+        return "", b""
+    # Prefer on-disk diff/patch/log artifacts.
+    for art in reversed(tuple(receipt.artifacts or ())):
+        kind = str(getattr(art, "kind", "") or "").lower()
+        if kind not in {"diff", "patch", "log", "error"}:
+            continue
+        path = str(getattr(art, "path", "") or "").strip()
+        if path and _Path(path).is_file():
+            try:
+                data = _Path(path).read_bytes()[:SETTLE_FILE_MAX]
+            except OSError:
+                continue
+            if not data:
+                continue
+            name = str(getattr(art, "filename", "") or "") or f"{kind}.txt"
+            return _safe_attach_name(name), data
+    # Fallback: failed → error.log from error/summary; done → optional settle excerpt.
+    if status is TaskStatus.FAILED:
+        body = "\n".join(
+            part for part in (str(receipt.error or "").strip(), str(receipt.summary or "").strip()) if part
+        )
+        if body:
+            data = body.encode("utf-8")[:SETTLE_FILE_MAX]
+            return "error.log", data
+    if status is TaskStatus.COMPLETED:
+        # Prefer an explicit settle/diff-ish artifact filename already listed.
+        for art in reversed(tuple(receipt.artifacts or ())):
+            kind = str(getattr(art, "kind", "") or "").lower()
+            if kind in {"settle", "diff", "patch"}:
+                summary = str(receipt.summary or "").strip()
+                if summary:
+                    return _safe_attach_name(str(getattr(art, "filename", "") or f"{kind}.md")), summary.encode("utf-8")[:SETTLE_FILE_MAX]
+    return "", b""
+
+
+def _safe_attach_name(name: str) -> str:
+    base = (name or "attach.txt").replace('\\', "/").rsplit("/", 1)[-1].strip() or "attach.txt"
+    return base[:80]
 
 
 MappingLike = dict[str, Any]

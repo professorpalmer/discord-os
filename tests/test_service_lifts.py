@@ -11,7 +11,14 @@ from agent_discord.discord.facade import DiscordFacade
 from agent_discord.discord.providers.fake import FakeDiscordMCPProvider
 from agent_discord.discord.rest import fetch_attachment_bytes
 from agent_discord.discord.voice import materialize_voice_intake
-from agent_discord.host.panel import GATE_ID, HALT_ID, PAIR_ID, handle_gateway_interaction
+from agent_discord.host.panel import (
+    GATE_CONFIRM_ID,
+    GATE_ID,
+    HALT_ID,
+    PAIR_CONFIRM_ID,
+    PAIR_ID,
+    handle_gateway_interaction,
+)
 from agent_discord.orchestration.listen import drain_inbound
 from agent_discord.orchestration.orchestrator import AgentOrchestrator
 from agent_discord.orchestration.receipts import render_receipt
@@ -359,12 +366,25 @@ def test_pair_and_halt_buttons_parse(tmp_path: Path):
         opener=opener,
     )
     assert result == "pair"
+    assert not store.is_operator("owner-7")  # menu only until Confirm
+    assert captured[0]["body"]["type"] == 4
+    assert captured[0]["body"]["data"].get("flags") == 64
+    confirm = handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix-pair",
+            "token": "tok",
+            "application_id": "app-1",
+            "user": {"id": "owner-7"},
+            "data": {"custom_id": PAIR_CONFIRM_ID},
+            "message": {"id": "panel-1"},
+        },
+        opener=opener,
+    )
+    assert confirm == "pair-confirm"
     assert store.is_operator("owner-7")
-    assert captured[0]["body"]["type"] == 6
-    paint = captured[1]["body"]
-    blob = json.dumps(paint)
-    assert "paired" in blob
-    assert "webhooks/app-1/tok/messages/@original" in captured[1]["url"]
     halt = handle_gateway_interaction(
         store,
         "ch",
@@ -396,6 +416,22 @@ def test_pair_and_halt_buttons_parse(tmp_path: Path):
         opener=opener,
     )
     assert gate == "gate"
+    assert store.get_preference("_host", "write_gate") != "1"  # menu only
+    gate_ok = handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix3b",
+            "token": "tok",
+            "application_id": "app-1",
+            "user": {"id": "owner-7"},
+            "data": {"custom_id": GATE_CONFIRM_ID},
+            "message": {"id": "panel-1"},
+        },
+        opener=opener,
+    )
+    assert gate_ok == "gate-confirm"
     assert store.get_preference("_host", "write_gate") == "1"
     store.close()
 

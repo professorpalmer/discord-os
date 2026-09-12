@@ -254,7 +254,9 @@ def test_publish_job_card_idle_includes_continue(tmp_path: Path):
     )
     assert sent
     blob = str(sent[-1].get("body") or "")
-    assert "discord-os:job:continue:run-idle" in blob
+    assert ("discord-os:job:continue:run-idle" in blob) or (
+        "dos:continue:" in blob and "run-idle" in blob
+    )
     pending = store.get_preference("_host", "pending_continue:ch")
     assert pending == "run-idle"
     store.close()

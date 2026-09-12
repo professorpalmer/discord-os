@@ -82,13 +82,15 @@ def test_dispatch_persists_events_and_posts_receipt(tmp_path: Path):
     assert "receipt" in kinds
 
     assert fake_discord.sent
+    from agent_discord.discord.layout import iter_component_text
+
     assert any(
-        "### Done" in (item.get("content") or "")
+        "### Done" in text
+        or "Done" in text
         or "Done" in (m.content or "")
         for m in fake_discord.sent
-        for row in ((m.metadata or {}).get("components") or [])
-        for item in (row.get("components") or [row])
-    )
+        for text in iter_component_text((m.metadata or {}).get("components") or [])
+    ) or any("Done" in (m.content or "") for m in fake_discord.sent)
 
     rendered = render_receipt(receipt)
     assert "openrouter/auto" in rendered or "openrouter/auto" in rendered
