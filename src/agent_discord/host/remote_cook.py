@@ -57,6 +57,11 @@ from agent_discord.puppetmaster.backend import (
     usage_from_cli_meta,
 )
 from agent_discord.puppetmaster.models import AGENTIC_MODEL_PIN
+from agent_discord.puppetmaster.prompt_handoff import (
+    is_arg_max_oserror,
+    plan_ssh_agentic_handoff,
+    spoken_arg_max_denied,
+)
 
 # Doctor / spoken honesty once Path A is wired.
 SSH_COOK_CAPABLE = "cook via ssh BatchMode (remote agentic)"
@@ -129,6 +134,62 @@ def probe_ssh_host(
     return False, detail or f"exit {code}"
 
 
+def _remote_agentic_flags(
+    request: DispatchRequest,
+    *,
+    cli: str,
+    pin: ModelPin,
+    timeout_seconds: float,
+) -> list[str]:
+    """Flags after the remote agentic prompt (no secrets, no prompt, no cwd)."""
+
+    mode = str((request.metadata or {}).get("compute_mode") or "implement")
+    if mode not in {"implement", "analyze"}:
+        mode = "implement"
+    flags = [
+        "--provider",
+        "openrouter",
+        "--model",
+        pin.adapter_name or pin.canonical,
+        "--mode",
+        mode,
+        "--timeout-seconds",
+        str(int(timeout_seconds)),
+    ]
+    if mode == "implement":
+        flags.append("--allow-dirty")
+        flags.append("--allow-non-worktree")
+    else:
+        flags.extend(["--allow-non-worktree", "--disable-codegraph"])
+    return flags
+
+
+def build_remote_agentic_handoff(
+    request: DispatchRequest,
+    *,
+    cli: str = "puppetmaster",
+    pin: Optional[ModelPin] = None,
+    timeout_seconds: float = 3600.0,
+    remote_cwd: str = "",
+):
+    """Plan remote agentic argv with ARG_MAX-safe stdin handoff when needed."""
+
+    model = pin or AGENTIC_MODEL_PIN
+    prompt = _safe_dispatch_prompt(request)
+    flags = _remote_agentic_flags(
+        request, cli=cli, pin=model, timeout_seconds=timeout_seconds
+    )
+    cwd = (remote_cwd or "").strip()
+    if not cwd:
+        cwd = str((request.metadata or {}).get("host_workdir") or "").strip()
+    return plan_ssh_agentic_handoff(
+        cli=cli,
+        prompt=prompt,
+        flags=flags,
+        remote_cwd=cwd,
+    )
+
+
 def build_remote_agentic_argv(
     request: DispatchRequest,
     *,
@@ -137,37 +198,21 @@ def build_remote_agentic_argv(
     timeout_seconds: float = 3600.0,
     remote_cwd: str = "",
 ) -> list[str]:
-    """Remote argv for ``puppetmaster agentic`` (no secrets)."""
+    """Remote argv for ``puppetmaster agentic`` (no secrets).
 
-    model = pin or AGENTIC_MODEL_PIN
-    prompt = _safe_dispatch_prompt(request)
-    mode = str((request.metadata or {}).get("compute_mode") or "implement")
-    if mode not in {"implement", "analyze"}:
-        mode = "implement"
-    command = [
-        cli,
-        "agentic",
-        prompt,
-        "--provider",
-        "openrouter",
-        "--model",
-        model.adapter_name or model.canonical,
-        "--mode",
-        mode,
-        "--timeout-seconds",
-        str(int(timeout_seconds)),
-    ]
-    if mode == "implement":
-        command.append("--allow-dirty")
-        command.append("--allow-non-worktree")
-    else:
-        command.extend(["--allow-non-worktree", "--disable-codegraph"])
-    cwd = (remote_cwd or "").strip()
-    if not cwd:
-        cwd = str((request.metadata or {}).get("host_workdir") or "").strip()
-    if cwd:
-        command.extend(["--cwd", cwd])
-    return command
+    Oversized prompts switch to a short ``bash -lc`` stdin handoff script;
+    callers that need the prompt body must use ``build_remote_agentic_handoff``.
+    """
+
+    return list(
+        build_remote_agentic_handoff(
+            request,
+            cli=cli,
+            pin=pin,
+            timeout_seconds=timeout_seconds,
+            remote_cwd=remote_cwd,
+        ).argv
+    )
 
 
 def run_ssh_remote_cook(
@@ -205,14 +250,26 @@ def _default_exec(argv: list[str], *, timeout_seconds: float) -> subprocess.Comp
     )
 
 
-def _default_popen(argv: list[str]) -> subprocess.Popen[str]:
-    return subprocess.Popen(
-        list(argv),
+def _default_popen(
+    argv: list[str], *, stdin_data: Optional[str] = None
+) -> subprocess.Popen[str]:
+    kwargs = dict(
+        args=list(argv),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         **popen_kwargs_for_killable_child(),
     )
+    if stdin_data is not None:
+        kwargs["stdin"] = subprocess.PIPE
+    proc = subprocess.Popen(**kwargs)
+    if stdin_data is not None and proc.stdin is not None:
+        try:
+            proc.stdin.write(stdin_data)
+            proc.stdin.close()
+        except OSError:
+            pass
+    return proc
 
 
 def wrap_remote_command_with_pid_echo(remote_command: Sequence[str]) -> list[str]:
@@ -333,19 +390,30 @@ class SshRemoteCookBackend:
             )
             return
 
-        remote_cmd = build_remote_agentic_argv(
+        handoff = build_remote_agentic_handoff(
             request,
             cli=self.cli,
             pin=self.pin,
             timeout_seconds=self.timeout_seconds,
             remote_cwd=str((request.metadata or {}).get("host_workdir") or ""),
         )
-        wrapped = wrap_remote_command_with_pid_echo(remote_cmd)
+        if not handoff.argv:
+            self._statuses[request.run_id] = TaskStatus.FAILED
+            spoken = spoken_arg_max_denied()
+            yield DispatchEvent(
+                kind=EventKind.ERROR,
+                summary=ProgressSummary(stage="deny", message=spoken),
+            )
+            return
+        wrapped = wrap_remote_command_with_pid_echo(handoff.argv)
         try:
-            proc = self._spawn_ssh_cook(wrapped)
+            proc = self._spawn_ssh_cook(wrapped, stdin_data=handoff.stdin_data)
         except (OSError, subprocess.TimeoutExpired) as exc:
             self._statuses[request.run_id] = TaskStatus.FAILED
-            spoken = spoken_ssh_unreachable(self.host.id, detail=str(exc)[:160])
+            if is_arg_max_oserror(exc):
+                spoken = spoken_arg_max_denied(detail=str(exc)[:160])
+            else:
+                spoken = spoken_ssh_unreachable(self.host.id, detail=str(exc)[:160])
             yield DispatchEvent(
                 kind=EventKind.ERROR,
                 summary=ProgressSummary(stage="deny", message=spoken),
@@ -435,16 +503,35 @@ class SshRemoteCookBackend:
     def status(self, run_id: str) -> TaskStatus:
         return self._statuses.get(run_id, TaskStatus.PENDING)
 
-    def _spawn_ssh_cook(self, remote_command: Sequence[str]) -> Any:
+    def _spawn_ssh_cook(
+        self,
+        remote_command: Sequence[str],
+        *,
+        stdin_data: Optional[str] = None,
+    ) -> Any:
         from agent_discord.host.runners import host_runner_argv
 
         argv = host_runner_argv(self.host, remote_command)
+        # Guard local ssh argv as well (workdir-wrapped remote strings grow fast).
+        from agent_discord.puppetmaster.prompt_handoff import needs_prompt_handoff
+
+        if needs_prompt_handoff(argv) and not stdin_data:
+            raise OSError(spoken_arg_max_denied(detail="ssh argv still oversized"))
         if self.popen_fn is not None:
-            return self.popen_fn(list(argv))
+            # Test harness: prefer kwargs if the fake accepts stdin_data.
+            try:
+                return self.popen_fn(list(argv), stdin_data=stdin_data)
+            except TypeError:
+                return self.popen_fn(list(argv))
         if self.exec_fn is not None:
             # Test harnesses inject blocking exec_fn — wrap as a fake live child.
-            return _ExecFnChild(self.exec_fn, list(argv), self.timeout_seconds)
-        return _default_popen(list(argv))
+            return _ExecFnChild(
+                self.exec_fn,
+                list(argv),
+                self.timeout_seconds,
+                stdin_data=stdin_data,
+            )
+        return _default_popen(list(argv), stdin_data=stdin_data)
 
     def _iter_ssh_cook_events(
         self, run_id: str, proc: Any
@@ -677,7 +764,7 @@ class _ProcView:
 class _ExecFnChild:
     """Adapter so tests that inject ``exec_fn`` still look like a killable child."""
 
-    def __init__(self, exec_fn: ExecFn, argv: list[str], timeout_seconds: float) -> None:
+    def __init__(self, exec_fn: ExecFn, argv: list[str], timeout_seconds: float, stdin_data: Optional[str] = None) -> None:
         self._exec_fn = exec_fn
         self._argv = list(argv)
         self._timeout = float(timeout_seconds)

@@ -15,6 +15,11 @@ from agent_discord.puppetmaster.cancel_honesty import (
     popen_kwargs_for_killable_child,
     terminate_process_group,
 )
+from agent_discord.puppetmaster.prompt_handoff import (
+    is_arg_max_oserror,
+    plan_local_agentic_handoff,
+    spoken_arg_max_denied,
+)
 
 from agent_discord.contracts import (
     DispatchEvent,
@@ -112,33 +117,7 @@ class AgenticPuppetmasterBackend:
                 error="adapter_name missing on model pin",
             )
 
-        prompt = _safe_dispatch_prompt(request)
-        workdir = request_workdir(request, self.cwd)
-        mode = str((request.metadata or {}).get("compute_mode") or "implement")
-        if mode not in {"implement", "analyze"}:
-            mode = "implement"
-        is_git = bool(workdir) and (Path(workdir) / ".git").exists()
-        command = [
-            self.cli,
-            "agentic",
-            prompt,
-            "--provider",
-            "openrouter",
-            "--model",
-            pin.adapter_name,
-            "--mode",
-            mode,
-            "--timeout-seconds",
-            str(int(self.timeout_seconds)),
-        ]
-        if mode == "implement":
-            command.append("--allow-dirty")
-            if not is_git:
-                command.append("--allow-non-worktree")
-        elif not is_git:
-            command.extend(["--allow-non-worktree", "--disable-codegraph"])
-        if workdir:
-            command.extend(["--cwd", workdir])
+        handoff, workdir = self._plan_agentic_spawn(request, stream=False)
 
         child_env = worker_env(self.env)
         secret = self._resolve_secret()
@@ -147,14 +126,8 @@ class AgenticPuppetmasterBackend:
         self._attach_gate_env(child_env, request, workdir)
 
         try:
-            proc = subprocess.Popen(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                cwd=workdir,
-                env=child_env,
-                **popen_kwargs_for_killable_child(),
+            proc = self._spawn_agentic_popen(
+                handoff, workdir=workdir, child_env=child_env
             )
         except OSError as exc:
             self._statuses[request.run_id] = TaskStatus.FAILED
@@ -196,6 +169,7 @@ class AgenticPuppetmasterBackend:
                 )
         finally:
             self._unregister_child(request.run_id, proc)
+            handoff.cleanup()
 
         if request.run_id in self._cancel_requested:
             self._statuses[request.run_id] = TaskStatus.CANCELLED
@@ -299,39 +273,7 @@ class AgenticPuppetmasterBackend:
             )
             return
 
-        prompt = _safe_dispatch_prompt(request)
-        workdir = request_workdir(request, self.cwd)
-        mode = str((request.metadata or {}).get("compute_mode") or "implement")
-        if mode not in {"implement", "analyze"}:
-            mode = "implement"
-        is_git = bool(workdir) and (Path(workdir) / ".git").exists()
-        command = prepend_early_job_id(
-            [
-                self.cli,
-                "agentic",
-                prompt,
-                "--provider",
-                "openrouter",
-                "--model",
-                pin.adapter_name,
-                "--mode",
-                mode,
-                "--timeout-seconds",
-                str(int(self.timeout_seconds)),
-                "--worker-mode",
-                "inline",
-            ]
-        )
-        if mode == "implement":
-            command.append("--allow-dirty")
-            if not is_git:
-                command.append("--allow-non-worktree")
-        elif not is_git:
-            command.extend(["--allow-non-worktree", "--disable-codegraph"])
-        if workdir:
-            command.extend(["--cwd", workdir])
-        if cli_supports_flag(self.cli, "agentic", "--json-lines"):
-            command.append("--json-lines")
+        handoff, workdir = self._plan_agentic_spawn(request, stream=True)
 
         child_env = worker_env(self.env)
         secret = self._resolve_secret()
@@ -340,14 +282,8 @@ class AgenticPuppetmasterBackend:
         self._attach_gate_env(child_env, request, workdir)
 
         try:
-            proc = subprocess.Popen(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                cwd=workdir,
-                env=child_env,
-                **popen_kwargs_for_killable_child(),
+            proc = self._spawn_agentic_popen(
+                handoff, workdir=workdir, child_env=child_env
             )
         except OSError as exc:
             self._statuses[request.run_id] = TaskStatus.FAILED
@@ -398,6 +334,97 @@ class AgenticPuppetmasterBackend:
         finally:
             self._unregister_child(request.run_id, proc)
             self._cancel_requested.discard(request.run_id)
+
+
+
+    def _agentic_flags(
+        self,
+        request: DispatchRequest,
+        *,
+        workdir: Optional[str],
+        mode: str,
+        is_git: bool,
+        stream: bool,
+    ) -> list[str]:
+        """Flags after the prompt (provider/model/mode/cwd/…)."""
+
+        pin = self.pin
+        flags: list[str] = [
+            "--provider",
+            "openrouter",
+            "--model",
+            pin.adapter_name or pin.canonical,
+            "--mode",
+            mode,
+            "--timeout-seconds",
+            str(int(self.timeout_seconds)),
+        ]
+        if stream:
+            flags.extend(["--worker-mode", "inline"])
+        if mode == "implement":
+            flags.append("--allow-dirty")
+            if not is_git:
+                flags.append("--allow-non-worktree")
+        elif not is_git:
+            flags.extend(["--allow-non-worktree", "--disable-codegraph"])
+        if workdir:
+            flags.extend(["--cwd", workdir])
+        if stream and cli_supports_flag(self.cli, "agentic", "--json-lines"):
+            flags.append("--json-lines")
+        return flags
+
+    def _plan_agentic_spawn(
+        self,
+        request: DispatchRequest,
+        *,
+        stream: bool = False,
+    ):
+        """Build ARG_MAX-safe local agentic argv (file handoff when oversized)."""
+
+        prompt = _safe_dispatch_prompt(request)
+        workdir = request_workdir(request, self.cwd)
+        mode = str((request.metadata or {}).get("compute_mode") or "implement")
+        if mode not in {"implement", "analyze"}:
+            mode = "implement"
+        is_git = bool(workdir) and (Path(workdir) / ".git").exists()
+        flags = self._agentic_flags(
+            request, workdir=workdir, mode=mode, is_git=is_git, stream=stream
+        )
+        if stream:
+            # prepend_early_job_id wraps the full command; apply after handoff plan
+            # only for argv mode. File handoff uses PM python -c (no early job id
+            # prefix — job id still arrives on stdout from the worker).
+            handoff = plan_local_agentic_handoff(
+                cli=self.cli, prompt=prompt, flags=flags
+            )
+            if handoff.mode == "argv":
+                handoff.argv = prepend_early_job_id(list(handoff.argv))
+            return handoff, workdir
+        return (
+            plan_local_agentic_handoff(cli=self.cli, prompt=prompt, flags=flags),
+            workdir,
+        )
+
+    def _spawn_agentic_popen(self, handoff, *, workdir, child_env):
+        """Popen local agentic; map E2BIG to spoken ARG_MAX Deny."""
+
+        if not handoff.argv:
+            raise OSError(spoken_arg_max_denied(detail="no puppetmaster interpreter"))
+        try:
+            return subprocess.Popen(
+                handoff.argv,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=workdir,
+                env=child_env,
+                **popen_kwargs_for_killable_child(),
+            )
+        except OSError as exc:
+            handoff.cleanup()
+            if is_arg_max_oserror(exc):
+                raise OSError(spoken_arg_max_denied(detail=str(exc)[:120])) from exc
+            raise
 
 
     def _register_child(self, run_id: str, proc: Any) -> None:

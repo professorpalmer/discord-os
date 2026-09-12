@@ -36,3 +36,13 @@ Phone Cancel terminates that group (and best-effort remote pid on SSH). If the
 backend cannot confirm the interrupt, Discord speaks **Cancel unconfirmed** and
 does not paint Cancelled. See [cards/reactive.md](../cards/reactive.md).
 
+
+## ARG_MAX / oversized prompts
+
+Huge Discord prompts can exceed OS ``ARG_MAX`` when Discord OS spawns
+``puppetmaster agentic`` (local) or wraps it in Path A SSH argv. Discord OS
+detects oversized argv and hands the prompt via a **temp file** (local
+in-process bridge) or **SSH stdin** (remote bash → temp file → same bridge).
+Override the budget with ``DISCORD_OS_ARGV_MAX`` (bytes). Keys never on argv.
+If handoff cannot run, Discord speaks a Deny instead of an opaque OS error.
+

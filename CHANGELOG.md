@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### P0.4 ARG_MAX stdin/file handoff
+
+Large agentic prompts no longer die on opaque OS ``ARG_MAX`` / ``E2BIG``.
+Local OpenRouter/agentic and Path A SSH remote cook measure planned argv
+against a conservative budget (``DISCORD_OS_ARGV_MAX``, default ~128KiB).
+Oversized bodies spill to a temp file (local) or SSH stdin (remote) and
+re-enter ``puppetmaster.cli.main`` in-process so the prompt never crosses
+``execve``. Keys stay off argv. If handoff is still impossible → spoken
+Deny. Tests: ``tests/test_prompt_handoff.py``. Docs: compute README.
+
 ## 0.5.45
 
 Live gate-hook inject for local agentic PreToolUse (sitecustomize / PreToolUse wrap; Ask park; SSH gates still not crossed).
