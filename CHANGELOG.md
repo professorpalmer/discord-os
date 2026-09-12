@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.41
 
 P0 live ask-gate / PreToolUse hold.
 
@@ -8,6 +8,8 @@ P0 live ask-gate / PreToolUse hold.
 - Durable file-queue hook (`discord-os gate-hook`, always exit 0) for when Puppetmaster agentic has no in-process `canUseTool`. Listen/orch drains `pending/` and writes `results/`.
 - Agentic spawn stamps `DISCORD_OS_GATE_DIR` / `DISCORD_OS_RUN_ID`. Fail closed if unanswered.
 - Docs: [docs/cards/ask-gate.md](docs/cards/ask-gate.md). Tests: fake worker hold.
+
+Closes round-3 P0 pack (Path A remote cook + live ask-gate).
 
 ## 0.5.40
 
