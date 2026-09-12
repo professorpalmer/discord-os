@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.27
 
 Companion web dashboard (P2.12). Read-only.
 
