@@ -17,9 +17,41 @@ zebbern / c-lord permission + AskUserQuestion button patterns — not Activities
 | Timeout | Same `DISCORD_OS_APPROVAL_TIMEOUT_MINUTES` auto-deny as write-gate |
 | Spoken | Exact `Allow` / `Deny` / `Always allow` in the parked thread resolves the gate |
 
-## How PM / adapters request a gate
+## Live hold (P0)
 
-Full agent-hook (`canUseTool` / Puppetmaster hook) integration is **deferred**.
+Phone Allow / Deny / Always **blocks the live worker** mid-cook.
+
+1. `tool_class_decision` → `allow` / `ask` / `deny`
+2. `ask` parks a Discord card (`raise_tool_gate` / `raise_ask_user` with `live=True`)
+3. The worker blocks until `gate_result_for` (or the result file) is
+   `allow` / `always` / `deny`, or the approval timeout self-denies.
+
+In-process adapters call `AgentOrchestrator.request_tool_hold`. Puppetmaster
+agentic is a subprocess and has no in-process `canUseTool`, so Discord OS
+stamps a durable file-queue on every agentic spawn:
+
+```text
+DISCORD_OS_GATE_DIR      per-run pending/ + results/
+DISCORD_OS_GATE_ROOT     <workspace>/gates
+DISCORD_OS_RUN_ID        live run id
+DISCORD_OS_GATE_HOOK     discord-os gate-hook
+```
+
+Attach the PreToolUse-shaped CLI (stdin JSON, stdout `permissionDecision`,
+**always exit 0**):
+
+```bash
+discord-os gate-hook
+discord-os gate-hook --print-attach
+```
+
+Listen/orch drains `pending/`, parks the card, and writes `results/` when
+the phone (or spoken Allow / Deny / Always, or expire) resolves it. Fail
+closed: unanswered → deny. Shapes stolen (not cloned): albertorsesc
+PreToolUse hold, DisCode CLI hooks, dis-claude atomic file-queue.
+
+## How adapters request a gate
+
 Adapters and host tools should:
 
 ```python
@@ -36,6 +68,7 @@ if decision.decision == "allow":
     return run_tool(...)
 # ask — park the Discord card and wait for gate_result
 orch.raise_tool_gate(run_id, tool_class=decision.tool_class, detail=preview)
+# live worker: orch.request_tool_hold(run_id, tool_name, detail=preview)
 # later: orch.gate_result_for(run_id) → gate_result allow|always|deny
 ```
 
@@ -52,7 +85,8 @@ orch.raise_ask_user(
 
 Do **not** invent a tool class. If `normalize_tool_class` returns `None`, deny.
 Known classes: `shell`, `write`, `edit`, `browser`, `network`, `git`, `mcp`,
-`ask`, `implement`. Aliases (`Bash` → `shell`, `AskUserQuestion` → `ask`) live
+`ask`, `implement`, `read`. `read` always allows (no card). Aliases
+(`Bash` → `shell`, `AskUserQuestion` → `ask`, `run_terminal` → `shell`) live
 in `ask_gate.py`.
 
 ## custom_ids
@@ -66,19 +100,25 @@ Write-gate park (whole implement) and tool-class park share the job button
 prefix. Metadata `awaiting_gate` routes approve/always/deny to the tool/ask
 resolver instead of resuming an implement.
 
-## Deferred
+## Residual
 
-- Puppetmaster / agent SDK `canUseTool` hook that blocks the worker until the
-  Discord button resolves
+- Puppetmaster agentic 1.27 does not invoke a host PreToolUse hook inside
+  `_execute_tool`. Live OpenRouter cooks block when an adapter calls
+  `request_tool_hold` or when a PreToolUse-shaped wrapper runs
+  `discord-os gate-hook` (env is stamped on every agentic spawn).
 - Per-tool (exact tool name) allowlists beyond class
 - Multi-select AskUserQuestion confirm row
 
 ## Code
 
 - `src/agent_discord/orchestration/ask_gate.py` — decision, cards, spoken parse
+- `src/agent_discord/orchestration/gate_hook.py` — file queue, hold, hook CLI
 - `src/agent_discord/orchestration/service.py` — tool-class session prefs
-- `src/agent_discord/orchestration/orchestrator.py` — `raise_tool_gate` /
-  `raise_ask_user` / resolve
+- `src/agent_discord/orchestration/orchestrator.py` — `request_tool_hold` /
+  `raise_tool_gate` / `raise_ask_user` / resolve
+- `src/agent_discord/puppetmaster/agentic.py` — stamps gate env on spawn
 - `src/agent_discord/host/panel.py` — ask button → `on_job("ask", run#idx)`
-- `src/agent_discord/orchestration/listen.py` — spoken Allow / Deny / Always
+- `src/agent_discord/orchestration/listen.py` — spoken Allow / Deny / Always;
+  drain pending hook files
+- CLI: `discord-os gate-hook`
 - Tests: `tests/test_ask_gate.py`

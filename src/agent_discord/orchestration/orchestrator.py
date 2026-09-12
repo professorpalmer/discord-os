@@ -1599,11 +1599,14 @@ class AgentOrchestrator:
         tool_class: str,
         detail: str = "",
         message: str = "",
+        live: bool = False,
+        request_id: str = "",
     ) -> dict[str, Any]:
         """Park mid-run for a tool-class Allow / Always / Deny card.
 
         Adapters call this when ``tool_class_decision`` returns ``ask``.
         Unknown classes should be denied by the adapter before calling.
+        ``live=True`` keeps the worker blocked until ``gate_result_for``.
         """
 
         import time
@@ -1639,6 +1642,8 @@ class AgentOrchestrator:
             tool_class=klass,
             detail=detail,
             parked_at_ms=parked_ms,
+            live=live,
+            request_id=request_id,
         )
         channel_id = str(task.get("channel_id") or meta.get("channel_id") or "").strip()
         thread_id = str(task.get("thread_id") or meta.get("thread_id") or "").strip() or None
@@ -1671,6 +1676,8 @@ class AgentOrchestrator:
             "status": "parked",
             "gate_kind": GATE_KIND_TOOL,
             "gate_class": klass,
+            "gate_live": bool(live),
+            "gate_request_id": (request_id or "").strip(),
             "summary": summary,
         }
 
@@ -1681,8 +1688,13 @@ class AgentOrchestrator:
         question: str,
         options: Sequence[Any] = (),
         header: str = "Need input",
+        live: bool = False,
+        request_id: str = "",
     ) -> dict[str, Any]:
-        """Park mid-run for an AskUserQuestion Discord card."""
+        """Park mid-run for an AskUserQuestion Discord card.
+
+        ``live=True`` keeps the worker blocked until an option or Deny.
+        """
 
         import time
 
@@ -1716,6 +1728,8 @@ class AgentOrchestrator:
             question=question,
             options=opts,
             parked_at_ms=parked_ms,
+            live=live,
+            request_id=request_id,
         )
         channel_id = str(task.get("channel_id") or meta.get("channel_id") or "").strip()
         thread_id = str(task.get("thread_id") or meta.get("thread_id") or "").strip() or None
@@ -1747,6 +1761,8 @@ class AgentOrchestrator:
             "run_id": run_id,
             "status": "parked",
             "gate_kind": GATE_KIND_ASK,
+            "gate_live": bool(live),
+            "gate_request_id": (request_id or "").strip(),
             "summary": summary,
         }
 
@@ -1894,6 +1910,46 @@ class AgentOrchestrator:
             failed=True,
         )
 
+    def request_tool_hold(
+        self,
+        run_id: str,
+        tool_name: str,
+        *,
+        detail: str = "",
+        timeout_seconds: float | None = None,
+        poll_seconds: float = 0.05,
+        sleeper: Any = None,
+        clock: Any = None,
+    ) -> dict[str, Any]:
+        """Block this worker until Allow / Deny / Always or timeout.
+
+        In-process canUseTool. Parks a Discord card when
+        ``tool_class_decision`` returns ``ask``. Fail closed on timeout.
+        """
+
+        from agent_discord.orchestration.gate_hook import hold_tool_decision
+
+        held = hold_tool_decision(
+            self.store,
+            self,
+            run_id=run_id,
+            tool_name=tool_name,
+            detail=detail,
+            timeout_seconds=timeout_seconds,
+            poll_seconds=poll_seconds,
+            sleeper=sleeper,
+            clock=clock,
+        )
+        return {
+            "run_id": run_id,
+            "request_id": held.request_id,
+            "decision": held.decision,
+            "gate_result": held.decision,
+            "gate_answer": held.gate_answer,
+            "reason": held.reason,
+            "tool_class": held.tool_class,
+        }
+
     def gate_result_for(self, run_id: str) -> dict[str, Any]:
         """Adapter poll: gate_result / gate_answer from task metadata."""
 
@@ -2031,6 +2087,8 @@ class AgentOrchestrator:
         if not isinstance(meta, dict):
             meta = {}
         merger = getattr(self.store, "merge_task_metadata", None)
+        live = bool(meta.get("gate_live"))
+        request_id = str(meta.get("gate_request_id") or "").strip()
         if callable(merger) and task_id:
             try:
                 merger(
@@ -2045,6 +2103,50 @@ class AgentOrchestrator:
                 )
             except Exception:
                 pass
+        if live:
+            self._write_live_gate_result(
+                run_id,
+                request_id=request_id,
+                result=result,
+                answer=answer,
+                tool_class=str(meta.get("gate_class") or ""),
+            )
+            # Worker is still mid-cook — do not settle the run.
+            try:
+                self.store.update_run(run_id, status=TaskStatus.RUNNING, summary=spoken)
+            except Exception:
+                pass
+            self._run_status[run_id] = TaskStatus.RUNNING
+            if self.post_progress_to_discord and self.discord is not None:
+                task = self.store.get_task(task_id) or {}
+                channel_id = str(task.get("channel_id") or meta.get("channel_id") or "").strip()
+                thread_id = str(task.get("thread_id") or meta.get("thread_id") or "").strip() or None
+                card_mid = str(meta.get("card_message_id") or "").strip()
+                try:
+                    card = reactive_working_card(
+                        message=spoken,
+                        run_id=run_id,
+                        status=TaskStatus.RUNNING,
+                    )
+                    dest = thread_id or channel_id
+                    if card_mid and dest:
+                        edit_card(self.discord, dest, card_mid, card)
+                    elif channel_id:
+                        send_card(self.discord, channel_id, card, thread_id=thread_id)
+                except Exception:
+                    pass
+            out = {
+                "action": action,
+                "run_id": run_id,
+                "status": TaskStatus.RUNNING.value,
+                "summary": spoken,
+                "gate_result": result,
+                "gate_answer": answer,
+                "gate_live": True,
+            }
+            if session_allow:
+                out["session_allow"] = session_allow
+            return out
         status = TaskStatus.FAILED if failed else TaskStatus.COMPLETED
         try:
             self.store.update_run(
@@ -2091,6 +2193,42 @@ class AgentOrchestrator:
         if session_allow:
             out["session_allow"] = session_allow
         return out
+
+    def _write_live_gate_result(
+        self,
+        run_id: str,
+        *,
+        request_id: str,
+        result: str,
+        answer: str = "",
+        tool_class: str = "",
+    ) -> None:
+        if not request_id:
+            return
+        try:
+            from agent_discord.orchestration.gate_hook import (
+                GateHoldResult,
+                complete_request,
+                resolve_run_gate_dir,
+            )
+
+            run_dir = resolve_run_gate_dir(
+                run_id=run_id,
+                workspace=self.workspace,
+                store=self.store,
+            )
+            complete_request(
+                run_dir,
+                GateHoldResult(
+                    request_id=request_id,
+                    decision=result,
+                    gate_answer=answer,
+                    reason=result,
+                    tool_class=tool_class,
+                ),
+            )
+        except Exception:
+            pass
 
     def _paint_gate_card(
         self,

@@ -513,6 +513,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_lineage.add_argument("--json", action="store_true")
 
+    p_hook = sub.add_parser(
+        "gate-hook",
+        help="PreToolUse hold: park Discord Allow/Deny and block until resolved (always exit 0)",
+    )
+    p_hook.add_argument(
+        "--print-attach",
+        action="store_true",
+        help="Print how the agentic worker attaches this hook",
+    )
+
     return parser
 
 
@@ -559,6 +569,15 @@ def cmd_map(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         chunks.append(format_lifts(world))
     print("\n\n".join(chunks), file=out)
     return 0
+
+
+def cmd_gate_hook(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
+    """PreToolUse hold. Always exit 0 — decision is JSON on stdout."""
+
+    from agent_discord.orchestration.gate_hook import run_hook
+
+    argv = ["--print-attach"] if getattr(args, "print_attach", False) else []
+    return run_hook(argv, stdout=out)
 
 
 def cmd_lineage(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
@@ -2399,6 +2418,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return cmd_map(args)
     if args.command == "lineage":
         return cmd_lineage(args)
+    if args.command == "gate-hook":
+        return cmd_gate_hook(args)
     parser.error(f"unknown command {args.command}")
     return 2
 

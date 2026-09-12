@@ -134,6 +134,7 @@ class AgenticPuppetmasterBackend:
         secret = self._resolve_secret()
         if secret:
             child_env["OPENROUTER_API_KEY"] = secret
+        self._attach_gate_env(child_env, request, workdir)
 
         try:
             proc = subprocess.run(
@@ -272,6 +273,7 @@ class AgenticPuppetmasterBackend:
         secret = self._resolve_secret()
         if secret:
             child_env["OPENROUTER_API_KEY"] = secret
+        self._attach_gate_env(child_env, request, workdir)
 
         try:
             proc = subprocess.Popen(
@@ -312,6 +314,19 @@ class AgenticPuppetmasterBackend:
             yield event
         if self._statuses.get(request.run_id) == TaskStatus.RUNNING:
             self._statuses[request.run_id] = TaskStatus.COMPLETED
+
+    def _attach_gate_env(
+        self, child_env: dict[str, str], request: DispatchRequest, workdir: Optional[str]
+    ) -> None:
+        """Stamp the live ask-gate file-queue so a PreToolUse hook can hold."""
+
+        try:
+            from agent_discord.orchestration.gate_hook import attach_gate_env
+
+            ws = workdir or (str(self.cwd) if self.cwd else None)
+            attach_gate_env(child_env, run_id=request.run_id, workspace=ws)
+        except Exception:
+            pass
 
     def _resolve_secret(self) -> str:
         if self.vault is not None:

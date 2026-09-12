@@ -7,10 +7,10 @@ surgical approve. This module is the zebbern / DisCode-shaped seam:
 - AskUserQuestion option buttons
 - fail closed when the tool class is unknown
 
-Full Puppetmaster / agent-hook ``canUseTool`` wiring is deferred.
-PM and host adapters should call ``tool_class_decision`` then
-``AgentOrchestrator.raise_tool_gate`` / ``raise_ask_user``. Docs:
-``docs/cards/ask-gate.md``.
+Live hold: adapters and the agentic hook call ``tool_class_decision``
+then ``AgentOrchestrator.request_tool_hold`` / ``raise_tool_gate`` /
+``raise_ask_user``. The worker blocks until ``gate_result_for`` or
+timeout self-denies. Docs: ``docs/cards/ask-gate.md``.
 """
 
 from __future__ import annotations
@@ -43,6 +43,7 @@ KNOWN_TOOL_CLASSES = frozenset(
         "mcp",
         "ask",
         "implement",
+        "read",
     }
 )
 
@@ -71,6 +72,25 @@ _TOOL_CLASS_ALIASES = {
     "ask_user_question": "ask",
     "implement": "implement",
     "write_gate": "implement",
+    "read": "read",
+    "read_file": "read",
+    "readfile": "read",
+    "read_offload": "read",
+    "list_dir": "read",
+    "listdir": "read",
+    "search_code": "read",
+    "graph_search": "read",
+    "graph_context": "read",
+    "write_file": "write",
+    "writefile": "write",
+    "delete_file": "write",
+    "deletefile": "write",
+    "edit_file": "edit",
+    "editfile": "edit",
+    "run_terminal": "shell",
+    "runterminal": "shell",
+    "web_fetch": "network",
+    "webfetch": "network",
 }
 
 DENIED_TOOL_SPOKEN = "Denied. Tool was not allowed."
@@ -172,6 +192,9 @@ def tool_class_decision(
             tool_class=canonical,
             reason="session always allow",
         )
+    # Reads never park — they are not a write-gate class.
+    if canonical == "read":
+        return ToolClassDecision(decision="allow", tool_class=canonical, reason="read passthrough")
     # AskUserQuestion always surfaces a card (unless session-always on class ask).
     if canonical == "ask":
         return ToolClassDecision(decision="ask", tool_class=canonical, reason="ask user")
@@ -333,6 +356,8 @@ def gate_meta_payload(
     question: str = "",
     options: Sequence[AskOption | Mapping[str, Any] | str] = (),
     parked_at_ms: int,
+    live: bool = False,
+    request_id: str = "",
 ) -> dict[str, Any]:
     """Task metadata patch for a parked tool / ask gate."""
 
@@ -349,5 +374,7 @@ def gate_meta_payload(
         ],
         "gate_result": "",
         "gate_answer": "",
+        "gate_live": bool(live),
+        "gate_request_id": (request_id or "").strip(),
         "parked_at_ms": int(parked_at_ms),
     }

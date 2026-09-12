@@ -2,9 +2,23 @@
 
 from __future__ import annotations
 
+import io
+import json
+import threading
+import time
 from pathlib import Path
 
+from agent_discord.cli import main
 from agent_discord.contracts import TaskIntake, TaskStatus
+from agent_discord.orchestration.gate_hook import (
+    build_request,
+    complete_request,
+    drain_gate_queue,
+    enqueue_request,
+    read_result,
+    run_hook,
+    wait_for_result,
+)
 from agent_discord.discord.facade import DiscordFacade
 from agent_discord.discord.providers.fake import FakeDiscordMCPProvider
 from agent_discord.host.actions import job_custom_id
@@ -41,6 +55,7 @@ def _orch(tmp_path: Path):
         backend=backend,
         discord=facade,
         post_progress_to_discord=True,
+        workspace=tmp_path,
     )
     return orch, store, fake, backend
 
@@ -261,4 +276,239 @@ def test_approval_timeout_expires_tool_gate(tmp_path: Path):
     assert expired
     assert any(row.get("action") == "expire" for row in expired)
     assert "Expired" in (store.get_run(receipt.run_id).get("summary") or "")
+    store.close()
+
+
+
+def test_normalize_agentic_and_read_passthrough(tmp_path: Path):
+    assert normalize_tool_class("run_terminal") == "shell"
+    assert normalize_tool_class("write_file") == "write"
+    assert normalize_tool_class("read_file") == "read"
+    store = SQLiteStore(tmp_path / "read.sqlite3")
+    store.initialize()
+    set_write_gate(store, True)
+    allowed = tool_class_decision(store, "read_file", channel_id="ch")
+    assert allowed.decision == "allow"
+    assert allowed.reason == "read passthrough"
+    store.close()
+
+
+def test_file_queue_timeout_self_denies(tmp_path: Path):
+    from agent_discord.orchestration.gate_hook import ensure_run_gate_dir, run_gate_dir
+
+    run_dir = ensure_run_gate_dir(run_gate_dir(tmp_path / "gates", "run-q1"))
+    req = build_request(run_id="run-q1", tool_name="shell", tool_input="pytest -q")
+    enqueue_request(run_dir, req)
+    held = wait_for_result(
+        run_dir,
+        req.request_id,
+        timeout_seconds=0.08,
+        poll_seconds=0.01,
+        tool_class="shell",
+    )
+    assert held.decision == "deny"
+    assert held.reason == "timeout"
+    assert read_result(run_dir, req.request_id).decision == "deny"
+
+
+def test_hook_cli_always_exits_zero_on_timeout(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("DISCORD_OS_GATE_DIR", str(tmp_path / "hook-run"))
+    monkeypatch.setenv("DISCORD_OS_RUN_ID", "run-hook")
+    monkeypatch.setenv("DISCORD_OS_GATE_TIMEOUT_SECONDS", "0.08")
+    stdin = io.StringIO(json.dumps({"tool_name": "Bash", "tool_input": {"command": "ls"}}))
+    stdout = io.StringIO()
+    code = run_hook([], stdin=stdin, stdout=stdout, env=dict(**{k: str(v) for k, v in {
+        "DISCORD_OS_GATE_DIR": tmp_path / "hook-run",
+        "DISCORD_OS_RUN_ID": "run-hook",
+        "DISCORD_OS_GATE_TIMEOUT_SECONDS": "0.08",
+    }.items()}))
+    assert code == 0
+    payload = json.loads(stdout.getvalue())
+    assert payload["permissionDecision"] == "deny"
+    assert payload["continue"] is False
+
+
+def test_hook_cli_unknown_class_denies_exit_zero(tmp_path: Path):
+    stdin = io.StringIO(json.dumps({"tool_name": "totally-novel", "run_id": "r1"}))
+    stdout = io.StringIO()
+    code = run_hook(
+        [],
+        stdin=stdin,
+        stdout=stdout,
+        env={"DISCORD_OS_GATE_DIR": str(tmp_path / "u"), "DISCORD_OS_RUN_ID": "r1"},
+    )
+    assert code == 0
+    payload = json.loads(stdout.getvalue())
+    assert payload["permissionDecision"] == "deny"
+
+
+def test_cli_gate_hook_print_attach(capsys):
+    assert main(["gate-hook", "--print-attach"]) == 0
+    out = capsys.readouterr().out
+    assert "DISCORD_OS_GATE_DIR" in out
+    assert "discord-os gate-hook" in out
+    assert "Cursor" not in out
+
+
+def test_live_worker_blocks_until_allow(tmp_path: Path):
+    orch, store, fake, backend = _orch(tmp_path)
+    set_write_gate(store, True)
+    backend.tool_hold = lambda rid: orch.request_tool_hold(
+        rid, "shell", detail="pytest -q", timeout_seconds=2.0, poll_seconds=0.02
+    )
+    box: dict = {}
+
+    def cook() -> None:
+        box["receipt"] = orch.run_task(
+            TaskIntake(
+                text="review the billing module",
+                channel_id="ch",
+                workspace_id="ws",
+                message_id="live-hold-1",
+            )
+        )
+
+    thread = threading.Thread(target=cook)
+    thread.start()
+    run_id = ""
+    deadline = time.time() + 2.0
+    while time.time() < deadline:
+        if backend.runs:
+            run_id = next(iter(backend.runs))
+            if orch.gate_result_for(run_id).get("awaiting_gate"):
+                break
+        time.sleep(0.02)
+    assert run_id
+    assert orch.gate_result_for(run_id)["awaiting_gate"] is True
+    allowed = orch.apply_job_action("approve", run_id)
+    assert allowed["gate_result"] == "allow"
+    assert allowed.get("gate_live") is True
+    thread.join(timeout=2.0)
+    assert not thread.is_alive()
+    assert box["receipt"].status == TaskStatus.COMPLETED
+    assert backend.last_hold is not None
+    assert backend.last_hold["decision"] == "allow"
+    store.close()
+
+
+def test_live_worker_timeout_self_denies(tmp_path: Path):
+    orch, store, fake, backend = _orch(tmp_path)
+    set_write_gate(store, True)
+    backend.tool_hold = lambda rid: orch.request_tool_hold(
+        rid, "shell", detail="ls", timeout_seconds=0.2, poll_seconds=0.02
+    )
+    box: dict = {}
+
+    def cook() -> None:
+        box["receipt"] = orch.run_task(
+            TaskIntake(
+                text="review timeout hold",
+                channel_id="ch",
+                workspace_id="ws",
+                message_id="live-hold-to",
+            )
+        )
+
+    thread = threading.Thread(target=cook)
+    thread.start()
+    thread.join(timeout=3.0)
+    assert not thread.is_alive()
+    assert box["receipt"].status == TaskStatus.FAILED
+    assert backend.last_hold is not None
+    assert backend.last_hold["decision"] == "deny"
+    assert backend.last_hold["reason"] == "timeout"
+    store.close()
+
+
+def test_drain_parks_hook_request_then_writes_result(tmp_path: Path):
+    from agent_discord.orchestration.gate_hook import ensure_run_gate_dir, resolve_run_gate_dir
+
+    orch, store, fake, backend = _orch(tmp_path)
+    receipt = orch.run_task(
+        TaskIntake(
+            text="review drain hold",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="live-drain-1",
+        )
+    )
+    set_write_gate(store, True)
+    run_dir = ensure_run_gate_dir(
+        resolve_run_gate_dir(run_id=receipt.run_id, workspace=tmp_path, store=store)
+    )
+    req = build_request(
+        run_id=receipt.run_id, tool_name="git", tool_input="gh pr create"
+    )
+    enqueue_request(run_dir, req)
+    parked = drain_gate_queue(orch)
+    assert any(row.get("action") == "park" for row in parked)
+    assert orch.gate_result_for(receipt.run_id)["awaiting_gate"] is True
+    always = orch.apply_job_action("always", receipt.run_id)
+    assert always["gate_result"] == "always"
+    # Live resolve writes results/ immediately so a blocked hook unblocks
+    # without waiting for another listen drain.
+    found = read_result(run_dir, req.request_id)
+    assert found is not None
+    assert found.decision == "always"
+    assert drain_gate_queue(orch) == []
+    store.close()
+
+
+
+def test_drain_timeout_self_denies_unanswered(tmp_path: Path):
+    from agent_discord.orchestration.gate_hook import ensure_run_gate_dir, resolve_run_gate_dir
+
+    orch, store, fake, backend = _orch(tmp_path)
+    receipt = orch.run_task(
+        TaskIntake(
+            text="review drain timeout",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="live-drain-to",
+        )
+    )
+    run_dir = ensure_run_gate_dir(
+        resolve_run_gate_dir(run_id=receipt.run_id, workspace=tmp_path, store=store)
+    )
+    req = build_request(
+        run_id=receipt.run_id,
+        tool_name="shell",
+        tool_input="ls",
+        created_at_ms=1,
+    )
+    enqueue_request(run_dir, req)
+    acted = drain_gate_queue(orch, now_ms=10_000_000)
+    assert any(row.get("action") == "timeout" for row in acted)
+    found = read_result(run_dir, req.request_id)
+    assert found is not None
+    assert found.decision == "deny"
+    store.close()
+
+
+def test_drain_writes_result_from_gate_metadata(tmp_path: Path):
+    from agent_discord.orchestration.gate_hook import ensure_run_gate_dir, resolve_run_gate_dir
+
+    orch, store, fake, backend = _orch(tmp_path)
+    receipt = orch.run_task(
+        TaskIntake(
+            text="review drain meta",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="live-drain-meta",
+        )
+    )
+    run_dir = ensure_run_gate_dir(
+        resolve_run_gate_dir(run_id=receipt.run_id, workspace=tmp_path, store=store)
+    )
+    req = build_request(run_id=receipt.run_id, tool_name="shell", tool_input="pwd")
+    enqueue_request(run_dir, req)
+    store.merge_task_metadata(
+        receipt.task_id,
+        {"gate_result": "allow", "gate_answer": "", "awaiting_gate": False},
+    )
+    acted = drain_gate_queue(orch)
+    assert any(row.get("action") == "resolve" for row in acted)
+    found = read_result(run_dir, req.request_id)
+    assert found is not None
+    assert found.decision == "allow"
     store.close()

@@ -40,7 +40,8 @@ The worker prompt says: call these from the shell; do not wait for an IDE MCP br
 ## Per-tool gate (P1.4)
 
 When HOST write-gate is on, adapters should not treat coarse Always-allow as
-blanket shell. Call `tool_class_decision` then `raise_tool_gate` /
-`raise_ask_user` so the phone gets Allow / Deny for that class. Unknown tool
-classes fail closed. See [ask-gate](../cards/ask-gate.md).
+blanket shell. Call `tool_class_decision` then `request_tool_hold` /
+`raise_tool_gate` / `raise_ask_user` so the phone gets Allow / Deny for that
+class and the **live worker blocks**. Unknown tool classes fail closed. See
+[ask-gate](../cards/ask-gate.md).
 

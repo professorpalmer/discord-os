@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Callable, Mapping, Optional
 
 from agent_discord.contracts import (
     ArtifactRef,
@@ -34,6 +34,8 @@ class FakePuppetmasterBackend:
     artifact_files: list[str] = field(default_factory=list)
     steer_count: int = 0
     steers: list[tuple[str, str]] = field(default_factory=list)
+    tool_hold: Optional[Callable[[str], Mapping[str, Any]]] = None
+    last_hold: Optional[Mapping[str, Any]] = None
 
     def resolve_model(self, requested: str) -> ModelPin:
         self.pin.assert_allowed(requested)
@@ -82,6 +84,25 @@ class FakePuppetmasterBackend:
                 final_summary="rate limited",
                 error="429 rate limited",
             )
+        if self.tool_hold is not None:
+            held = self.tool_hold(request.run_id) or {}
+            self.last_hold = dict(held)
+            decision = str(held.get("decision") or held.get("gate_result") or "").strip().lower()
+            if decision == "deny":
+                self.runs[request.run_id] = TaskStatus.FAILED
+                reason = str(held.get("reason") or "Denied. Tool was not allowed.")
+                return DispatchResult(
+                    run_id=request.run_id,
+                    status=TaskStatus.FAILED,
+                    events=(
+                        DispatchEvent(
+                            kind=EventKind.ERROR,
+                            summary=ProgressSummary(stage="gate", message=reason),
+                        ),
+                    ),
+                    final_summary=reason,
+                    error=reason,
+                )
         if self.fail_next:
             self.fail_next = False
             self.runs[request.run_id] = TaskStatus.FAILED

@@ -502,6 +502,7 @@ def drain_inbound(
         )
     )
     _tick_approval_timeout_best_effort(orchestrator, env)
+    _tick_gate_queue_best_effort(orchestrator, env)
     if thread_id is None:
         try:
             from agent_discord.orchestration.github_rules import admit_github_rules
@@ -633,6 +634,19 @@ def _tick_approval_timeout_best_effort(
 
     try:
         expire_parked_approvals(orchestrator, env=env)
+    except Exception:
+        pass
+
+
+def _tick_gate_queue_best_effort(
+    orchestrator: Any, env: Optional[Mapping[str, str]]
+) -> None:
+    """Park Discord cards for pending live-hook requests. Best-effort."""
+
+    try:
+        from agent_discord.orchestration.gate_hook import drain_gate_queue
+
+        drain_gate_queue(orchestrator, env=env)
     except Exception:
         pass
 

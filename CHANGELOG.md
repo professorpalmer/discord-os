@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+P0 live ask-gate / PreToolUse hold.
+
+- Phone Allow / Deny / Always blocks the **live worker** mid-cook: `tool_class_decision` → park Discord card → hold until `gate_result_for` or approval timeout self-denies.
+- Durable file-queue hook (`discord-os gate-hook`, always exit 0) for when Puppetmaster agentic has no in-process `canUseTool`. Listen/orch drains `pending/` and writes `results/`.
+- Agentic spawn stamps `DISCORD_OS_GATE_DIR` / `DISCORD_OS_RUN_ID`. Fail closed if unanswered.
+- Docs: [docs/cards/ask-gate.md](docs/cards/ask-gate.md). Tests: fake worker hold.
+
 ## 0.5.40
 
 P0 Path A: real SSH / remote cook.
