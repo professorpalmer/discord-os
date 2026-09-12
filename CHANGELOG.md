@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.36
 
 P2.7 Discord RO status digest from dashboard data.
 
