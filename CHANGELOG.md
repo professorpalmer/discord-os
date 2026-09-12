@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.32
 
 P0.3 Approval timeout + Cancel clarity + inbound queue while RUNNING.
 
