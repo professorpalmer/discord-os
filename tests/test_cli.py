@@ -21,6 +21,7 @@ def test_cli_check_live_channel(tmp_path: Path, monkeypatch, capsys):
     ws = tmp_path / ".agent-discord"
     monkeypatch.setenv("AGENT_DISCORD_WORKSPACE", str(ws))
     monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-test")
     monkeypatch.setenv("PUPPETMASTER_MODEL", "openrouter/auto")
     monkeypatch.setattr(
         "agent_discord.discord.rest.fetch_bot_identity",
@@ -45,6 +46,7 @@ def test_cli_bootstrap_check_run(tmp_path: Path, monkeypatch, capsys):
     ws = tmp_path / ".agent-discord"
     monkeypatch.setenv("AGENT_DISCORD_WORKSPACE", str(ws))
     monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-test")
     monkeypatch.setenv("PUPPETMASTER_MODEL", "openrouter/auto")
 
     assert main(["bootstrap", "--workspace", str(ws)]) == 0
@@ -64,3 +66,20 @@ def test_cli_bootstrap_check_run(tmp_path: Path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "run_id" in out
     assert "completed" in out
+
+
+def test_cli_check_fails_closed_without_openrouter_key(tmp_path: Path, monkeypatch, capsys):
+    """Offline check exits non-zero when OpenRouter key is missing (fail-closed)."""
+    monkeypatch.chdir(tmp_path)
+    ws = tmp_path / ".agent-discord"
+    monkeypatch.setenv("AGENT_DISCORD_WORKSPACE", str(ws))
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("PUPPETMASTER_MODEL", "openrouter/auto")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    assert main(["bootstrap", "--workspace", str(ws)]) == 0
+    assert main(["check"]) == 1
+    out = capsys.readouterr().out
+    assert "Problems:" in out
+    assert "no OpenRouter key; run discord-os connect" in out
+
