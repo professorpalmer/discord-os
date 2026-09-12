@@ -61,6 +61,15 @@ def test_job_custom_ids_parse_without_host_power():
     assert parsed.run_id == "run-9"
     assert job_action_from_custom_id(cancel).action == "cancel"
     assert job_action_from_custom_id(retry).action == "retry"
+    always = job_custom_id("always", "run-9")
+    deny = job_custom_id("deny", "run-9")
+    cont = job_custom_id("continue", "run-9")
+    assert always == "discord-os:job:always:run-9"
+    assert deny == "discord-os:job:deny:run-9"
+    assert cont == "discord-os:job:continue:run-9"
+    assert job_action_from_custom_id(always).action == "always"
+    assert job_action_from_custom_id(deny).action == "deny"
+    assert job_action_from_custom_id(cont).action == "continue"
     assert job_action_from_custom_id(ON_ID) is None
     assert job_action_from_custom_id(OFF_ID) is None
     assert job_action_from_custom_id(ASK_ID) is None

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from typing import Any, Mapping, Optional, Sequence
 
 from agent_discord.contracts import UsageReceipt
@@ -12,6 +13,9 @@ HOST_PREFS_WORKSPACE = "_host"
 SPEND_HALT_KEY = "spend_halt"
 SPEND_CAP_KEY = "spend_cap_usd"
 WRITE_GATE_KEY = "write_gate"
+WRITE_SESSION_ALLOW_PREFIX = "write_session_allow:"
+# Always-allow lasts this many seconds, or until HOST Off clears it.
+WRITE_SESSION_ALLOW_TTL_SECONDS = 4 * 3600
 DEFAULT_SPEND_CAP_USD = 10.0
 _INPUT_USD_PER_MTOK = 0.50
 _OUTPUT_USD_PER_MTOK = 1.50
@@ -138,6 +142,105 @@ def seed_write_gate_from_env(store: Any, env: Optional[Mapping[str, str]] = None
     if not raw:
         return
     set_write_gate(store, _truthy(raw))
+
+
+def write_session_allow_key(scope_id: str) -> str:
+    return f"{WRITE_SESSION_ALLOW_PREFIX}{(scope_id or '').strip()}"
+
+
+def set_write_session_allow(
+    store: Any,
+    scope_id: str,
+    *,
+    ttl_seconds: int = WRITE_SESSION_ALLOW_TTL_SECONDS,
+) -> None:
+    """Allow gated writes for this channel/thread until TTL or HOST Off."""
+
+    scope = (scope_id or "").strip()
+    if not scope:
+        return
+    writer = getattr(store, "set_preference", None)
+    if not callable(writer):
+        return
+    ttl = max(60, int(ttl_seconds or WRITE_SESSION_ALLOW_TTL_SECONDS))
+    expires = int(time.time()) + ttl
+    writer(HOST_PREFS_WORKSPACE, write_session_allow_key(scope), str(expires))
+
+
+def write_session_allows_writes(store: Any, scope_id: str) -> bool:
+    """True when Always-allow is still live for this channel or thread."""
+
+    scope = (scope_id or "").strip()
+    if not scope:
+        return False
+    raw = _host_pref(store, write_session_allow_key(scope))
+    if raw is None:
+        return False
+    try:
+        expires = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return False
+    if expires <= int(time.time()):
+        clear_write_session_allow(store, scope)
+        return False
+    return True
+
+
+def clear_write_session_allow(store: Any, scope_id: str) -> None:
+    writer = getattr(store, "set_preference", None)
+    if not callable(writer):
+        return
+    scope = (scope_id or "").strip()
+    if not scope:
+        return
+    writer(HOST_PREFS_WORKSPACE, write_session_allow_key(scope), "0")
+
+
+def clear_write_session_allows(store: Any) -> None:
+    """Drop every Always-allow preference (HOST Off)."""
+
+    lister = getattr(store, "list_preferences", None)
+    writer = getattr(store, "set_preference", None)
+    if not callable(lister) or not callable(writer):
+        return
+    try:
+        rows = list(lister(HOST_PREFS_WORKSPACE, kind="preference"))
+    except TypeError:
+        try:
+            rows = list(lister(HOST_PREFS_WORKSPACE))
+        except Exception:
+            return
+    except Exception:
+        return
+    for row in rows:
+        if isinstance(row, dict):
+            key = str(row.get("key") or "")
+        elif isinstance(row, (tuple, list)) and row:
+            key = str(row[0])
+        else:
+            key = str(getattr(row, "key", "") or "")
+        if key.startswith(WRITE_SESSION_ALLOW_PREFIX):
+            try:
+                writer(HOST_PREFS_WORKSPACE, key, "0")
+            except Exception:
+                pass
+
+
+def writes_need_approval_for(
+    store: Any,
+    *,
+    channel_id: str = "",
+    thread_id: str = "",
+) -> bool:
+    """Gate writes unless Always-allow covers this thread or channel."""
+
+    if not writes_need_approval(store):
+        return False
+    if write_session_allows_writes(store, thread_id):
+        return False
+    if write_session_allows_writes(store, channel_id):
+        return False
+    return True
 
 
 def set_spend_cap_usd(store: Any, cap: float) -> None:

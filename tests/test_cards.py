@@ -167,14 +167,15 @@ def test_working_card_attaches_job_action_row():
     ids = _button_custom_ids(live)
     assert ids == ["discord-os:job:cancel:run-22"]
     parked = working_card(
-        task_label="Approve write",
-        message="Waiting for Approve to write.",
+        task_label="Allow write",
+        message="Waiting for Allow to write.",
         run_id="run-22",
         actions="parked",
     )
     assert _button_custom_ids(parked) == [
         "discord-os:job:approve:run-22",
-        "discord-os:job:cancel:run-22",
+        "discord-os:job:always:run-22",
+        "discord-os:job:deny:run-22",
     ]
     assert "run-22" not in live.text
     progress = progress_card(stage="work", message="card edited", run_id="live-card")
@@ -187,6 +188,8 @@ def test_job_action_custom_ids_stay_under_discord_limit():
     ids = [item["custom_id"] for item in row["components"]]
     assert [item[: item.rfind(":") + 1] for item in ids] == [
         "discord-os:job:approve:",
+        "discord-os:job:always:",
+        "discord-os:job:deny:",
         "discord-os:job:cancel:",
         "discord-os:job:retry:",
     ]

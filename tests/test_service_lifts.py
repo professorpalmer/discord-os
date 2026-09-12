@@ -94,7 +94,7 @@ def test_implement_waits_for_approve(tmp_path: Path):
         TaskIntake(text="implement the login timeout fix", channel_id="ch", workspace_id="ws")
     )
     assert parked.status == TaskStatus.PENDING
-    assert "Approve" in parked.summary
+    assert "Allow" in parked.summary
     assert backend.dispatch_count == 0
     result = orch.apply_job_action("approve", parked.run_id)
     assert result["status"] == TaskStatus.COMPLETED.value

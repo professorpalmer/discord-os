@@ -1285,8 +1285,8 @@ def test_write_gate_approve_and_done_stay_in_job_thread(tmp_path: Path):
     assert _parent_job_cards(fake_discord) == []
     assert _parent_headlines(fake_discord) == []
     parked_blob = _thread_card_blobs(fake_discord, thread_id)
-    assert "Approve write" in parked_blob
-    assert "Waiting for Approve to write." in parked_blob
+    assert "Allow write" in parked_blob
+    assert "Waiting for Allow to write." in parked_blob
 
     result = orch.apply_job_action("approve", parked.run_id)
     assert result["status"] == TaskStatus.COMPLETED.value

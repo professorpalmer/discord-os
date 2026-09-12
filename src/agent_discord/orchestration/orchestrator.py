@@ -684,9 +684,13 @@ class AgentOrchestrator:
         )
         approved = bool(extra_meta.get("approved"))
         if compute_mode == MODE_IMPLEMENT and not approved:
-            from agent_discord.orchestration.service import writes_need_approval
+            from agent_discord.orchestration.service import writes_need_approval_for
 
-            if writes_need_approval(self.store):
+            if writes_need_approval_for(
+                self.store,
+                channel_id=str(intake.channel_id or ""),
+                thread_id=str(job_thread_id or intake.thread_id or ""),
+            ):
                 receipt = self._park_for_approval(
                     intake,
                     task_id=task_id,
@@ -1229,8 +1233,14 @@ class AgentOrchestrator:
         self._set_presence("idle", "Discord OS")
         return receipt
 
-    def apply_job_action(self, action: str, run_id: str) -> dict[str, Any]:
-        """Approve / cancel / retry a stored run. Best-effort, no raises."""
+    def apply_job_action(
+        self,
+        action: str,
+        run_id: str,
+        *,
+        prompt: str = "",
+    ) -> dict[str, Any]:
+        """Allow / Always allow / Deny / cancel / retry / Continue. Best-effort."""
 
         verb = (action or "").strip().lower()
         run = self.store.get_run(run_id) or {}
@@ -1261,6 +1271,12 @@ class AgentOrchestrator:
             return {"action": verb, "run_id": run_id, "status": "missing"}
         if verb == "approve":
             return self._approve_parked_run(run_id)
+        if verb == "always":
+            return self._always_allow_parked_run(run_id)
+        if verb == "deny":
+            return self._deny_parked_run(run_id)
+        if verb == "continue":
+            return self._continue_idle_run(run_id, prompt=prompt)
         return {"action": verb, "run_id": run_id, "status": "ignored"}
 
     def _approve_parked_run(self, run_id: str) -> dict[str, Any]:
@@ -1311,6 +1327,128 @@ class AgentOrchestrator:
             "receipt": receipt,
         }
 
+    def _always_allow_parked_run(self, run_id: str) -> dict[str, Any]:
+        from agent_discord.orchestration.service import set_write_session_allow
+
+        run = self.store.get_run(run_id) or {}
+        task_id = str(run.get("task_id") or "")
+        reader = getattr(self.store, "task_metadata", None)
+        meta = reader(task_id) if callable(reader) and task_id else {}
+        if not isinstance(meta, dict):
+            meta = {}
+        task = self.store.get_task(task_id) or {}
+        scope = (
+            str(task.get("thread_id") or meta.get("thread_id") or "").strip()
+            or str(task.get("channel_id") or meta.get("channel_id") or "").strip()
+        )
+        if scope:
+            set_write_session_allow(self.store, scope)
+        result = self._approve_parked_run(run_id)
+        result["action"] = "always"
+        result["session_allow"] = scope
+        return result
+
+    def _deny_parked_run(self, run_id: str) -> dict[str, Any]:
+        run = self.store.get_run(run_id) or {}
+        task_id = str(run.get("task_id") or "")
+        reader = getattr(self.store, "task_metadata", None)
+        meta = reader(task_id) if callable(reader) and task_id else {}
+        if not isinstance(meta, dict):
+            meta = {}
+        spoken = "Denied. Write was not started."
+        merger = getattr(self.store, "merge_task_metadata", None)
+        if callable(merger) and task_id:
+            try:
+                merger(task_id, {"awaiting_approval": False})
+            except Exception:
+                pass
+        try:
+            self.store.update_run(
+                run_id,
+                status=TaskStatus.FAILED,
+                summary=spoken,
+                error=spoken,
+            )
+        except Exception:
+            pass
+        self._run_status[run_id] = TaskStatus.FAILED
+        if self.post_progress_to_discord and self.discord is not None:
+            task = self.store.get_task(task_id) or {}
+            channel_id = str(task.get("channel_id") or meta.get("channel_id") or "").strip()
+            thread_id = str(task.get("thread_id") or meta.get("thread_id") or "").strip() or None
+            card_mid = str(meta.get("card_message_id") or "").strip()
+            card = receipt_card(
+                RunReceipt(
+                    task_id=task_id,
+                    run_id=run_id,
+                    status=TaskStatus.FAILED,
+                    summary=spoken,
+                    error=spoken,
+                )
+            )
+            try:
+                dest = thread_id or channel_id
+                if card_mid and dest:
+                    edit_card(self.discord, dest, card_mid, card)
+                elif channel_id:
+                    send_card(
+                        self.discord,
+                        channel_id,
+                        card,
+                        thread_id=thread_id,
+                    )
+            except Exception:
+                pass
+        self._set_presence("idle", "Discord OS")
+        return {
+            "action": "deny",
+            "run_id": run_id,
+            "status": TaskStatus.FAILED.value,
+            "summary": spoken,
+        }
+
+    def _continue_idle_run(self, run_id: str, *, prompt: str = "") -> dict[str, Any]:
+        """Start a new tip-parented job in the prior idle Discord thread."""
+
+        from agent_discord.orchestration.job_briefing import DEFAULT_CONTINUE_PROMPT
+
+        run = self.store.get_run(run_id) or {}
+        task_id = str(run.get("task_id") or "")
+        task = self.store.get_task(task_id) if task_id else None
+        if not isinstance(task, dict):
+            return {"action": "continue", "run_id": run_id, "status": "missing"}
+        thread_id = str(task.get("thread_id") or "").strip()
+        channel_id = str(task.get("channel_id") or "").strip()
+        if not thread_id or not channel_id:
+            return {"action": "continue", "run_id": run_id, "status": "missing"}
+        status_raw = str(run.get("status") or "").strip().lower()
+        if status_raw in {"running", "progress", "pending"}:
+            return {
+                "action": "continue",
+                "run_id": run_id,
+                "status": "busy",
+                "summary": "Job is not idle.",
+            }
+        text = (prompt or "").strip() or DEFAULT_CONTINUE_PROMPT
+        intake = TaskIntake(
+            text=text,
+            channel_id=channel_id,
+            workspace_id=str(task.get("workspace_id") or "default"),
+            thread_id=thread_id,
+            requester_id=task.get("requester_id"),
+            metadata={"continued_from": run_id, "inbound_claimed": True},
+        )
+        receipt = self.run_task(intake)
+        return {
+            "action": "continue",
+            "run_id": receipt.run_id,
+            "prior_run_id": run_id,
+            "status": receipt.status.value,
+            "intake_text": text,
+            "thread_id": thread_id,
+            "receipt": receipt,
+        }
+
     def _park_for_approval(
         self,
         intake: TaskIntake,
@@ -1337,7 +1475,7 @@ class AgentOrchestrator:
                     "intake_meta": dict(intake.metadata or {}),
                 },
             )
-        summary = "Waiting for Approve to write."
+        summary = "Waiting for Allow to write."
         try:
             self.store.update_run(run_id, status=TaskStatus.PENDING, summary=summary)
         except Exception:
@@ -1351,7 +1489,7 @@ class AgentOrchestrator:
         )
         if self.post_progress_to_discord and self.discord is not None:
             card = working_card(
-                task_label="Approve write",
+                task_label="Allow write",
                 message=summary,
                 run_id=run_id,
                 actions="parked",

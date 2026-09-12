@@ -11,6 +11,7 @@ from agent_discord.discord.layout import (
     FLAG_COMPONENTS_V2,
     STYLE_DANGER,
     STYLE_PRIMARY,
+    STYLE_SECONDARY,
     STYLE_SUCCESS,
     action_row,
     attachment_component,
@@ -349,17 +350,26 @@ def job_action_row(run_id: str, *, actions: str = "parked") -> dict[str, Any]:
     if mode == "running":
         items = [button("Cancel", job_custom_id("cancel", rid), style=STYLE_DANGER)]
     elif mode == "done":
-        items = [button("Retry", job_custom_id("retry", rid), style=STYLE_PRIMARY)]
+        items = [
+            button("Continue", job_custom_id("continue", rid), style=STYLE_PRIMARY),
+            button("Retry", job_custom_id("retry", rid), style=STYLE_SECONDARY),
+        ]
+    elif mode == "idle":
+        items = [button("Continue", job_custom_id("continue", rid), style=STYLE_PRIMARY)]
     elif mode == "all":
         items = [
-            button("Approve", job_custom_id("approve", rid), style=STYLE_SUCCESS),
-            button("Cancel", job_custom_id("cancel", rid), style=STYLE_DANGER),
-            button("Retry", job_custom_id("retry", rid), style=STYLE_PRIMARY),
+            button("Allow", job_custom_id("approve", rid), style=STYLE_SUCCESS),
+            button("Always allow", job_custom_id("always", rid), style=STYLE_PRIMARY),
+            button("Deny", job_custom_id("deny", rid), style=STYLE_DANGER),
+            button("Cancel", job_custom_id("cancel", rid), style=STYLE_SECONDARY),
+            button("Retry", job_custom_id("retry", rid), style=STYLE_SECONDARY),
         ]
     else:
+        # parked write-gate: DisCode-style Allow / Always allow / Deny
         items = [
-            button("Approve", job_custom_id("approve", rid), style=STYLE_SUCCESS),
-            button("Cancel", job_custom_id("cancel", rid), style=STYLE_DANGER),
+            button("Allow", job_custom_id("approve", rid), style=STYLE_SUCCESS),
+            button("Always allow", job_custom_id("always", rid), style=STYLE_PRIMARY),
+            button("Deny", job_custom_id("deny", rid), style=STYLE_DANGER),
         ]
     return action_row(items)
 
@@ -373,6 +383,7 @@ def receipt_card(
     *,
     max_progress: int = 5,
     thinking: str = "",
+    actions: str = "done",
 ) -> CardMessage:
     title, color = _RECEIPT_TITLES.get(receipt.status, ("Receipt", COLOR_IDLE))
     summary = str(strip_forbidden_keys({"summary": receipt.summary}).get("summary", ""))
@@ -416,7 +427,7 @@ def receipt_card(
         color=color,
         fields=tuple(fields),
         link_url=jump,
-        rows=_job_rows(receipt.run_id, "done"),
+        rows=_job_rows(receipt.run_id, actions),
     )
 
 

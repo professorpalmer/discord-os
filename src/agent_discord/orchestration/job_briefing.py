@@ -17,6 +17,8 @@ PREFIX_WAITING = "Waiting"
 PREFIX_LIVE = "Live"
 PREFIX_LAST = "Last"
 
+DEFAULT_CONTINUE_PROMPT = "Continue from the last tip in this thread."
+
 
 def job_attention(job: Mapping[str, Any]) -> str:
     return str(job.get("attention") or "").strip().lower()
@@ -62,3 +64,10 @@ def normalize_job_code(value: str) -> str:
     if is_job_code(raw):
         return f"{JOB_CODE_PREFIX}{raw[len(JOB_CODE_PREFIX):]}"
     return raw
+
+
+def is_idle_job(job: Mapping[str, Any]) -> bool:
+    """Completed / failed / cancelled runs are idle session tips."""
+
+    status = str(job.get("status") or "").strip().lower()
+    return status in {"completed", "failed", "cancelled"}

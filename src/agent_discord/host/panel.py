@@ -684,6 +684,13 @@ def handle_gateway_interaction(
     confirm_off = action == "off"
     if action in {"on", "off-confirm"}:
         apply_panel_action(store, channel_id, action)
+        if action == "off-confirm":
+            try:
+                from agent_discord.orchestration.service import clear_write_session_allows
+
+                clear_write_session_allows(store)
+            except Exception:
+                pass
         if callable(on_power):
             try:
                 on_power(action == "on")
@@ -1100,21 +1107,63 @@ def _publish_job_card(
     from agent_discord.contracts import RunReceipt, TaskStatus
     from agent_discord.discord.rest import send_channel_message
     from agent_discord.orchestration.cards import receipt_card
+    from agent_discord.orchestration.job_briefing import briefing_line, is_idle_job
 
     status_raw = str(run.get("status") or "completed")
     try:
         status = TaskStatus(status_raw)
     except ValueError:
         status = TaskStatus.COMPLETED
+    task = {}
+    task_getter = getattr(store, "get_task", None)
+    task_id = str(run.get("task_id") or "")
+    if callable(task_getter) and task_id:
+        try:
+            task = task_getter(task_id) or {}
+        except Exception:
+            task = {}
+    job_row = {
+        "run_id": run_id,
+        "status": status.value,
+        "summary": str(run.get("summary") or ""),
+        "intake_text": str(task.get("intake_text") or ""),
+        "job_code": str(task.get("job_code") or ""),
+        "thread_id": str(task.get("thread_id") or ""),
+    }
+    summary = str(run.get("summary") or "No summary.")
+    line = briefing_line(job_row)
+    if line and line not in summary:
+        summary = f"{line}\n{summary}"
+    idle = is_idle_job(job_row) and bool(job_row.get("thread_id"))
+    if status == TaskStatus.PENDING:
+        actions = "parked"
+    elif idle:
+        actions = "idle"
+    elif status == TaskStatus.RUNNING:
+        actions = "running"
+    else:
+        actions = "done"
     card = receipt_card(
         RunReceipt(
-            task_id=str(run.get("task_id") or ""),
+            task_id=task_id,
             run_id=run_id,
             status=status,
-            summary=str(run.get("summary") or "No summary."),
+            summary=summary,
             error=str(run.get("error") or "") or None,
-        )
+        ),
+        actions=actions,
     )
+    if idle:
+        try:
+            from agent_discord.orchestration.service import set_preference_safe
+        except Exception:
+            set_preference_safe = None
+        writer = getattr(store, "set_preference", None)
+        if callable(writer):
+            try:
+                writer("_host", f"pending_continue:{channel_id}", run_id)
+            except Exception:
+                pass
     send_channel_message(
         token=token,
         channel_id=channel_id,

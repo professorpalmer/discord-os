@@ -1638,8 +1638,34 @@ def _start_panel_gateway(
         ask_channel = interaction_channel_id(payload, channel_id)
 
         def on_ask_here(text: str) -> None:
-            if asks is not None and text.strip():
-                asks.put((ask_channel, text.strip(), ""))
+            prompt = (text or "").strip()
+            if not prompt:
+                return
+            pending = ""
+            try:
+                pending = str(
+                    store.get_preference("_host", f"pending_continue:{ask_channel}") or ""
+                ).strip()
+            except Exception:
+                pending = ""
+            if pending and orch is not None:
+                try:
+                    store.set_preference("_host", f"pending_continue:{ask_channel}", "")
+                except Exception:
+                    pass
+                try:
+                    orch.apply_job_action("continue", pending, prompt=prompt)
+                    return
+                except TypeError:
+                    try:
+                        orch.apply_job_action("continue", pending)
+                        return
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+            if asks is not None:
+                asks.put((ask_channel, prompt, ""))
 
         def on_job(action: str, run_id: str) -> None:
             if orch is not None:
@@ -1654,6 +1680,24 @@ def _start_panel_gateway(
                 return
             if action == "retry" and asks is not None:
                 asks.put((ask_channel, f"retry run {run_id}", run_id))
+                return
+            if action == "continue" and asks is not None:
+                from agent_discord.orchestration.job_briefing import DEFAULT_CONTINUE_PROMPT
+
+                asks.put((ask_channel, DEFAULT_CONTINUE_PROMPT, ""))
+                return
+            if action == "deny":
+                try:
+                    from agent_discord.contracts import TaskStatus
+
+                    store.update_run(
+                        run_id,
+                        status=TaskStatus.FAILED,
+                        summary="Denied. Write was not started.",
+                        error="Denied. Write was not started.",
+                    )
+                except Exception:
+                    pass
                 return
             if action != "cancel":
                 return
