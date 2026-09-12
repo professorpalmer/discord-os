@@ -1,4 +1,10 @@
-"""Discord-native harness cards. Skip marker is embed footer ``Discord OS``."""
+"""Discord-native harness cards (Components v2 console).
+
+The live card is always a Components v2 container (``FLAG_COMPONENTS_V2``).
+Embeds exist only as a narrow TypeError fallback in ``send_card`` / ``edit_card``
+for ancient fakes that reject ``flags`` / v2 kwargs — not a production paint path.
+Skip marker remains embed footer ``Discord OS`` for legacy harness detection.
+"""
 
 from __future__ import annotations
 
@@ -61,7 +67,11 @@ _RECEIPT_TITLES = {
 
 @dataclass(frozen=True)
 class CardMessage:
-    """One Discord V2 container. ``text`` is the MCP fallback when V2 is dropped."""
+    """One Discord V2 container.
+
+    Production paint uses ``v2_payload`` / ``v2_components``. ``embeds()`` is
+    TypeError-only legacy. ``text`` is the last-resort MCP/plain fallback.
+    """
 
     kind: str
     title: str
@@ -88,6 +98,7 @@ class CardMessage:
         return redact_text_markers("\n".join(lines))
 
     def embeds(self) -> list[dict[str, Any]]:
+        """Legacy embed shape for TypeError fallbacks only — not production."""
         embed: dict[str, Any] = {
             "title": self.title,
             "color": int(self.color),
@@ -670,6 +681,7 @@ def send_card(
     thread_id: Optional[str] = None,
     components: Optional[list[dict[str, Any]]] = None,
 ) -> Any:
+    """Post a card. Prefer Components v2; embed/text only on TypeError."""
     poster = getattr(discord, "send_message", None)
     if not callable(poster):
         return None
@@ -683,6 +695,7 @@ def send_card(
             flags=payload["flags"],
         )
     except TypeError:
+        # Ancient fakes / signatures: narrow embed fallback, then plain text.
         try:
             return poster(
                 channel_id,
@@ -708,6 +721,7 @@ def edit_card(
     *,
     components: Optional[list[dict[str, Any]]] = None,
 ) -> Any:
+    """Edit a live card. Prefer Components v2; embed/text only on TypeError."""
     editor = getattr(discord, "edit_message", None)
     if not callable(editor):
         raise TypeError("edit_message is not available")

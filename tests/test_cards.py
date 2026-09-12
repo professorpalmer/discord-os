@@ -11,6 +11,7 @@ from agent_discord.discord.layout import (
     TYPE_FILE,
     TYPE_MEDIA_GALLERY,
     TYPE_SECTION,
+    TYPE_TEXT,
     TYPE_THUMBNAIL,
     iter_component_text,
     progress_bar,
@@ -19,6 +20,7 @@ from agent_discord.discord.layout import (
 )
 from agent_discord.host.panel import ASK_ID, OFF_ID, ON_ID
 from agent_discord.contracts import RunReceipt, TaskStatus
+from agent_discord.discord.providers.fake import FakeDiscordMCPProvider
 from agent_discord.orchestration.cards import (
     CARD_FOOTER,
     CODE_BODY_MAX,
@@ -29,11 +31,13 @@ from agent_discord.orchestration.cards import (
     code_card,
     connect_card,
     diff_card,
+    edit_card,
     host_card,
     job_action_row,
     object_card,
     progress_card,
     receipt_card,
+    send_card,
     working_card,
 )
 
@@ -265,3 +269,108 @@ def test_v2_thinking_plus_summary_stays_under_budget():
     joined = "\n".join(texts)
     assert "X" * 40 in joined
     assert ("X" * (THINKING_BODY_MAX + 1)) not in joined
+
+
+def test_job_receipt_progress_cards_emit_v2():
+    """P1.8: job / receipt / progress paint FLAG_COMPONENTS_V2 containers."""
+    progress = progress_card(stage="work", message="editing", percent=40, run_id="r1")
+    p = progress.v2_payload()
+    assert p["flags"] == FLAG_COMPONENTS_V2
+    assert p["components"][0]["type"] == TYPE_CONTAINER
+    kinds = [c["type"] for c in p["components"][0]["components"]]
+    assert TYPE_TEXT in kinds
+    assert TYPE_ACTION_ROW in kinds
+    assert _button_custom_ids(progress) == ["discord-os:job:cancel:r1"]
+
+    done = receipt_card(
+        RunReceipt(
+            task_id="t",
+            run_id="r2",
+            status=TaskStatus.COMPLETED,
+            summary="shipped the card upgrade",
+        ),
+        actions="done",
+    )
+    d = done.v2_payload()
+    assert d["flags"] == FLAG_COMPONENTS_V2
+    assert d["components"][0]["type"] == TYPE_CONTAINER
+    assert _button_custom_ids(done) == [
+        "discord-os:job:continue:r2",
+        "discord-os:job:retry:r2",
+    ]
+    assert "shipped the card upgrade" in _joined(done)
+
+    parked = working_card(
+        task_label="Allow write",
+        message="Waiting for Allow to write.",
+        run_id="r3",
+        actions="parked",
+    )
+    w = parked.v2_payload()
+    assert w["flags"] == FLAG_COMPONENTS_V2
+    assert w["components"][0]["type"] == TYPE_CONTAINER
+    assert _button_custom_ids(parked) == [
+        "discord-os:job:approve:r3",
+        "discord-os:job:always:r3",
+        "discord-os:job:deny:r3",
+    ]
+
+    idle = receipt_card(
+        RunReceipt(
+            task_id="t",
+            run_id="r4",
+            status=TaskStatus.COMPLETED,
+            summary="ready",
+        ),
+        actions="idle",
+    )
+    assert _button_custom_ids(idle) == ["discord-os:job:continue:r4"]
+
+
+def test_send_and_edit_card_prefer_v2_not_embeds():
+    fake = FakeDiscordMCPProvider()
+    card = progress_card(stage="work", message="live", run_id="live-1")
+    posted = send_card(fake, "chan-1", card, thread_id="thread-1")
+    assert posted is not None
+    meta = posted.metadata or {}
+    assert meta.get("flags") == FLAG_COMPONENTS_V2
+    assert meta.get("components")
+    assert meta["components"][0]["type"] == TYPE_CONTAINER
+    assert not meta.get("embeds")
+
+    edited = edit_card(fake, "chan-1", posted.message_id, card)
+    emeta = edited.metadata or {}
+    assert emeta.get("flags") == FLAG_COMPONENTS_V2
+    assert emeta.get("components")
+    assert not emeta.get("embeds")
+
+
+def test_send_card_typeerror_falls_back_to_embeds():
+    """Ancient signatures that reject flags still get a narrow embed paint."""
+
+    class Ancient:
+        def __init__(self):
+            self.calls = []
+
+        def send_message(self, channel_id, content, *, thread_id=None, embeds=None, components=None):
+            self.calls.append(
+                {
+                    "channel_id": channel_id,
+                    "content": content,
+                    "thread_id": thread_id,
+                    "embeds": embeds,
+                    "components": components,
+                }
+            )
+            return {"ok": True, "embeds": embeds}
+
+    ancient = Ancient()
+    card = working_card(task_label="wave", message="hello", run_id="r9")
+    send_card(ancient, "c1", card, thread_id="t1")
+    assert len(ancient.calls) == 1
+    call = ancient.calls[0]
+    assert call["embeds"]
+    assert call["embeds"][0]["title"] == "Wave"
+    assert call["embeds"][0]["footer"]["text"] == CARD_FOOTER
+    # v2 rows were not accepted on this signature; components arg is the extra rows only
+    assert call["components"] is None or call["components"] == []
