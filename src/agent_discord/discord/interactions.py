@@ -6,9 +6,11 @@ host verbs behind slash chrome. It does not open a second Gateway.
 Discord requires a public HTTPS URL and a 3s ACK. Bind loopback; tunnel if
 you opt in. Slash ``/connect`` never accepts a secret option.
 
-P2.9: thin slash aliases ``/bind`` ``/status`` ``/on`` ``/off`` ``/stop``
-mirror text verbs when ``AGENT_DISCORD_INTERACTIONS=http`` and commands are
-registered. Text + HOST panel remain the default. No slash ``/add``.
+P2.9 / Discord-half P2: thin slash aliases ``/bind`` ``/status`` ``/on``
+``/off`` ``/stop`` plus read-only ``/job`` mirror text verbs when
+``AGENT_DISCORD_INTERACTIONS=http`` and commands are registered. Opt-in
+autocomplete enriches ``/bind`` names and ``/job`` ``DOS-*`` codes.
+Text + HOST panel remain the default. No slash ``/add``.
 """
 
 from __future__ import annotations
@@ -25,9 +27,12 @@ from agent_discord.keys.connect import handle_connect_message
 
 INTERACTION_PING = 1
 INTERACTION_APPLICATION_COMMAND = 2
+INTERACTION_APPLICATION_COMMAND_AUTOCOMPLETE = 4
 RESPONSE_PONG = 1
 RESPONSE_CHANNEL_MESSAGE = 4
+RESPONSE_AUTOCOMPLETE = 8
 EPHEMERAL = 64
+MAX_AUTOCOMPLETE_CHOICES = 25
 
 CONNECT_COMMAND = {
     "name": "connect",
@@ -78,6 +83,21 @@ BIND_COMMAND = {
             "description": "Realm name, memory, or host <id> (e.g. puppetmaster / memory / host lab)",
             "type": 3,
             "required": False,
+            "autocomplete": True,
+        },
+    ],
+}
+JOB_COMMAND = {
+    "name": "job",
+    "description": "Read-only lookup for a DOS-* job code (phone autocomplete)",
+    "type": 1,
+    "options": [
+        {
+            "name": "code",
+            "description": "Speakable job code (DOS-10001)",
+            "type": 3,
+            "required": True,
+            "autocomplete": True,
         },
     ],
 }
@@ -106,6 +126,7 @@ OPT_IN_COMMANDS = (
     CONNECT_COMMAND,
     OPEN_COMMAND,
     BIND_COMMAND,
+    JOB_COMMAND,
     STATUS_COMMAND,
     ON_COMMAND,
     OFF_COMMAND,
@@ -159,6 +180,8 @@ def handle_interaction_payload(
     kind = int(payload.get("type") or 0)
     if kind == INTERACTION_PING:
         return {"type": RESPONSE_PONG}
+    if kind == INTERACTION_APPLICATION_COMMAND_AUTOCOMPLETE:
+        return _handle_autocomplete(payload, workspace=workspace, env=env)
     if kind != INTERACTION_APPLICATION_COMMAND:
         return _ephemeral("unsupported interaction")
     data = payload.get("data") if isinstance(payload.get("data"), Mapping) else {}
@@ -188,6 +211,13 @@ def handle_interaction_payload(
             name_opt=str(options.get("name") or "").strip(),
             workspace=workspace,
             env=env,
+        )
+    if name == "job":
+        options = _option_map(data.get("options"))
+        return _handle_job_slash(
+            payload,
+            code=str(options.get("code") or "").strip(),
+            workspace=workspace,
         )
     return _ephemeral("unknown command")
 
@@ -490,6 +520,170 @@ def _handle_bind_slash(
         return _ephemeral(f"Bound {name}")
     except Exception as exc:  # noqa: BLE001
         return _ephemeral(f"bind failed: {exc}")
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
+
+
+def _handle_autocomplete(
+    payload: Mapping[str, Any],
+    *,
+    workspace: Path,
+    env: Optional[Mapping[str, str]] = None,
+) -> dict[str, Any]:
+    """Discord type-4 autocomplete for /bind name and /job code."""
+
+    data = payload.get("data") if isinstance(payload.get("data"), Mapping) else {}
+    name = str(data.get("name") or "").lower()
+    focused = _focused_option(data.get("options"))
+    needle = str(focused.get("value") or "").strip().lower()
+    if name == "bind" and focused.get("name") == "name":
+        choices = _bind_autocomplete_choices(needle, workspace=workspace, env=env)
+        return {"type": RESPONSE_AUTOCOMPLETE, "data": {"choices": choices}}
+    if name == "job" and focused.get("name") == "code":
+        channel_id = _channel_id(payload)
+        choices = _job_autocomplete_choices(
+            needle, workspace=workspace, channel_id=channel_id
+        )
+        return {"type": RESPONSE_AUTOCOMPLETE, "data": {"choices": choices}}
+    return {"type": RESPONSE_AUTOCOMPLETE, "data": {"choices": []}}
+
+
+def _focused_option(raw: Any) -> dict[str, str]:
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        return {}
+    for item in raw:
+        if not isinstance(item, Mapping):
+            continue
+        if item.get("focused"):
+            return {
+                "name": str(item.get("name") or ""),
+                "value": str(item.get("value") or ""),
+            }
+    for item in raw:
+        if isinstance(item, Mapping) and item.get("name"):
+            return {
+                "name": str(item.get("name") or ""),
+                "value": str(item.get("value") or ""),
+            }
+    return {}
+
+
+def _bind_autocomplete_choices(
+    needle: str,
+    *,
+    workspace: Path,
+    env: Optional[Mapping[str, str]] = None,
+) -> list[dict[str, str]]:
+    from agent_discord.host.repos import load_host_repos
+    from agent_discord.host.runners import load_host_allowlist
+
+    _ = workspace  # reserved if bindings later seed suggestions
+    suggestions: list[str] = ["memory"]
+    try:
+        repos = load_host_repos(env=env) if env is not None else load_host_repos()
+        for repo in repos:
+            suggestions.append(repo.name)
+            for alias in repo.aliases or ():
+                if alias and alias.lower() not in {s.lower() for s in suggestions}:
+                    suggestions.append(str(alias))
+    except Exception:
+        pass
+    try:
+        allow = load_host_allowlist(env=env) if env is not None else load_host_allowlist()
+        for host in allow or ():
+            hid = str(getattr(host, "id", "") or "").strip()
+            if hid:
+                suggestions.append(f"host {hid}")
+    except Exception:
+        pass
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for item in suggestions:
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(item)
+    if needle:
+        ordered = [s for s in ordered if needle in s.lower()]
+    return [
+        {"name": label[:100], "value": label[:100]}
+        for label in ordered[:MAX_AUTOCOMPLETE_CHOICES]
+    ]
+
+
+def _job_autocomplete_choices(
+    needle: str,
+    *,
+    workspace: Path,
+    channel_id: str = "",
+) -> list[dict[str, str]]:
+    store = None
+    try:
+        store = _open_store(workspace)
+        lister = getattr(store, "list_recent_jobs", None)
+        if not callable(lister):
+            return []
+        rows = lister(channel_id or "", limit=25) or []
+        out: list[dict[str, str]] = []
+        for row in rows:
+            code = str(row.get("job_code") or "").strip()
+            if not code:
+                continue
+            status = str(row.get("status") or "").strip()
+            label = f"{code} · {status}" if status else code
+            if needle and needle not in code.lower() and needle not in label.lower():
+                continue
+            out.append({"name": label[:100], "value": code[:100]})
+            if len(out) >= MAX_AUTOCOMPLETE_CHOICES:
+                break
+        return out
+    except Exception:
+        return []
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
+
+
+def _handle_job_slash(
+    payload: Mapping[str, Any],
+    *,
+    code: str,
+    workspace: Path,
+) -> dict[str, Any]:
+    """Read-only DOS-* lookup. Never mutates job state."""
+
+    _ = payload
+    raw = (code or "").strip()
+    if not raw:
+        return _ephemeral("job needs a DOS-* code")
+    store = None
+    try:
+        store = _open_store(workspace)
+        getter = getattr(store, "get_task_by_job_code", None)
+        if not callable(getter):
+            return _ephemeral("job lookup unavailable")
+        task = getter(raw) or {}
+        if not task:
+            return _ephemeral(f"No job for {raw}")
+        job_code = str(task.get("job_code") or raw).strip()
+        status = str(task.get("status") or "").strip() or "unknown"
+        summary = str(task.get("intake_text") or "").strip().replace("\n", " ")
+        if len(summary) > 120:
+            summary = summary[:119].rstrip() + "…"
+        line = f"{job_code} · {status}"
+        if summary:
+            line += f" · {summary}"
+        return _ephemeral(line)
+    except Exception as exc:  # noqa: BLE001
+        return _ephemeral(f"job failed: {exc}")
     finally:
         if store is not None:
             try:

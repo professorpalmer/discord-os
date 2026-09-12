@@ -1,6 +1,6 @@
-# Slash progressive enhancement (P2.9)
+# Slash progressive enhancement (P2.9 / Discord-half P2)
 
-Phone autocomplete for bind / status / stop without replacing text listen.
+Phone autocomplete for bind / job / status / stop without replacing text listen.
 
 ## Default off
 
@@ -24,7 +24,8 @@ discord-os interactions --serve
 
 | Slash | Same as text | Notes |
 |---|---|---|
-| `/bind` | `bind` / `/bind` | Optional `name`: realm, `memory`, or `host <id>` |
+| `/bind` | `bind` / `/bind` | Optional `name` with **autocomplete** (realms, `memory`, `host <id>`) |
+| `/job` | (read-only) | Required `code` with **DOS-*** autocomplete; ephemeral status line |
 | `/status` | `/status` | Read-only digest; never mutates power |
 | `/on` | `/on` | Arms channel; may seed owner if empty |
 | `/off` | `/off` | Disarms |
@@ -34,8 +35,18 @@ discord-os interactions --serve
 
 **Not registered:** `/add`. Use `discord-os add …` or in-channel `bind`.
 
+## Autocomplete
+
+Discord type-4 focus events return up to 25 choices:
+
+- `/bind name` — host repos + aliases, `memory`, allowlisted `host <id>`
+- `/job code` — recent `DOS-*` codes from workspace SQLite (channel-scoped when known)
+
+Re-run `discord-os interactions --register` after upgrading so Discord sees
+`autocomplete: true` on those options.
+
 ## Wiring
 
-Handlers open workspace SQLite and reuse power/bind parse + absorb helpers. HOST card paint stays on the Gateway listen loop. Slash ACK is ephemeral.
+Handlers open workspace SQLite and reuse power/bind parse + absorb helpers. HOST card paint stays on the Gateway listen loop. Slash ACK is ephemeral. `/job` never mutates job state.
 
 Code: `src/agent_discord/discord/interactions.py`.

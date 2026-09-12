@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
 ENV_TTS = "DISCORD_OS_TTS"
+ENV_VOICE_JOIN = "DISCORD_OS_VOICE_JOIN"
 SPEAK_TIMEOUT_S = 45
 MAX_SPEAK_CHARS = 800
 
@@ -37,6 +38,7 @@ _SECRET_ARGV_MARKERS = (
 
 __all__ = [
     "ENV_TTS",
+    "ENV_VOICE_JOIN",
     "SpeakResult",
     "VoiceJoinError",
     "available",
@@ -176,15 +178,24 @@ def join_voice_channel(
     """Stub: Discord gateway voice join is deferred (see docs/host/voice.md).
 
     Always fail closed. Does not open a gateway, UDP socket, or load Opus /
-    NaCl. ``DISCORD_OS_TTS`` does not unlock join — that is a separate,
-    heavier surface.
+    NaCl. ``DISCORD_OS_TTS`` does not unlock join. Setting
+    ``DISCORD_OS_VOICE_JOIN`` is also an honest Deny in this spike — the
+    knob is reserved, not implemented.
     """
 
-    _ = env  # reserved for a future explicit DISCORD_OS_VOICE_JOIN opt-in
+    source = dict(os.environ if env is None else env)
     guild = str(guild_id or "").strip()
     channel = str(channel_id or "").strip()
+    join_opt = str(source.get(ENV_VOICE_JOIN) or "").strip().lower()
     if not guild or not channel:
         deny = spoken_voice_join_deny(reason="missing guild or channel id")
+    elif join_opt in _TRUTHY:
+        deny = spoken_voice_join_deny(
+            reason=(
+                f"{ENV_VOICE_JOIN} is reserved but not implemented "
+                "(gateway voice + Opus/UDP deferred)"
+            )
+        )
     else:
         deny = spoken_voice_join_deny(
             reason="not implemented (gateway voice + Opus/UDP deferred)"

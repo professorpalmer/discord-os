@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Discord-half P2 (10–13) — slash autocomplete, non-blocking polls, forum skip, voice honesty
+
+- **Slash progressive enhancement (opt-in)**: `/bind name` and new read-only
+  `/job code` register with Discord autocomplete (realms / memory / host ids;
+  recent `DOS-*`). Text listen + HOST panel remain default. No `/add`.
+- **Polls only for non-blocking asks**: `ask_poll.build_nonblocking_poll` /
+  `post_nonblocking_ask_poll` post Discord native polls for preference-style
+  choices. Live gate holds stay on Components cards — `live=True` hard-refuses
+  polls (`LiveGatePollError`). Docs: [ask-poll](docs/cards/ask-poll.md).
+- **Forum-as-realm**: **skipped** (not S–M; would duplicate JobPool; catalog
+  `forum-tags` rank **never**). Documented in [realms](docs/realms/README.md).
+- **Voice honesty polish**: `DISCORD_OS_VOICE_JOIN` reserved but still spoken
+  Deny; TTS opt-in still does not unlock join. Stub only — not a desk/voice
+  product. Docs: [voice](docs/host/voice.md).
+- No version bump — parent pack cuts 0.5.52 when ready.
+
 ## 0.5.51
 
 Discord-half P1 pack — accent+Section chrome, File settle, dos: router, ACK-first, ephemeral Pair/Gate.

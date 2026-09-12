@@ -42,3 +42,12 @@ The host scans GitHub on that checkout before dispatch. The worker prompt starts
 - `src/agent_discord/host/repos.py` — catalog, name match, host reach
 - `src/agent_discord/orchestration/listen.py` — `_absorb_bind`
 - `src/agent_discord/persistence/sqlite.py` — `merge_binding_metadata` (must merge, not wipe)
+
+## Forum-as-realm (Discord-half P2 — skipped)
+
+**Skipped (not S–M).** Discord forum channels as a second realm / job system
+would duplicate JobPool + session threads. The AWS catalog ranks
+`forum-tags` as **never** for that reason. Categories may later group realms
+visually; forums are not a checkout bind surface. See
+[aws map](../aws/README.md) and `src/agent_discord/data/aws_catalog.json`.
+

@@ -238,6 +238,7 @@ def send_channel_message(
     thread_id: Optional[str] = None,
     components: Optional[list[dict[str, Any]]] = None,
     embeds: Optional[list[dict[str, Any]]] = None,
+    poll: Optional[Mapping[str, Any]] = None,
     flags: int = 0,
     opener: Optional[UrlOpener] = None,
 ) -> DiscordMessage:
@@ -254,6 +255,9 @@ def send_channel_message(
             payload["embeds"] = list(embeds)
         if components:
             payload["components"] = list(components)
+    if poll is not None:
+        # Discord native polls (non-blocking preference asks). Not for live gates.
+        payload["poll"] = dict(poll)
     raw = call_discord_json(
         token,
         "POST",

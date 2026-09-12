@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 from agent_discord.cli import main
 from agent_discord.discord.interactions import (
     BIND_COMMAND,
+    JOB_COMMAND,
     CONNECT_COMMAND,
     INTERACTION_APPLICATION_COMMAND,
     INTERACTION_PING,
@@ -130,7 +131,7 @@ def test_register_opt_in_commands_posts_connect_and_open():
         guild_id="guild-1",
         opener=opener,
     )
-    expected = ["connect", "open", "bind", "status", "on", "off", "stop"]
+    expected = ["connect", "open", "bind", "job", "status", "on", "off", "stop"]
     assert names == expected
     assert [item["name"] for item in posted] == expected
     assert "options" not in posted[0]

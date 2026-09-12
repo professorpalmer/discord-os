@@ -158,4 +158,4 @@ Opt-in local spoken Done on this Mac. Discord voice-channel join is stubbed
 
 ## Slash (opt-in)
 
-Text binds and the HOST panel are the default. Slash is optional (default off) and mirrors the same verbs when registered — `/bind`, `/status`, `/on`, `/off`, `/stop`, `/open`, `/connect`. Not required for doctor, binds, or jobs. No `/add`. See [slash.md](slash.md). Code: `src/agent_discord/discord/interactions.py`.
+Text binds and the HOST panel are the default. Slash is optional (default off) and mirrors the same verbs when registered — `/bind` (name autocomplete), `/job` (DOS-* autocomplete), `/status`, `/on`, `/off`, `/stop`, `/open`, `/connect`. Not required for doctor, binds, or jobs. No `/add`. See [slash.md](slash.md). Code: `src/agent_discord/discord/interactions.py`.
