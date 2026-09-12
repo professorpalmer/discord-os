@@ -1,12 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.5.38
 
 P2.9 Slash progressive enhancement (still opt-in).
 
 - Thin slash aliases `/bind`, `/status`, `/on`, `/off`, `/stop` (stop = off) registered only when `AGENT_DISCORD_INTERACTIONS=http` + `discord-os interactions --register`.
 - Handlers reuse power/bind absorb parse paths against workspace SQLite; text listen + HOST panel stay default. No `/add`.
 - Docs: [docs/setup/README.md](docs/setup/README.md), [docs/host/slash.md](docs/host/slash.md).
+
+Closes round-2 haul (P0–P2).
 
 ## 0.5.37
 
