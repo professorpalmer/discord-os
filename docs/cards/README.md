@@ -12,11 +12,15 @@ Harness cards (`**Card**`, `**Receipt**`, HOST, NOTE) are skipped on intake so t
 
 A follow-up in a **live** job thread steers that worker. A follow-up after Done starts a new job in the same thread (session), parented at the prior tip. Do not start a nested thread.
 
+State → button set / accent / stage (write-gate Allow / Always / Deny, Continue) is the [reactive spike](reactive.md). Not Activities. Not a client UI.
+
 ![next-level cards](../screenshots/next-level-cards.png)
 
 ## Code
 
 - `src/agent_discord/orchestration/cards.py` — builders, skip rules, `send_card` / `edit_card` (v2 primary)
+- `src/agent_discord/orchestration/reactive.py` — state → button set / accent / stage (P2.14 spike)
 - `src/agent_discord/orchestration/orchestrator.py` — reply-first thread, one live card, persist-then-settle
-- `src/agent_discord/host/panel.py` — HOST + Jobs Continue receipts via `v2_payload`
-- Tests: `tests/test_cards.py`, `tests/test_write_gate_buttons.py`, `tests/test_orchestration.py`
+- `src/agent_discord/host/panel.py` — HOST + Jobs Continue receipts via `reactive_for_job`
+- Tests: `tests/test_cards.py`, `tests/test_reactive_cards.py`, `tests/test_write_gate_buttons.py`, `tests/test_orchestration.py`
+- Spike: [reactive.md](reactive.md)

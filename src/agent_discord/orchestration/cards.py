@@ -4,6 +4,8 @@ The live card is always a Components v2 container (``FLAG_COMPONENTS_V2``).
 Embeds exist only as a narrow TypeError fallback in ``send_card`` / ``edit_card``
 for ancient fakes that reject ``flags`` / v2 kwargs — not a production paint path.
 Skip marker remains embed footer ``Discord OS`` for legacy harness detection.
+
+State → button set / accent / stage lives in ``reactive.py`` (P2.14 spike).
 """
 
 from __future__ import annotations

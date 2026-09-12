@@ -1107,7 +1107,8 @@ def _publish_job_card(
     from agent_discord.contracts import RunReceipt, TaskStatus
     from agent_discord.discord.rest import send_channel_message
     from agent_discord.orchestration.cards import receipt_card
-    from agent_discord.orchestration.job_briefing import briefing_line, is_idle_job
+    from agent_discord.orchestration.job_briefing import briefing_line
+    from agent_discord.orchestration.reactive import reactive_for_job
 
     status_raw = str(run.get("status") or "completed")
     try:
@@ -1134,15 +1135,7 @@ def _publish_job_card(
     line = briefing_line(job_row)
     if line and line not in summary:
         summary = f"{line}\n{summary}"
-    idle = is_idle_job(job_row) and bool(job_row.get("thread_id"))
-    if status == TaskStatus.PENDING:
-        actions = "parked"
-    elif idle:
-        actions = "idle"
-    elif status == TaskStatus.RUNNING:
-        actions = "running"
-    else:
-        actions = "done"
+    paint = reactive_for_job(job_row)
     card = receipt_card(
         RunReceipt(
             task_id=task_id,
@@ -1151,9 +1144,9 @@ def _publish_job_card(
             summary=summary,
             error=str(run.get("error") or "") or None,
         ),
-        actions=actions,
+        actions=paint.actions,
     )
-    if idle:
+    if paint.actions == "idle":
         try:
             from agent_discord.orchestration.service import set_preference_safe
         except Exception:

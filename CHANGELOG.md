@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+Reactive card spike (P2.14).
+
+- `reactive_paint` maps job state → button set / accent / stage used by write-gate Allow / Always allow / Deny and Continue.
+- Docs: [docs/cards/reactive.md](docs/cards/reactive.md). Not Activities. Not a client UI.
+
 ## 0.5.27
 
 Companion web dashboard (P2.12). Read-only.
