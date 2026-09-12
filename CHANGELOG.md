@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.29
 
 Voice channel join + TTS spike (P2.13). Thin. Fail closed.
 
