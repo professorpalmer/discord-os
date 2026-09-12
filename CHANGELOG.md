@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.33
 
 P1.4 Per-tool / AskUserQuestion gate (surgical phone approve).
 
