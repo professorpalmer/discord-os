@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.30
 
 P0.1 SSH cook-or-Deny (honesty). Fail closed.
 
