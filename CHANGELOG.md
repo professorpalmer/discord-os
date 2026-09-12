@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.25
+
+DisCode write-gate. Jobs Continue. Honest Done. V2 console.
+
+- Parked implement cards: Allow / Always allow / Deny; Always-allow is a 4h session prefer cleared on HOST Off.
+- HOST Jobs → Continue starts a tip-parented job in the same thread.
+- Spoken Done for platform lock, missing agentic CLI, and no_model; voice memos without whisper speak instead of silent skip.
+- Live cards stay Components v2; embeds are TypeError fallback only. Slash stays opt-in in docs.
+
 ## 0.5.24
 
 Host doctor. Spend strings parse. Idle sessions soak two follow-ups.
