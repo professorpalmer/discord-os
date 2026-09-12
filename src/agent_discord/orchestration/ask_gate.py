@@ -81,7 +81,7 @@ ALLOWED_TOOL_SPOKEN = "Allowed."
 ALWAYS_TOOL_SPOKEN = "Always allowed for this class this session."
 
 _SPOKEN_ALLOW = frozenset({"allow", "allowed", "approve", "yes", "y", "ok", "okay"})
-_SPOKEN_DENY = frozenset({"deny", "denied", "no", "n", "reject", "block"})
+_SPOKEN_DENY = frozenset({"deny", "denied", "no", "n", "reject", "block", "cancel", "cancelled", "canceled"})
 _SPOKEN_ALWAYS = frozenset(
     {
         "always",

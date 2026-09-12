@@ -5,8 +5,8 @@ running, settle, and HOST Jobs reprint all go through
 ``reactive_paint`` / ``reactive_for_job`` so button set / accent / stage
 stay one source of truth.
 
-Write-gate Allow / Always allow / Deny, ask-gate parked rows, Cancel,
-and Jobs Continue live here. Discord Activities and a full client UI do not.
+Write-gate Allow / Always allow / Deny, plan Approve / Cancel, ask-gate
+parked rows, Cancel, and Jobs Continue live here. Discord Activities and a full client UI do not.
 """
 
 from __future__ import annotations
@@ -29,12 +29,14 @@ from agent_discord.orchestration.cards import (
 from agent_discord.orchestration.job_briefing import is_idle_job
 
 ACTIONS_PARKED = "parked"
+ACTIONS_PLAN = "plan"
 ACTIONS_RUNNING = "running"
 ACTIONS_IDLE = "idle"
 ACTIONS_DONE = "done"
 
 # Labels the write-gate and Continue rows must keep. Styles stay in cards.py.
 PARKED_BUTTONS = ("Allow", "Always allow", "Deny")
+PLAN_BUTTONS = ("Approve", "Cancel")
 RUNNING_BUTTONS = ("Cancel",)
 IDLE_BUTTONS = ("Continue",)
 DONE_BUTTONS = ("Continue", "Retry")
@@ -62,12 +64,14 @@ def reactive_paint(
     status: Union[str, TaskStatus, None] = None,
     *,
     awaiting_approval: bool = False,
+    awaiting_plan: bool = False,
     has_thread: bool = False,
 ) -> ReactivePaint:
     """Map a job row to the button set / accent / stage the card will show.
 
     Matches HOST Jobs + write-gate park today:
 
+    - awaiting_plan → plan Approve / Cancel (P2.8; not write-gate Always)
     - pending (or explicit awaiting_approval) → parked Allow / Always / Deny
     - completed / failed / cancelled with a thread → idle Continue
     - running → Cancel
@@ -75,6 +79,12 @@ def reactive_paint(
     """
 
     state = _as_status(status)
+    if awaiting_plan:
+        return ReactivePaint(
+            actions=ACTIONS_PLAN,
+            accent=COLOR_WORK,
+            stage="Approve plan",
+        )
     if awaiting_approval or state is TaskStatus.PENDING:
         return ReactivePaint(
             actions=ACTIONS_PARKED,
@@ -97,9 +107,14 @@ def reactive_paint(
 def reactive_for_job(job: Mapping[str, Any]) -> ReactivePaint:
     """HOST / briefing path: one SQLite-ish row → paint."""
 
+    awaiting_plan = bool(job.get("awaiting_plan")) or str(
+        job.get("gate_kind") or ""
+    ).strip() == "plan_approve"
+    awaiting_approval = bool(job.get("awaiting_approval")) and not awaiting_plan
     return reactive_paint(
         job.get("status"),
-        awaiting_approval=bool(job.get("awaiting_approval")),
+        awaiting_approval=awaiting_approval,
+        awaiting_plan=awaiting_plan,
         has_thread=bool(str(job.get("thread_id") or "").strip()),
     )
 
@@ -179,6 +194,8 @@ def action_labels(actions: str) -> tuple[str, ...]:
         return IDLE_BUTTONS
     if mode == ACTIONS_DONE:
         return DONE_BUTTONS
+    if mode == ACTIONS_PLAN:
+        return PLAN_BUTTONS
     return PARKED_BUTTONS
 
 

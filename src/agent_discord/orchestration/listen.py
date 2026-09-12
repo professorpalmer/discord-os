@@ -548,15 +548,23 @@ def _absorb_spoken_gate(
     channel_id: str,
     thread_id: Optional[str],
 ) -> bool:
-    """Spoken Allow / Always / Deny for parked write or tool/ask gates."""
+    """Spoken Allow / Always / Deny for parked write or tool/ask gates.
+
+    Plan parks (P2.8) accept Approve / Deny / Cancel only — never Always.
+    """
 
     from agent_discord.orchestration.ask_gate import parse_spoken_gate_verb
+    from agent_discord.orchestration.plan_approve import parse_spoken_plan_verb
 
-    verb = parse_spoken_gate_verb(text)
-    if verb is None:
-        return False
     run_id = _parked_run_for_destination(store, channel_id=channel_id, thread_id=thread_id)
     if not run_id:
+        return False
+    verb = None
+    if _parked_is_plan(store, run_id):
+        verb = parse_spoken_plan_verb(text)
+    else:
+        verb = parse_spoken_gate_verb(text)
+    if verb is None:
         return False
     if not _claim_inbound(store, discord, message, channel_id):
         return True
@@ -568,6 +576,27 @@ def _absorb_spoken_gate(
     except Exception:
         pass
     return True
+
+
+def _parked_is_plan(store: Any, run_id: str) -> bool:
+    getter = getattr(store, "get_run", None)
+    if not callable(getter):
+        return False
+    try:
+        run = getter(run_id) or {}
+    except Exception:
+        return False
+    task_id = str(run.get("task_id") or "")
+    reader = getattr(store, "task_metadata", None)
+    if not callable(reader) or not task_id:
+        return False
+    try:
+        meta = reader(task_id) or {}
+    except Exception:
+        return False
+    from agent_discord.orchestration.plan_approve import is_plan_gate_meta
+
+    return is_plan_gate_meta(meta if isinstance(meta, dict) else {})
 
 
 def _parked_run_for_destination(

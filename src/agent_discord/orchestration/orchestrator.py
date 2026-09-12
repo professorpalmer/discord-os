@@ -1299,6 +1299,9 @@ class AgentOrchestrator:
         verb = (action or "").strip().lower()
         run = self.store.get_run(run_id) or {}
         if verb == "cancel":
+            # Plan park Cancel = deny plan (ExitPlanMode), not live-cook interrupt.
+            if self._task_awaiting_gate(run_id) and self._gate_kind(run_id) == "plan_approve":
+                return self._resolve_plan_gate(run_id, "deny")
             try:
                 self.backend.cancel(run_id)
             except Exception:
@@ -1335,6 +1338,18 @@ class AgentOrchestrator:
             return self._resolve_ask_option(rid, option_index)
         if verb in {"approve", "always", "deny", "expire"}:
             if self._task_awaiting_gate(run_id):
+                if self._gate_kind(run_id) == "plan_approve":
+                    if verb == "always":
+                        # Plan park has no Always — fail closed / ignore.
+                        return {
+                            "action": "always",
+                            "run_id": run_id,
+                            "status": "ignored",
+                            "summary": "Plan Approve has no Always; use Approve or Cancel.",
+                        }
+                    if verb == "expire":
+                        return self.expire_parked_run(run_id)
+                    return self._resolve_plan_gate(run_id, verb)
                 if verb == "expire":
                     return self.expire_parked_run(run_id)
                 return self._resolve_tool_gate(run_id, verb)
@@ -1425,11 +1440,21 @@ class AgentOrchestrator:
             EXPIRED_TOOL_SPOKEN,
             GATE_KIND_ASK,
         )
+        from agent_discord.orchestration.plan_approve import (
+            EXPIRED_PLAN_SPOKEN,
+            GATE_KIND_PLAN,
+        )
         from agent_discord.orchestration.service import EXPIRED_WRITE_SPOKEN
 
         spoken = EXPIRED_WRITE_SPOKEN
         if self._task_awaiting_gate(run_id):
             kind = self._gate_kind(run_id)
+            if kind == GATE_KIND_PLAN:
+                result = self._resolve_plan_gate(
+                    run_id, "deny", spoken=EXPIRED_PLAN_SPOKEN
+                )
+                result["action"] = "expire"
+                return result
             spoken = EXPIRED_ASK_SPOKEN if kind == GATE_KIND_ASK else EXPIRED_TOOL_SPOKEN
             result = self._resolve_tool_gate(run_id, "deny", spoken=spoken)
             result["action"] = "expire"
@@ -1700,6 +1725,150 @@ class AgentOrchestrator:
             "summary": summary,
         }
 
+    def raise_plan_approve(
+        self,
+        run_id: str,
+        *,
+        plan_text: str = "",
+        summary: str = "",
+        plan_status: str = "ready",
+        message: str = "",
+    ) -> dict[str, Any]:
+        """Park after plan-ready for Approve / Cancel (no Always).
+
+        Adapters call this when ``plan_ready_decision`` returns ``ask``.
+        Empty / unknown plan fails closed (denied) — do not invent a plan.
+        """
+
+        import time
+
+        from agent_discord.orchestration.plan_approve import (
+            GATE_KIND_PLAN,
+            plan_approve_card,
+            plan_meta_payload,
+            plan_ready_decision,
+        )
+        from agent_discord.orchestration.reactive import reactive_paint
+
+        decision = plan_ready_decision(plan_text, plan_status=plan_status)
+        if decision.decision == "deny":
+            return {
+                "action": "raise_plan_approve",
+                "run_id": run_id,
+                "status": "denied",
+                "summary": f"Denied. {decision.reason or 'unknown plan'}.",
+                "gate_kind": GATE_KIND_PLAN,
+            }
+        run = self.store.get_run(run_id) or {}
+        task_id = str(run.get("task_id") or "")
+        if not task_id:
+            return {"action": "raise_plan_approve", "run_id": run_id, "status": "missing"}
+        task = self.store.get_task(task_id) or {}
+        reader = getattr(self.store, "task_metadata", None)
+        meta = reader(task_id) if callable(reader) else {}
+        if not isinstance(meta, dict):
+            meta = {}
+        parked_ms = int(time.time() * 1000)
+        patch = plan_meta_payload(
+            plan_text=decision.plan_text,
+            summary=summary,
+            parked_at_ms=parked_ms,
+        )
+        channel_id = str(task.get("channel_id") or meta.get("channel_id") or "").strip()
+        thread_id = str(task.get("thread_id") or meta.get("thread_id") or "").strip() or None
+        patch["channel_id"] = channel_id
+        patch["thread_id"] = thread_id
+        merger = getattr(self.store, "merge_task_metadata", None)
+        if callable(merger):
+            merger(task_id, patch)
+        spoken_summary = "Waiting for Approve to implement."
+        try:
+            self.store.update_run(run_id, status=TaskStatus.PENDING, summary=spoken_summary)
+        except Exception:
+            pass
+        self._run_status[run_id] = TaskStatus.PENDING
+        card = plan_approve_card(
+            run_id,
+            plan_text=decision.plan_text,
+            message=message or spoken_summary,
+            summary=summary,
+        )
+        self._paint_gate_card(
+            card,
+            channel_id=channel_id,
+            thread_id=thread_id,
+            task_id=task_id,
+            meta=meta,
+            stage=reactive_paint(awaiting_plan=True).stage,
+        )
+        self._set_presence("idle", "Discord OS")
+        return {
+            "action": "raise_plan_approve",
+            "run_id": run_id,
+            "status": "parked",
+            "gate_kind": GATE_KIND_PLAN,
+            "summary": spoken_summary,
+        }
+
+    def _resolve_plan_gate(
+        self,
+        run_id: str,
+        verb: str,
+        *,
+        spoken: str = "",
+    ) -> dict[str, Any]:
+        from agent_discord.orchestration.plan_approve import (
+            APPROVED_PLAN_SPOKEN,
+            DENIED_PLAN_SPOKEN,
+            GATE_KIND_PLAN,
+            is_plan_gate_meta,
+        )
+
+        run = self.store.get_run(run_id) or {}
+        task_id = str(run.get("task_id") or "")
+        reader = getattr(self.store, "task_metadata", None)
+        meta = reader(task_id) if callable(reader) and task_id else {}
+        if not isinstance(meta, dict) or not meta.get("awaiting_gate"):
+            return {"action": verb, "run_id": run_id, "status": "missing"}
+        if not is_plan_gate_meta(meta) and str(meta.get("gate_kind") or "") != GATE_KIND_PLAN:
+            return {"action": verb, "run_id": run_id, "status": "ignored"}
+        if verb == "approve":
+            out = self._finish_gate(
+                run_id,
+                result="allow",
+                answer="",
+                spoken=spoken or APPROVED_PLAN_SPOKEN,
+                action="approve",
+            )
+            # Mark plan approved so a follow-up implement can skip re-plan park.
+            merger = getattr(self.store, "merge_task_metadata", None)
+            if callable(merger) and task_id:
+                try:
+                    merger(
+                        task_id,
+                        {
+                            "plan_approved": True,
+                            "awaiting_plan": False,
+                            "intake_meta": {
+                                **dict(meta.get("intake_meta") or {}),
+                                "approved": True,
+                                "plan_approved": True,
+                            },
+                        },
+                    )
+                except Exception:
+                    pass
+            return out
+        # deny / cancel
+        return self._finish_gate(
+            run_id,
+            result="deny",
+            answer="",
+            spoken=spoken or DENIED_PLAN_SPOKEN,
+            action="deny" if verb == "deny" else verb,
+            failed=True,
+        )
+
     def gate_result_for(self, run_id: str) -> dict[str, Any]:
         """Adapter poll: gate_result / gate_answer from task metadata."""
 
@@ -1844,6 +2013,7 @@ class AgentOrchestrator:
                     {
                         "awaiting_approval": False,
                         "awaiting_gate": False,
+                        "awaiting_plan": False,
                         "gate_result": result,
                         "gate_answer": answer,
                     },

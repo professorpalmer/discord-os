@@ -16,10 +16,12 @@ from agent_discord.orchestration.reactive import (
     ACTIONS_DONE,
     ACTIONS_IDLE,
     ACTIONS_PARKED,
+    ACTIONS_PLAN,
     ACTIONS_RUNNING,
     DONE_BUTTONS,
     IDLE_BUTTONS,
     PARKED_BUTTONS,
+    PLAN_BUTTONS,
     RUNNING_BUTTONS,
     action_labels,
     reactive_action_row,
@@ -185,4 +187,20 @@ def test_ask_gate_parked_row_uses_reactive_paint():
         "discord-os:job:always:run-gate",
         "discord-os:job:deny:run-gate",
     ]
+
+
+def test_plan_awaiting_uses_approve_cancel_row():
+    paint = reactive_paint(awaiting_plan=True)
+    assert paint.actions == ACTIONS_PLAN
+    assert paint.stage == "Approve plan"
+    assert action_labels(paint.actions) == PLAN_BUTTONS
+    assert _labels(reactive_action_row("run-plan", paint)) == list(PLAN_BUTTONS)
+    assert _labels(job_action_row("run-plan", actions=paint.actions)) == [
+        "Approve",
+        "Cancel",
+    ]
+    job = reactive_for_job(
+        {"status": "pending", "awaiting_plan": True, "gate_kind": "plan_approve", "thread_id": "th"}
+    )
+    assert job.actions == ACTIONS_PLAN
 

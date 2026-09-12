@@ -11,6 +11,7 @@ The live card is a `FLAG_COMPONENTS_V2` container edited in the job thread (`sen
 | State | How we get there | Buttons | Accent | Stage |
 |---|---|---|---|---|
 | parked | write-gate implement, HOST Jobs on `pending`, or mid-run tool/ask gate ([ask-gate](ask-gate.md)) | Allow / Always allow / Deny | work gold | Allow write / tool |
+| plan | plan-ready park ([plan-approve](plan-approve.md)) | Approve / Cancel | work gold | Approve plan |
 | running | live cook | **Cancel** (phone interrupt on the live v2 card) | work gold | Working |
 | idle | Done / Failed / Cancelled **and** a job thread | Continue | live / fail / idle | Done / Failed / Cancelled |
 | done | settled receipt without a session thread | Continue + Retry | receipt chrome | receipt title |
@@ -46,7 +47,7 @@ Do not hardcode `actions="parked"` / `"running"` / `"idle"` / `"done"` at park, 
 
 ## Code
 
-- `src/agent_discord/orchestration/reactive.py` — `ReactivePaint`, `reactive_paint`, `reactive_for_job`, `reactive_working_card`, `reactive_progress_card`, `reactive_receipt_card`
+- `src/agent_discord/orchestration/reactive.py` — `ReactivePaint`, `reactive_paint` (`awaiting_plan` → `ACTIONS_PLAN`), `reactive_for_job`, `reactive_working_card`, `reactive_progress_card`, `reactive_receipt_card`
 - `src/agent_discord/orchestration/cards.py` — builders + `job_action_row`
 - `src/agent_discord/orchestration/orchestrator.py` — park / running / settle / deny via reactive helpers
 - `src/agent_discord/orchestration/ask_gate.py` — tool / ask parked rows via `reactive_paint`

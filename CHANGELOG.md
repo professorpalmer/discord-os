@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+P2.8 Plan-mode Approve card (c-lord ExitPlanMode shape).
+
+- When plan is ready, park with **Approve / Cancel** (not write-gate Always) via `raise_plan_approve`.
+- Reuses approval timeout; reactive `actions=plan` row; spoken Deny / Cancel / expire.
+- Fail closed on empty / unknown plan status. Full PM plan-hook deferred.
+- Docs: [docs/cards/plan-approve.md](docs/cards/plan-approve.md).
+
 ## 0.5.36
 
 P2.7 Discord RO status digest from dashboard data.

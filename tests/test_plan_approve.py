@@ -1,0 +1,203 @@
+"""P2.8 Plan-mode Approve / Cancel park seam."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from agent_discord.contracts import TaskIntake, TaskStatus
+from agent_discord.discord.facade import DiscordFacade
+from agent_discord.discord.providers.fake import FakeDiscordMCPProvider
+from agent_discord.host.actions import job_custom_id
+from agent_discord.orchestration.orchestrator import AgentOrchestrator
+from agent_discord.orchestration.plan_approve import (
+    APPROVED_PLAN_SPOKEN,
+    DENIED_PLAN_SPOKEN,
+    EXPIRED_PLAN_SPOKEN,
+    GATE_KIND_PLAN,
+    normalize_plan_status,
+    parse_spoken_plan_verb,
+    plan_approve_card,
+    plan_ready_decision,
+)
+from agent_discord.orchestration.reactive import (
+    ACTIONS_PLAN,
+    PLAN_BUTTONS,
+    action_labels,
+    reactive_paint,
+)
+from agent_discord.orchestration.service import expire_parked_approvals
+from agent_discord.persistence.sqlite import SQLiteStore
+from agent_discord.puppetmaster.fake import FakePuppetmasterBackend
+
+
+def _orch(tmp_path: Path):
+    store = SQLiteStore(tmp_path / "plan-approve.sqlite3")
+    store.initialize()
+    fake = FakeDiscordMCPProvider()
+    facade = DiscordFacade(fake, bot_token_fingerprint="fp", owner_id="test")
+    backend = FakePuppetmasterBackend()
+    orch = AgentOrchestrator(
+        store=store,
+        backend=backend,
+        discord=facade,
+        post_progress_to_discord=True,
+    )
+    return orch, store, fake, backend
+
+
+def test_plan_ready_decision_fail_closed():
+    denied = plan_ready_decision("")
+    assert denied.decision == "deny"
+    assert denied.reason == "unknown plan"
+    denied_status = plan_ready_decision("do the thing", plan_status="totally-novel")
+    assert denied_status.decision == "deny"
+    assert denied_status.reason == "unknown plan status"
+    ok = plan_ready_decision("1. edit cards\n2. flush", plan_status="ready")
+    assert ok.decision == "ask"
+    assert "edit cards" in ok.plan_text
+    assert normalize_plan_status("plan-ready") == "plan_ready"
+    assert normalize_plan_status("bogus") is None
+
+
+def test_plan_approve_card_is_approve_cancel_not_always():
+    card = plan_approve_card(
+        "run-p1",
+        plan_text="Edit backend.py then flush the Discord card.",
+        summary="Plan",
+    )
+    assert card.kind == "PLAN"
+    assert card.title == "Approve plan"
+    row = card.rows[0]
+    labels = [c["label"] for c in row["components"]]
+    assert labels == ["Approve", "Cancel"]
+    assert "Always allow" not in labels
+    ids = [c["custom_id"] for c in row["components"]]
+    assert ids == [
+        job_custom_id("approve", "run-p1"),
+        job_custom_id("cancel", "run-p1"),
+    ]
+    paint = reactive_paint(awaiting_plan=True)
+    assert paint.actions == ACTIONS_PLAN
+    assert action_labels(paint.actions) == PLAN_BUTTONS
+    assert paint.stage == "Approve plan"
+
+
+def test_spoken_plan_verbs_no_always():
+    assert parse_spoken_plan_verb("Approve") == "approve"
+    assert parse_spoken_plan_verb("Allow") == "approve"
+    assert parse_spoken_plan_verb("Deny") == "deny"
+    assert parse_spoken_plan_verb("Cancel") == "deny"
+    assert parse_spoken_plan_verb("always allow") is None
+    assert parse_spoken_plan_verb("please approve the plan later") is None
+
+
+def test_raise_plan_approve_approve_and_cancel(tmp_path: Path):
+    orch, store, fake, backend = _orch(tmp_path)
+    receipt = orch.run_task(
+        TaskIntake(
+            text="review the billing module",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="plan-1",
+        )
+    )
+    assert receipt.status == TaskStatus.COMPLETED
+    denied = orch.raise_plan_approve(receipt.run_id, plan_text="", plan_status="ready")
+    assert denied["status"] == "denied"
+
+    parked = orch.raise_plan_approve(
+        receipt.run_id,
+        plan_text="1. patch routing\n2. add tests",
+        summary="Ship plan",
+        plan_status="ready",
+    )
+    assert parked["status"] == "parked"
+    assert parked["gate_kind"] == GATE_KIND_PLAN
+    meta = store.task_metadata(receipt.task_id)
+    assert meta.get("awaiting_gate") is True
+    assert meta.get("awaiting_plan") is True
+    assert meta.get("gate_kind") == GATE_KIND_PLAN
+
+    # Always is ignored on plan park
+    ignored = orch.apply_job_action("always", receipt.run_id)
+    assert ignored["status"] == "ignored"
+    assert store.task_metadata(receipt.task_id).get("awaiting_gate") is True
+
+    approved = orch.apply_job_action("approve", receipt.run_id)
+    assert approved["gate_result"] == "allow"
+    assert APPROVED_PLAN_SPOKEN in approved["summary"]
+    assert orch.gate_result_for(receipt.run_id)["gate_result"] == "allow"
+    meta2 = store.task_metadata(receipt.task_id)
+    assert meta2.get("awaiting_gate") is False
+    assert meta2.get("plan_approved") is True
+
+    # Fresh park then Cancel → deny
+    second = orch.run_task(
+        TaskIntake(
+            text="review invoices again",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="plan-2",
+        )
+    )
+    parked2 = orch.raise_plan_approve(
+        second.run_id,
+        plan_text="Retry with Cancel path.",
+        plan_status="ready",
+    )
+    assert parked2["status"] == "parked"
+    cancelled = orch.apply_job_action("cancel", second.run_id)
+    assert cancelled["gate_result"] == "deny"
+    assert DENIED_PLAN_SPOKEN in cancelled["summary"]
+    assert backend.dispatch_count >= 1
+    store.close()
+
+
+def test_raise_plan_approve_unknown_status_fails_closed(tmp_path: Path):
+    orch, store, fake, backend = _orch(tmp_path)
+    receipt = orch.run_task(
+        TaskIntake(
+            text="review something",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="plan-unk",
+        )
+    )
+    result = orch.raise_plan_approve(
+        receipt.run_id,
+        plan_text="a real plan",
+        plan_status="not-a-real-status",
+    )
+    assert result["status"] == "denied"
+    store.close()
+
+
+def test_approval_timeout_expires_plan_gate(tmp_path: Path):
+    orch, store, fake, backend = _orch(tmp_path)
+    receipt = orch.run_task(
+        TaskIntake(
+            text="review timeout plan",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="plan-exp",
+        )
+    )
+    parked = orch.raise_plan_approve(
+        receipt.run_id,
+        plan_text="Expire me.",
+        plan_status="ready",
+    )
+    assert parked["status"] == "parked"
+    store.merge_task_metadata(receipt.task_id, {"parked_at_ms": 1})
+    expired = expire_parked_approvals(
+        orch,
+        now_ms=1 + 21 * 60 * 1000,
+        env={"DISCORD_OS_APPROVAL_TIMEOUT_MINUTES": "20"},
+    )
+    assert len(expired) == 1
+    assert expired[0]["action"] == "expire"
+    assert EXPIRED_PLAN_SPOKEN in expired[0]["summary"]
+    run = store.get_run(receipt.run_id)
+    assert run["status"] == TaskStatus.FAILED.value
+    assert EXPIRED_PLAN_SPOKEN in (run.get("summary") or "")
+    store.close()
