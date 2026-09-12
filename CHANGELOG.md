@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+P2.7 Discord RO status digest from dashboard data.
+
+- Push read-only snapshot (power / spend / jobs / allowlist ids) to the host channel or `DISCORD_OS_STATUS_THREAD_ID` on On, `/status`, and listen on-change (debounced).
+- Reuses `build_status_snapshot`; fail closed — never mutates power; no secrets / SSH targets.
+- Docs: [docs/host/status-digest.md](docs/host/status-digest.md).
+
 ## 0.5.35
 
 P1.6 Reactive seam finish.

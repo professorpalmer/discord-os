@@ -110,6 +110,14 @@ discord-os host dashboard --once   # print JSON snapshot, no server
 
 JSON: `GET /api/status`. HTML: `GET /`. Code: `src/agent_discord/host/dashboard.py`.
 
+## Discord RO status digest (P2.7)
+
+Phone-visible copy of the dashboard RO facts (power / spend / jobs / allowlist
+ids). Posts to the host channel (or `DISCORD_OS_STATUS_THREAD_ID`) on **On**,
+`/status`, and listen on-change. Debounced. Never mutates power. See
+[status-digest.md](status-digest.md).
+
+
 ## Other host verbs
 
 - `/open [here|host] terminal|files|browser` — dest-explicit. `here` lists files or returns a link in Discord. `host` opens a GUI. Browser with a URL defaults to here.
@@ -139,6 +147,7 @@ Opt-in local spoken Done on this Mac. Discord voice-channel join is stubbed
 - `src/agent_discord/host/doctor.py` — operators require check
 - `src/agent_discord/host/dashboard.py` — read-only companion web dashboard
 - `src/agent_discord/host/liveness.py` — phone-visible digest / HOST Need (P0.2)
+- `src/agent_discord/host/status_digest.py` — Discord RO status digest from dashboard (P2.7)
 - `src/agent_discord/discord/tts.py` — local TTS + voice-join stub (P2.13)
 - `src/agent_discord/host/install.py` — login item
 - `src/agent_discord/host/actions.py` — Terminal / files / browser

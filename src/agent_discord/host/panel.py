@@ -727,6 +727,8 @@ def handle_gateway_interaction(
                 on_power(action == "on")
             except Exception:
                 pass
+        if action == "on":
+            _post_status_digest_on_arm(store, channel_id, token=token, opener=opener)
     armed = _channel_armed(store, channel_id)
     if confirm_off:
         armed = True
@@ -747,6 +749,60 @@ def handle_gateway_interaction(
     except Exception as exc:
         print(f"panel paint failed: {exc}", flush=True)
     return action
+
+
+
+def _post_status_digest_on_arm(
+    store: Any,
+    channel_id: str,
+    *,
+    token: str = "",
+    opener: Any = None,
+) -> None:
+    """P2.7: push RO dashboard digest when HOST On. Never mutates power."""
+
+    if not (token or "").strip():
+        return
+    try:
+        from agent_discord.host.status_digest import tick_status_digest
+    except Exception:
+        return
+    workspace = None
+    try:
+        meta_reader = getattr(store, "path", None) or getattr(store, "db_path", None)
+        if meta_reader is not None:
+            from pathlib import Path as _Path
+
+            workspace = _Path(meta_reader).parent
+    except Exception:
+        workspace = None
+    if workspace is None:
+        return
+
+    class _RestPoster:
+        def send_message(self, dest: str, body: str, thread_id: str | None = None) -> None:
+            from agent_discord.discord.rest import send_channel_message
+
+            # Prefer explicit status thread id as channel target when provided.
+            target = (thread_id or "").strip() or dest
+            send_channel_message(
+                token=token,
+                channel_id=target,
+                content=body,
+                opener=opener,
+            )
+
+    try:
+        tick_status_digest(
+            _RestPoster(),
+            workspace=workspace,
+            channel_id=channel_id,
+            store=store,
+            force=True,
+            min_interval_s=0,
+        )
+    except Exception:
+        pass
 
 
 def _channel_armed(store: Any, channel_id: str) -> bool:

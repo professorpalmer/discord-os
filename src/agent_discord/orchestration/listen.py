@@ -773,6 +773,41 @@ def _tick_host_liveness_best_effort(
         )
     except Exception:
         pass
+    _tick_status_digest_best_effort(
+        discord,
+        store,
+        channel_id=channel_id,
+        workspace_id=workspace_id,
+        workspace=workspace,
+    )
+
+
+def _tick_status_digest_best_effort(
+    discord: Any,
+    store: Any,
+    *,
+    channel_id: str,
+    workspace_id: str,
+    workspace: Optional[Path],
+    force: bool = False,
+) -> None:
+    """P2.7 RO dashboard snapshot → Discord (debounced). Never mutates power."""
+
+    if workspace is None:
+        return
+    try:
+        from agent_discord.host.status_digest import tick_status_digest
+
+        tick_status_digest(
+            discord,
+            workspace=Path(workspace),
+            channel_id=channel_id,
+            store=store,
+            workspace_id=workspace_id,
+            force=force,
+        )
+    except Exception:
+        pass
 
 
 def _follow_thread_id(
@@ -1068,6 +1103,17 @@ def _absorb_power(
     if parsed.action in {"on", "off"} and callable(writer):
         writer(channel_id, armed=parsed.action == "on")
     publish_host_card(discord, store, channel_id, thread_id=thread_id)
+    # P2.7: /status and On push RO dashboard facts to Discord (phone). Read-only.
+    if parsed.action in {"on", "status"}:
+        ws = _workspace_from_store_or_meta(store, discord)
+        _tick_status_digest_best_effort(
+            discord,
+            store,
+            channel_id=channel_id,
+            workspace_id=str(getattr(orchestrator, "workspace_id", None) or "default"),
+            workspace=ws,
+            force=True,
+        )
 
 
 
