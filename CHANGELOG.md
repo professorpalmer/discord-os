@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.28
 
 Reactive card spike (P2.14).
 
