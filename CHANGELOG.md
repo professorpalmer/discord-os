@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.5.42
 
-Round-3 full P1 pack (no version bump — parent cuts 0.5.42).
+Round-3 full P1 pack.
 
 ### Plan ExitPlanMode → `raise_plan_approve` (live)
 
@@ -39,6 +39,8 @@ Round-3 full P1 pack (no version bump — parent cuts 0.5.42).
 
 Tests: plan hold, gateway health, spend honesty, doctor-notify watchdog,
 operators public FAIL.
+
+Closes round-3 haul (0.5.39–0.5.42): Cursor purge, Path A remote cook, live ask-gate, plan hold, watchdog, WS ACK, operators push, honest spend.
 
 ## 0.5.41
 
