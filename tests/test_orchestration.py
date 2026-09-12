@@ -2023,16 +2023,27 @@ def test_idle_session_two_sequential_followups_advance_thread_watermark(tmp_path
 
 
 
-def test_ssh_host_cook_denies_without_local_worker(tmp_path: Path, monkeypatch):
-    """P0.1: bound kind=ssh must spoken-Deny; Fake backend must not run."""
+def test_ssh_host_cook_denies_when_unreachable(tmp_path: Path, monkeypatch):
+    """Path A: bound kind=ssh Denies when ssh unreachable; Fake never runs."""
 
     import json
 
     orch, store, fake_discord, backend = _orch(tmp_path)
+
+    class _Bad:
+        returncode = 255
+        stdout = ""
+        stderr = "ssh: connect to host lab.local port 22: Connection refused"
+
+    def _exec(argv, *, timeout_seconds=0):
+        return _Bad()
+
+    orch.ssh_exec = _exec
     monkeypatch.setenv(
         "DISCORD_OS_HOSTS",
         json.dumps([{"id": "lab", "label": "Lab", "ssh": "cary@lab.local"}]),
     )
+    monkeypatch.setenv("DISCORD_OS_SSH_COOK", "1")
     store.merge_binding_metadata("ws", "ch", {"host_id": "lab", "host_label": "Lab"})
     receipt = orch.run_task(
         TaskIntake(
@@ -2044,8 +2055,94 @@ def test_ssh_host_cook_denies_without_local_worker(tmp_path: Path, monkeypatch):
     )
     assert backend.last_request is None
     assert "Denied" in receipt.summary
-    assert "routing only" in receipt.summary or "Deny until remote cook" in receipt.summary
     assert "lab" in receipt.summary
+    assert "ssh unreachable" in receipt.summary.lower() or "Deny" in receipt.summary
+
+
+def test_ssh_host_cook_denies_when_kill_switch(tmp_path: Path, monkeypatch):
+    """DISCORD_OS_SSH_COOK=0 restores spoken Deny; never local cook."""
+
+    import json
+
+    orch, store, fake_discord, backend = _orch(tmp_path)
+    monkeypatch.setenv(
+        "DISCORD_OS_HOSTS",
+        json.dumps([{"id": "lab", "label": "Lab", "ssh": "cary@lab.local"}]),
+    )
+    monkeypatch.setenv("DISCORD_OS_SSH_COOK", "0")
+    store.merge_binding_metadata("ws", "ch", {"host_id": "lab", "host_label": "Lab"})
+    receipt = orch.run_task(
+        TaskIntake(
+            text="review invoices",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="inbound-ssh-off",
+        )
+    )
+    assert backend.last_request is None
+    assert "Denied" in receipt.summary
+    assert "lab" in receipt.summary
+
+
+def test_ssh_host_remote_cook_uses_ssh_not_local(tmp_path: Path, monkeypatch):
+    """Path A: allowlisted ssh cooks via mock ssh; Fake local backend stays idle."""
+
+    import json
+
+    orch, store, fake_discord, backend = _orch(tmp_path)
+    calls: list[list[str]] = []
+
+    class _Proc:
+        def __init__(self, argv):
+            self.returncode = 0
+            # Probe uses trailing "true"; cook runs puppetmaster agentic.
+            if argv and argv[-1] == "true":
+                self.stdout = ""
+                self.stderr = ""
+            else:
+                self.stdout = json.dumps(
+                    {"summary": "remote lab done", "ok": True}
+                )
+                self.stderr = ""
+
+    def _exec(argv, *, timeout_seconds=0):
+        calls.append(list(argv))
+        return _Proc(argv)
+
+    orch.ssh_exec = _exec
+    monkeypatch.setenv(
+        "DISCORD_OS_HOSTS",
+        json.dumps(
+            [
+                {
+                    "id": "lab",
+                    "label": "Lab",
+                    "ssh": "cary@lab.local",
+                    "workdir": "/Users/cary/Projects",
+                }
+            ]
+        ),
+    )
+    monkeypatch.setenv("DISCORD_OS_SSH_COOK", "1")
+    store.merge_binding_metadata("ws", "ch", {"host_id": "lab", "host_label": "Lab"})
+    receipt = orch.run_task(
+        TaskIntake(
+            text="review invoices",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="inbound-ssh-cook",
+        )
+    )
+    assert backend.last_request is None  # never silent local cook
+    assert receipt.status == TaskStatus.COMPLETED
+    assert "Denied" not in (receipt.summary or "")
+    assert calls, "expected ssh probe and/or cook"
+    assert any(c[:3] == ["ssh", "-o", "BatchMode=yes"] for c in calls)
+    assert any("puppetmaster" in " ".join(c) or "agentic" in " ".join(c) for c in calls)
+    joined = " ".join(" ".join(c) for c in calls)
+    assert "token=" not in joined
+    assert "OPENROUTER_API_KEY" not in joined
+    assert "ghp_" not in joined
 
 
 def test_local_path_host_still_cooks(tmp_path: Path, monkeypatch):

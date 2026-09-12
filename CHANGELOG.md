@@ -1,6 +1,18 @@
 # Changelog
 
+## Unreleased
+
+P0 Path A: real SSH / remote cook.
+
+- Allowlisted `kind=ssh` hosts cook via `host_runner_argv` + SSH `BatchMode=yes` → remote `puppetmaster agentic` (OpenRouter on the remote).
+- Unreachable ssh / `DISCORD_OS_SSH_COOK=0` → spoken Deny; **never** silent local cook on the control-plane Mac.
+- `kind=local` / path still cooks on this Mac. Empty allowlist single-host unchanged.
+- Doctor **OK**s cook-capable ssh hosts; **WARN**s unreachable (`ssh unreachable / Deny`).
+- Credentials never in argv (no OpenRouter key tunnel). Tests mock ssh/probe.
+- Docs: [docs/host/README.md](docs/host/README.md).
+
 ## 0.5.39
+
 
 Rip Cursor / PM-cursor adapter out of Discord OS. Product compute is OpenRouter / agentic only.
 

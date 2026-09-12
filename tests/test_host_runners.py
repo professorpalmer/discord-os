@@ -10,6 +10,13 @@ import pytest
 from agent_discord.host.doctor import run_doctor
 from agent_discord.host.install import SERVICE_LABEL
 from agent_discord.host.power import is_power_command, parse_power_command
+from agent_discord.host.remote_cook import (
+    SSH_COOK_CAPABLE,
+    SSH_COOK_UNREACHABLE,
+    build_remote_agentic_argv,
+    probe_ssh_host,
+    ssh_cook_enabled,
+)
 from agent_discord.host.runners import (
     SSH_COOK_STATUS,
     HostAllowlistError,
@@ -27,6 +34,7 @@ from agent_discord.host.runners import (
     spoken_ssh_cook_deny,
     validate_host_allowlist,
 )
+from agent_discord.contracts import ContextSnapshot, DispatchRequest
 from agent_discord.persistence.sqlite import SQLiteStore
 
 
@@ -213,10 +221,34 @@ def test_validate_and_doctor_allowlist(tmp_path: Path, monkeypatch) -> None:
         "DISCORD_OS_HOSTS",
         json.dumps([{"id": "lab", "ssh": "cary@lab.local"}]),
     )
+    monkeypatch.setenv("DISCORD_OS_SSH_COOK", "1")
+
+    def _fake_probe(host, **kwargs):
+        return True, SSH_COOK_CAPABLE
+
+    monkeypatch.setattr(
+        "agent_discord.host.doctor.probe_ssh_host"
+        if False
+        else "agent_discord.host.remote_cook.probe_ssh_host",
+        _fake_probe,
+    )
+    # Doctor imports probe inside the function — patch the module used at call time.
+    import agent_discord.host.remote_cook as rc
+
+    monkeypatch.setattr(rc, "probe_ssh_host", _fake_probe)
     code, lines = run_doctor(workspace=ws, plist_path=plist, home=home)
     assert any("host allowlist 1: lab" in line for line in lines), lines
     assert any(
-        "WARN host ssh lab:" in line and SSH_COOK_STATUS in line for line in lines
+        "OK host ssh lab:" in line and "cook-capable" in line for line in lines
+    ), lines
+
+    def _fail_probe(host, **kwargs):
+        return False, "Connection refused"
+
+    monkeypatch.setattr(rc, "probe_ssh_host", _fail_probe)
+    code, lines = run_doctor(workspace=ws, plist_path=plist, home=home)
+    assert any(
+        "WARN host ssh lab:" in line and SSH_COOK_UNREACHABLE in line for line in lines
     ), lines
 
     monkeypatch.setenv(
@@ -248,17 +280,13 @@ def test_bind_unknown_host_raises(tmp_path: Path) -> None:
     store.close()
 
 
-def test_ssh_cook_denied_local_path_allowed(tmp_path: Path) -> None:
-    """P0.1: ssh bind must not cook locally; local/path still may."""
+def test_ssh_cook_allowed_local_path_allowed(tmp_path: Path) -> None:
+    """Path A: ssh kind is cook-eligible; local/path still may; argv stays clean."""
 
     ssh = RemoteHost(id="lab", label="Lab", kind="ssh", target="cary@lab.local")
-    with pytest.raises(HostAllowlistError) as exc:
-        assert_host_cook_allowed(ssh)
-    spoken = str(exc.value.spoken)
-    assert spoken.startswith("Denied.")
-    assert "lab" in spoken
-    assert SSH_COOK_STATUS in spoken
+    assert_host_cook_allowed(ssh)  # no raise — remote cook path owns reachability
     assert SSH_COOK_STATUS in spoken_ssh_cook_deny("lab")
+    assert ssh_cook_enabled() is True
 
     # Empty / None: single-host unchanged.
     assert_host_cook_allowed(None)
@@ -271,7 +299,6 @@ def test_ssh_cook_denied_local_path_allowed(tmp_path: Path) -> None:
     )
     assert_host_cook_allowed(local)  # no raise
 
-    # host_runner_argv still builds mockable remote path (Path A building block).
     argv = host_runner_argv(ssh, ["puppetmaster", "agentic", "status"])
     assert argv[:3] == ["ssh", "-o", "BatchMode=yes"]
     joined = " ".join(argv)
@@ -280,7 +307,7 @@ def test_ssh_cook_denied_local_path_allowed(tmp_path: Path) -> None:
 
 
 def test_ssh_bound_channel_cook_gate(tmp_path: Path) -> None:
-    """resolve + assert: bound ssh channel fails closed before local cook."""
+    """resolve + assert: bound ssh is cook-eligible; local still allowed."""
 
     allow = (
         RemoteHost(id="lab", label="Lab", kind="ssh", target="cary@lab.local"),
@@ -299,9 +326,7 @@ def test_ssh_bound_channel_cook_gate(tmp_path: Path) -> None:
         store, "ch-ssh", workspace_id="ws", allowlist=allow
     )
     assert host is not None and host.kind == "ssh"
-    with pytest.raises(HostAllowlistError) as exc:
-        assert_host_cook_allowed(host)
-    assert SSH_COOK_STATUS in str(exc.value.spoken)
+    assert_host_cook_allowed(host)
 
     bind_channel_host(
         store,
@@ -316,3 +341,59 @@ def test_ssh_bound_channel_cook_gate(tmp_path: Path) -> None:
     assert local is not None and local.kind == "local"
     assert_host_cook_allowed(local)
     store.close()
+
+
+def test_remote_cook_argv_and_mock_probe() -> None:
+    """Path A building blocks: agentic argv over ssh; probe mockable."""
+
+    ssh = RemoteHost(id="lab", label="Lab", kind="ssh", target="cary@lab.local")
+    req = DispatchRequest(
+        task_id="t",
+        run_id="r",
+        prompt="review invoices",
+        model="openrouter/auto",
+        context=ContextSnapshot(
+            task_id="t", memories=(), bindings={}, provenance={}
+        ),
+        metadata={"compute_mode": "analyze", "host_workdir": "/tmp/work"},
+    )
+    remote = build_remote_agentic_argv(req, remote_cwd="/tmp/work")
+    assert remote[0] == "puppetmaster"
+    assert "agentic" in remote
+    assert "openrouter" in remote
+    joined = " ".join(remote)
+    assert "token=" not in joined
+    assert "OPENROUTER" not in joined
+
+    argv = host_runner_argv(ssh, remote)
+    assert argv[:3] == ["ssh", "-o", "BatchMode=yes"]
+    assert "cary@lab.local" in argv
+
+    calls: list[list[str]] = []
+
+    class _Proc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def _exec(argv, *, timeout_seconds=0):
+        calls.append(list(argv))
+        return _Proc()
+
+    ok, detail = probe_ssh_host(ssh, exec_fn=_exec)
+    assert ok is True
+    assert SSH_COOK_CAPABLE in detail
+    assert calls and calls[0][:3] == ["ssh", "-o", "BatchMode=yes"]
+    assert "true" in calls[0]
+
+    class _Bad:
+        returncode = 255
+        stdout = ""
+        stderr = "Connection refused"
+
+    def _bad(argv, *, timeout_seconds=0):
+        return _Bad()
+
+    ok, detail = probe_ssh_host(ssh, exec_fn=_bad)
+    assert ok is False
+    assert "refused" in detail.lower() or detail

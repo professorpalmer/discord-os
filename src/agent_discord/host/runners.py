@@ -5,10 +5,10 @@ Unknown host ids are Denied; there is no silent local fallback to a
 stranger host. Off / On / status stay on the control-plane Mac. SSH argv
 never carries tokens or passwords (agent / ssh config only).
 
-``kind=ssh`` is routing-only until remote cook is wired: cook that would
-target an ssh host is spoken Deny (no silent local cook on the control-
-plane Mac). ``kind=local`` / path hosts may still supply a local cwd.
-``host_runner_argv`` is the future remote-invoke building block.
+``kind=ssh`` cooks via Path A remote cook (``host_runner_argv`` + SSH
+``BatchMode=yes`` → remote ``puppetmaster agentic``). Unreachable / disabled
+SSH is spoken Deny — never a silent local cook on the control-plane Mac.
+``kind=local`` / path hosts still supply a local cwd on this Mac.
 """
 
 from __future__ import annotations
@@ -65,30 +65,36 @@ def spoken_host_deny(host_id: str, *, reason: str = "not allowlisted") -> str:
     return f"Denied. Host '{key}' is {why}."
 
 
-# Honest status until Path A (remote cook via host_runner_argv) ships.
+# Legacy Deny string (kill-switch / docs). Path A capable status lives in remote_cook.
 SSH_COOK_STATUS = "routing only / Deny until remote cook"
 
 
 def spoken_ssh_cook_deny(host_id: str) -> str:
-    """Spoken Deny when cook would target kind=ssh without remote cook."""
+    """Spoken Deny when ssh remote cook is disabled or not ready."""
 
     return spoken_host_deny(host_id, reason=SSH_COOK_STATUS)
 
 
 def assert_host_cook_allowed(host: Optional[RemoteHost]) -> None:
-    """Refuse cook for ssh hosts until remote cook exists (fail closed).
+    """Validate host kind for cook. ``kind=ssh`` is allowed (remote cook path).
 
-    ``None`` and ``kind=local`` are allowed (local / empty allowlist path).
+    ``None`` and ``kind=local`` cook on this Mac. Unknown kinds Deny.
+    Reachability / kill-switch for ssh is enforced by ``remote_cook``
+    (spoken Deny; never silent local cook).
     """
 
     if host is None:
         return
     kind = (host.kind or "").strip().lower()
+    if kind == "path":
+        kind = "local"
     if kind == "ssh":
-        raise HostAllowlistError(
-            spoken_ssh_cook_deny(host.id),
-            host_id=host.id,
-        )
+        if not (host.target or "").strip():
+            raise HostAllowlistError(
+                spoken_host_deny(host.id, reason="missing ssh target"),
+                host_id=host.id,
+            )
+        return
     if kind and kind not in HOST_KINDS:
         raise HostAllowlistError(
             spoken_host_deny(host.id, reason=f"has unknown kind {kind!r}"),
@@ -194,8 +200,8 @@ def host_runner_argv(
 ) -> list[str]:
     """Build ssh/local argv for remote cook (Path A). Never puts credentials in argv.
 
-    Cook does not invoke this yet for ssh — ``assert_host_cook_allowed`` Denies
-    until a daemon / worker path runs this argv off-box.
+    Used by ``host.remote_cook`` to invoke remote ``puppetmaster agentic`` over
+    SSH ``BatchMode=yes`` (agent / ``~/.ssh/config`` only).
     """
 
     cmd = [str(part) for part in remote_command]

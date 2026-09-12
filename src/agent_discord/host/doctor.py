@@ -167,8 +167,13 @@ def _truthy_env(name: str) -> bool:
 def _check_host_allowlist(lines: list[str]) -> int:
     """Report allowlist status. Refuse unsafe configs (FAIL)."""
 
+    from agent_discord.host.remote_cook import (
+        SSH_COOK_CAPABLE,
+        SSH_COOK_UNREACHABLE,
+        probe_ssh_host,
+        ssh_cook_enabled,
+    )
     from agent_discord.host.runners import (
-        SSH_COOK_STATUS,
         load_host_allowlist,
         validate_host_allowlist,
     )
@@ -184,12 +189,27 @@ def _check_host_allowlist(lines: list[str]) -> int:
     for problem in problems:
         lines.append(f"FAIL host allowlist: {problem}")
         fails += 1
-    ssh_ids = [host.id for host in hosts if (host.kind or "").strip().lower() == "ssh"]
-    if ssh_ids:
-        # Honesty: bind/route works; cook Denies until remote cook (Path A).
-        lines.append(
-            f"WARN host ssh {','.join(ssh_ids)}: {SSH_COOK_STATUS}"
-        )
+    ssh_hosts = [
+        host for host in hosts if (host.kind or "").strip().lower() == "ssh"
+    ]
+    if ssh_hosts:
+        if not ssh_cook_enabled():
+            ids_csv = ",".join(host.id for host in ssh_hosts)
+            lines.append(
+                f"WARN host ssh {ids_csv}: remote cook disabled "
+                "(DISCORD_OS_SSH_COOK=0) — cook Denies"
+            )
+        else:
+            for host in ssh_hosts:
+                ok, detail = probe_ssh_host(host)
+                if ok:
+                    lines.append(
+                        f"OK host ssh {host.id}: cook-capable ({SSH_COOK_CAPABLE})"
+                    )
+                else:
+                    lines.append(
+                        f"WARN host ssh {host.id}: {SSH_COOK_UNREACHABLE} ({detail})"
+                    )
     local_ids = [
         host.id for host in hosts if (host.kind or "").strip().lower() == "local"
     ]

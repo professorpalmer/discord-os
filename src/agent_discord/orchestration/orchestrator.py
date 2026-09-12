@@ -343,6 +343,7 @@ class AgentOrchestrator:
         host_repos: Optional[tuple[HostRepo, ...]] = None,
         retry_backoff_s: float = 0.0,
         presence: Optional[Callable[[str, str], None]] = None,
+        ssh_exec: Optional[Callable[..., Any]] = None,
     ) -> None:
         self.store = store
         self.backend = backend
@@ -358,6 +359,8 @@ class AgentOrchestrator:
         self.host_github: Optional[Callable[[Path], str]] = None
         self.retry_backoff_s = float(retry_backoff_s)
         self.presence = presence
+        # Injectable SSH runner for Path A remote cook tests (argv, *, timeout_seconds).
+        self.ssh_exec = ssh_exec
         self._run_status: dict[str, TaskStatus] = {}
         self._checkpoints: dict[str, dict[str, Any]] = {}
         self._steer_lock = threading.Lock()
@@ -627,6 +630,10 @@ class AgentOrchestrator:
             }
         )
         repos = self.host_repos if self.host_repos is not None else load_host_repos()
+        from agent_discord.host.remote_cook import (
+            assert_ssh_remote_cook_ready,
+            make_ssh_cook_backend,
+        )
         from agent_discord.host.runners import (
             HostAllowlistError,
             assert_host_cook_allowed,
@@ -634,6 +641,7 @@ class AgentOrchestrator:
             resolve_channel_host,
         )
 
+        cook_backend = self.backend
         try:
             remote_host = resolve_channel_host(
                 self.store,
@@ -641,8 +649,22 @@ class AgentOrchestrator:
                 workspace_id=intake.workspace_id,
                 allowlist=load_host_allowlist(),
             )
-            # kind=ssh must not silently cook on the control-plane Mac.
+            # Unknown kinds / missing ssh target Deny. kind=ssh continues to
+            # Path A remote cook (never silent local cook on this Mac).
             assert_host_cook_allowed(remote_host)
+            if (
+                remote_host is not None
+                and (remote_host.kind or "").strip().lower() == "ssh"
+            ):
+                assert_ssh_remote_cook_ready(
+                    remote_host, exec_fn=self.ssh_exec
+                )
+                cook_backend = make_ssh_cook_backend(
+                    remote_host,
+                    exec_fn=self.ssh_exec,
+                )
+                # Preflight already probed; avoid a second BatchMode round-trip.
+                cook_backend.probe_first = False
         except HostAllowlistError as exc:
             receipt = self._close_without_worker(
                 intake,
@@ -660,8 +682,8 @@ class AgentOrchestrator:
             extra_meta["host_kind"] = remote_host.kind
             if remote_host.workdir:
                 extra_meta["host_workdir"] = remote_host.workdir
-            # Local path-root hosts may supply the run cwd. ssh never reaches
-            # here (assert_host_cook_allowed Denies until remote cook).
+            # Local path-root hosts may supply the run cwd. ssh uses remote
+            # workdir via Path A (SshRemoteCookBackend) — never local cook.
             if remote_host.kind == "local" and remote_host.target:
                 root = Path(remote_host.target).expanduser()
                 if root.is_dir():
@@ -780,13 +802,14 @@ class AgentOrchestrator:
                 job_thread_id=job_thread_id,
                 progress_message_id=progress_message_id,
                 live=live,
+                backend=cook_backend,
             )
-        stream = getattr(self.backend, "stream", None)
+        stream = getattr(cook_backend, "stream", None)
         if callable(stream):
             events_iter = stream(request)
             result = None
         else:
-            result = self.backend.dispatch(request)
+            result = cook_backend.dispatch(request)
             events_iter = iter(result.events)
 
         from agent_discord.puppetmaster.backend import public_card_text as _card_text
@@ -967,7 +990,7 @@ class AgentOrchestrator:
         flush_token_card(force=True)
 
         if result is None:
-            streamed_status = self.backend.status(run_id)
+            streamed_status = cook_backend.status(run_id)
             if streamed_status in {
                 TaskStatus.PENDING,
                 TaskStatus.RUNNING,
@@ -1004,7 +1027,7 @@ class AgentOrchestrator:
                 context=request.context,
                 metadata={**dict(request.metadata), "resume": "rate_limit"},
             )
-            result = self.backend.dispatch(retry_request)
+            result = cook_backend.dispatch(retry_request)
             self._run_status[run_id] = result.status
 
         if result.status == TaskStatus.FAILED:
@@ -1199,12 +1222,14 @@ class AgentOrchestrator:
         job_thread_id: Optional[str],
         progress_message_id: Optional[str],
         live: Optional[_LiveCard] = None,
+        backend: Optional[Any] = None,
     ) -> RunReceipt:
         """Fan out one analyze worker per role, then optional implement handoff."""
 
         if live is None:
             live = _LiveCard(self, intake.channel_id, job_thread_id, run_id)
             live.message_id = progress_message_id
+        cook = backend if backend is not None else self.backend
         roles = list(_SWARM_ROLES[: max(2, min(int(workers), 5))])
         summaries: list[str] = []
         progress_items: list[ProgressSummary] = []
@@ -1218,7 +1243,7 @@ class AgentOrchestrator:
                 context=request.context,
                 metadata={**dict(request.metadata), "role": role, "parent_run_id": run_id},
             )
-            result = self.backend.dispatch(child)
+            result = cook.dispatch(child)
             bit = _visible_card_text(result.final_summary or role) or role
             summaries.append(f"{role}: {bit}")
             progress_items.append(
@@ -1252,7 +1277,7 @@ class AgentOrchestrator:
                 context=request.context,
                 metadata={**dict(request.metadata), "compute_mode": MODE_IMPLEMENT, "handoff": True},
             )
-            handoff_result = self.backend.dispatch(handoff)
+            handoff_result = cook.dispatch(handoff)
             stitched = f"{stitched}\nimplement: {handoff_result.final_summary}"
             final_status = handoff_result.status
             handoff_error = handoff_result.error
