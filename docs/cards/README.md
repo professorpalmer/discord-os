@@ -14,7 +14,7 @@ A follow-up in a **live** job thread steers that worker (or queues in SQLite if 
 
 **Cancel** is on the live Components v2 card while the cook is running (`discord-os:job:cancel:<run_id>`). Tap that button on the job-thread card from the phone. It is not HOST Off. Parked Allow / Always allow / Deny auto-denies after `DISCORD_OS_APPROVAL_TIMEOUT_MINUTES` (default 20) with a spoken expire.
 
-State → button set / accent / stage (write-gate Allow / Always / Deny, Continue) is the [reactive spike](reactive.md). Not Activities. Not a client UI.
+State → button set / accent / stage (write-gate Allow / Always / Deny, Continue) is the [reactive spike](reactive.md). Per-tool / AskUserQuestion mid-run park is [ask-gate](ask-gate.md). Not Activities. Not a client UI.
 
 ![next-level cards](../screenshots/next-level-cards.png)
 
@@ -25,4 +25,5 @@ State → button set / accent / stage (write-gate Allow / Always / Deny, Continu
 - `src/agent_discord/orchestration/orchestrator.py` — reply-first thread, one live card, persist-then-settle
 - `src/agent_discord/host/panel.py` — HOST + Jobs Continue receipts via `reactive_for_job`
 - Tests: `tests/test_cards.py`, `tests/test_reactive_cards.py`, `tests/test_write_gate_buttons.py`, `tests/test_orchestration.py`
-- Spike: [reactive.md](reactive.md)
+- Spike: [reactive.md](reactive.md), [ask-gate.md](ask-gate.md)
+- Tests: also `tests/test_ask_gate.py`

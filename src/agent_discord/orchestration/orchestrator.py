@@ -7,7 +7,7 @@ import threading
 import time
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional, Sequence
 from uuid import uuid4
 
 from agent_discord.contracts import (
@@ -1316,6 +1316,21 @@ class AgentOrchestrator:
                     "replay_of": run_id,
                 }
             return {"action": verb, "run_id": run_id, "status": "missing"}
+        if verb == "ask":
+            # custom_id path packs run_id#option_index
+            rid, sep, idx_raw = (run_id or "").partition("#")
+            if not sep:
+                return {"action": "ask", "run_id": run_id, "status": "missing"}
+            try:
+                option_index = int(idx_raw)
+            except ValueError:
+                return {"action": "ask", "run_id": rid, "status": "missing"}
+            return self._resolve_ask_option(rid, option_index)
+        if verb in {"approve", "always", "deny", "expire"}:
+            if self._task_awaiting_gate(run_id):
+                if verb == "expire":
+                    return self.expire_parked_run(run_id)
+                return self._resolve_tool_gate(run_id, verb)
         if verb == "approve":
             return self._approve_parked_run(run_id)
         if verb == "always":
@@ -1398,9 +1413,21 @@ class AgentOrchestrator:
         return result
 
     def expire_parked_run(self, run_id: str) -> dict[str, Any]:
+        from agent_discord.orchestration.ask_gate import (
+            EXPIRED_ASK_SPOKEN,
+            EXPIRED_TOOL_SPOKEN,
+            GATE_KIND_ASK,
+        )
         from agent_discord.orchestration.service import EXPIRED_WRITE_SPOKEN
 
-        result = self._deny_parked_run(run_id, spoken=EXPIRED_WRITE_SPOKEN)
+        spoken = EXPIRED_WRITE_SPOKEN
+        if self._task_awaiting_gate(run_id):
+            kind = self._gate_kind(run_id)
+            spoken = EXPIRED_ASK_SPOKEN if kind == GATE_KIND_ASK else EXPIRED_TOOL_SPOKEN
+            result = self._resolve_tool_gate(run_id, "deny", spoken=spoken)
+            result["action"] = "expire"
+            return result
+        result = self._deny_parked_run(run_id, spoken=spoken)
         result["action"] = "expire"
         return result
 
@@ -1506,6 +1533,395 @@ class AgentOrchestrator:
             "thread_id": thread_id,
             "receipt": receipt,
         }
+
+    def raise_tool_gate(
+        self,
+        run_id: str,
+        *,
+        tool_class: str,
+        detail: str = "",
+        message: str = "",
+    ) -> dict[str, Any]:
+        """Park mid-run for a tool-class Allow / Always / Deny card.
+
+        Adapters call this when ``tool_class_decision`` returns ``ask``.
+        Unknown classes should be denied by the adapter before calling.
+        """
+
+        import time
+
+        from agent_discord.orchestration.ask_gate import (
+            GATE_KIND_TOOL,
+            gate_meta_payload,
+            normalize_tool_class,
+            tool_gate_card,
+        )
+
+        klass = normalize_tool_class(tool_class)
+        if klass is None:
+            return {
+                "action": "raise_tool_gate",
+                "run_id": run_id,
+                "status": "denied",
+                "summary": "Denied. Unknown tool class.",
+                "gate_class": (tool_class or "").strip(),
+            }
+        run = self.store.get_run(run_id) or {}
+        task_id = str(run.get("task_id") or "")
+        if not task_id:
+            return {"action": "raise_tool_gate", "run_id": run_id, "status": "missing"}
+        task = self.store.get_task(task_id) or {}
+        reader = getattr(self.store, "task_metadata", None)
+        meta = reader(task_id) if callable(reader) else {}
+        if not isinstance(meta, dict):
+            meta = {}
+        parked_ms = int(time.time() * 1000)
+        patch = gate_meta_payload(
+            kind=GATE_KIND_TOOL,
+            tool_class=klass,
+            detail=detail,
+            parked_at_ms=parked_ms,
+        )
+        channel_id = str(task.get("channel_id") or meta.get("channel_id") or "").strip()
+        thread_id = str(task.get("thread_id") or meta.get("thread_id") or "").strip() or None
+        patch["channel_id"] = channel_id
+        patch["thread_id"] = thread_id
+        merger = getattr(self.store, "merge_task_metadata", None)
+        if callable(merger):
+            merger(task_id, patch)
+        summary = f"Waiting for Allow on `{klass}`."
+        try:
+            self.store.update_run(run_id, status=TaskStatus.PENDING, summary=summary)
+        except Exception:
+            pass
+        self._run_status[run_id] = TaskStatus.PENDING
+        card = tool_gate_card(
+            run_id, tool_class=klass, detail=detail, message=message or summary
+        )
+        self._paint_gate_card(
+            card,
+            channel_id=channel_id,
+            thread_id=thread_id,
+            task_id=task_id,
+            meta=meta,
+            stage="parked",
+        )
+        self._set_presence("idle", "Discord OS")
+        return {
+            "action": "raise_tool_gate",
+            "run_id": run_id,
+            "status": "parked",
+            "gate_kind": GATE_KIND_TOOL,
+            "gate_class": klass,
+            "summary": summary,
+        }
+
+    def raise_ask_user(
+        self,
+        run_id: str,
+        *,
+        question: str,
+        options: Sequence[Any] = (),
+        header: str = "Need input",
+    ) -> dict[str, Any]:
+        """Park mid-run for an AskUserQuestion Discord card."""
+
+        import time
+
+        from agent_discord.orchestration.ask_gate import (
+            GATE_KIND_ASK,
+            ask_user_question_card,
+            gate_meta_payload,
+        )
+
+        run = self.store.get_run(run_id) or {}
+        task_id = str(run.get("task_id") or "")
+        if not task_id:
+            return {"action": "raise_ask_user", "run_id": run_id, "status": "missing"}
+        opts = tuple(options or ())
+        if not opts:
+            return {
+                "action": "raise_ask_user",
+                "run_id": run_id,
+                "status": "denied",
+                "summary": "Denied. No options provided.",
+            }
+        task = self.store.get_task(task_id) or {}
+        reader = getattr(self.store, "task_metadata", None)
+        meta = reader(task_id) if callable(reader) else {}
+        if not isinstance(meta, dict):
+            meta = {}
+        parked_ms = int(time.time() * 1000)
+        patch = gate_meta_payload(
+            kind=GATE_KIND_ASK,
+            tool_class="ask",
+            question=question,
+            options=opts,
+            parked_at_ms=parked_ms,
+        )
+        channel_id = str(task.get("channel_id") or meta.get("channel_id") or "").strip()
+        thread_id = str(task.get("thread_id") or meta.get("thread_id") or "").strip() or None
+        patch["channel_id"] = channel_id
+        patch["thread_id"] = thread_id
+        merger = getattr(self.store, "merge_task_metadata", None)
+        if callable(merger):
+            merger(task_id, patch)
+        summary = "Waiting for an answer."
+        try:
+            self.store.update_run(run_id, status=TaskStatus.PENDING, summary=summary)
+        except Exception:
+            pass
+        self._run_status[run_id] = TaskStatus.PENDING
+        card = ask_user_question_card(
+            run_id, question=question, options=opts, header=header
+        )
+        self._paint_gate_card(
+            card,
+            channel_id=channel_id,
+            thread_id=thread_id,
+            task_id=task_id,
+            meta=meta,
+            stage="parked",
+        )
+        self._set_presence("idle", "Discord OS")
+        return {
+            "action": "raise_ask_user",
+            "run_id": run_id,
+            "status": "parked",
+            "gate_kind": GATE_KIND_ASK,
+            "summary": summary,
+        }
+
+    def gate_result_for(self, run_id: str) -> dict[str, Any]:
+        """Adapter poll: gate_result / gate_answer from task metadata."""
+
+        run = self.store.get_run(run_id) or {}
+        task_id = str(run.get("task_id") or "")
+        reader = getattr(self.store, "task_metadata", None)
+        meta = reader(task_id) if callable(reader) and task_id else {}
+        if not isinstance(meta, dict):
+            meta = {}
+        return {
+            "run_id": run_id,
+            "awaiting_gate": bool(meta.get("awaiting_gate")),
+            "gate_kind": str(meta.get("gate_kind") or ""),
+            "gate_class": str(meta.get("gate_class") or ""),
+            "gate_result": str(meta.get("gate_result") or ""),
+            "gate_answer": str(meta.get("gate_answer") or ""),
+        }
+
+    def _task_awaiting_gate(self, run_id: str) -> bool:
+        run = self.store.get_run(run_id) or {}
+        task_id = str(run.get("task_id") or "")
+        reader = getattr(self.store, "task_metadata", None)
+        meta = reader(task_id) if callable(reader) and task_id else {}
+        return isinstance(meta, dict) and bool(meta.get("awaiting_gate"))
+
+    def _gate_kind(self, run_id: str) -> str:
+        run = self.store.get_run(run_id) or {}
+        task_id = str(run.get("task_id") or "")
+        reader = getattr(self.store, "task_metadata", None)
+        meta = reader(task_id) if callable(reader) and task_id else {}
+        if not isinstance(meta, dict):
+            return ""
+        return str(meta.get("gate_kind") or "")
+
+    def _resolve_ask_option(self, run_id: str, option_index: int) -> dict[str, Any]:
+        from agent_discord.orchestration.ask_gate import ALLOWED_TOOL_SPOKEN, GATE_KIND_ASK
+
+        run = self.store.get_run(run_id) or {}
+        task_id = str(run.get("task_id") or "")
+        reader = getattr(self.store, "task_metadata", None)
+        meta = reader(task_id) if callable(reader) and task_id else {}
+        if not isinstance(meta, dict) or not meta.get("awaiting_gate"):
+            return {"action": "ask", "run_id": run_id, "status": "missing"}
+        if str(meta.get("gate_kind") or "") != GATE_KIND_ASK:
+            return {"action": "ask", "run_id": run_id, "status": "ignored"}
+        options = meta.get("gate_options") if isinstance(meta.get("gate_options"), list) else []
+        if option_index < 0 or option_index >= len(options):
+            return {"action": "ask", "run_id": run_id, "status": "missing"}
+        opt = options[option_index] if isinstance(options[option_index], dict) else {}
+        answer = str(opt.get("label") or "").strip() or f"option-{option_index}"
+        return self._finish_gate(
+            run_id,
+            result="allow",
+            answer=answer,
+            spoken=f"Answered: {answer}",
+            action="ask",
+        )
+
+    def _resolve_tool_gate(
+        self,
+        run_id: str,
+        verb: str,
+        *,
+        spoken: str = "",
+    ) -> dict[str, Any]:
+        from agent_discord.orchestration.ask_gate import (
+            ALLOWED_TOOL_SPOKEN,
+            ALWAYS_TOOL_SPOKEN,
+            DENIED_ASK_SPOKEN,
+            DENIED_TOOL_SPOKEN,
+            GATE_KIND_ASK,
+        )
+        from agent_discord.orchestration.service import set_tool_class_session_allow
+
+        run = self.store.get_run(run_id) or {}
+        task_id = str(run.get("task_id") or "")
+        reader = getattr(self.store, "task_metadata", None)
+        meta = reader(task_id) if callable(reader) and task_id else {}
+        if not isinstance(meta, dict) or not meta.get("awaiting_gate"):
+            return {"action": verb, "run_id": run_id, "status": "missing"}
+        kind = str(meta.get("gate_kind") or "")
+        klass = str(meta.get("gate_class") or "").strip()
+        task = self.store.get_task(task_id) or {}
+        scope = (
+            str(task.get("thread_id") or meta.get("thread_id") or "").strip()
+            or str(task.get("channel_id") or meta.get("channel_id") or "").strip()
+        )
+        if verb == "always":
+            if klass and scope:
+                set_tool_class_session_allow(self.store, klass, scope)
+            return self._finish_gate(
+                run_id,
+                result="always",
+                answer="",
+                spoken=spoken or ALWAYS_TOOL_SPOKEN,
+                action="always",
+                session_allow=scope,
+            )
+        if verb == "approve":
+            return self._finish_gate(
+                run_id,
+                result="allow",
+                answer="",
+                spoken=spoken or ALLOWED_TOOL_SPOKEN,
+                action="approve",
+            )
+        # deny
+        deny_spoken = spoken or (
+            DENIED_ASK_SPOKEN if kind == GATE_KIND_ASK else DENIED_TOOL_SPOKEN
+        )
+        return self._finish_gate(
+            run_id,
+            result="deny",
+            answer="",
+            spoken=deny_spoken,
+            action="deny",
+            failed=True,
+        )
+
+    def _finish_gate(
+        self,
+        run_id: str,
+        *,
+        result: str,
+        answer: str,
+        spoken: str,
+        action: str,
+        session_allow: str = "",
+        failed: bool = False,
+    ) -> dict[str, Any]:
+        run = self.store.get_run(run_id) or {}
+        task_id = str(run.get("task_id") or "")
+        reader = getattr(self.store, "task_metadata", None)
+        meta = reader(task_id) if callable(reader) and task_id else {}
+        if not isinstance(meta, dict):
+            meta = {}
+        merger = getattr(self.store, "merge_task_metadata", None)
+        if callable(merger) and task_id:
+            try:
+                merger(
+                    task_id,
+                    {
+                        "awaiting_approval": False,
+                        "awaiting_gate": False,
+                        "gate_result": result,
+                        "gate_answer": answer,
+                    },
+                )
+            except Exception:
+                pass
+        status = TaskStatus.FAILED if failed else TaskStatus.COMPLETED
+        try:
+            self.store.update_run(
+                run_id,
+                status=status,
+                summary=spoken,
+                error=spoken if failed else "",
+            )
+        except Exception:
+            pass
+        self._run_status[run_id] = status
+        if self.post_progress_to_discord and self.discord is not None:
+            task = self.store.get_task(task_id) or {}
+            channel_id = str(task.get("channel_id") or meta.get("channel_id") or "").strip()
+            thread_id = str(task.get("thread_id") or meta.get("thread_id") or "").strip() or None
+            card_mid = str(meta.get("card_message_id") or "").strip()
+            card = receipt_card(
+                RunReceipt(
+                    task_id=task_id,
+                    run_id=run_id,
+                    status=status,
+                    summary=spoken,
+                    error=spoken if failed else "",
+                )
+            )
+            try:
+                dest = thread_id or channel_id
+                if card_mid and dest:
+                    edit_card(self.discord, dest, card_mid, card)
+                elif channel_id:
+                    send_card(self.discord, channel_id, card, thread_id=thread_id)
+            except Exception:
+                pass
+        self._set_presence("idle", "Discord OS")
+        out = {
+            "action": action,
+            "run_id": run_id,
+            "status": status.value,
+            "summary": spoken,
+            "gate_result": result,
+            "gate_answer": answer,
+        }
+        if session_allow:
+            out["session_allow"] = session_allow
+        return out
+
+    def _paint_gate_card(
+        self,
+        card: Any,
+        *,
+        channel_id: str,
+        thread_id: Optional[str],
+        task_id: str,
+        meta: Mapping[str, Any],
+        stage: str = "parked",
+    ) -> None:
+        if not (self.post_progress_to_discord and self.discord is not None and channel_id):
+            return
+        merger = getattr(self.store, "merge_task_metadata", None)
+        card_mid = str(meta.get("card_message_id") or "").strip()
+        try:
+            dest = thread_id or channel_id
+            if card_mid and dest:
+                edit_card(self.discord, dest, card_mid, card)
+            else:
+                sent = send_card(
+                    self.discord,
+                    channel_id,
+                    card,
+                    thread_id=thread_id,
+                )
+                mid = ""
+                if isinstance(sent, dict):
+                    mid = str(sent.get("id") or sent.get("message_id") or "").strip()
+                elif sent is not None:
+                    mid = str(getattr(sent, "message_id", "") or getattr(sent, "id", "") or "").strip()
+                if mid and callable(merger):
+                    merger(task_id, {"card_message_id": mid})
+        except Exception:
+            pass
 
     def _park_for_approval(
         self,

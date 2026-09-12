@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+P1.4 Per-tool / AskUserQuestion gate (surgical phone approve).
+
+- Tool-class Allow / Always allow / Deny mid-run via `raise_tool_gate`; AskUserQuestion option cards via `raise_ask_user`.
+- Tool-class session prefs (`tool_class_allow:<class>:<scope>`, 4h, cleared on HOST Off). Unknown classes fail closed.
+- Reuses write-gate button custom_ids + approval timeout; spoken Allow / Deny / Always allow in the parked thread.
+- Docs: [docs/cards/ask-gate.md](docs/cards/ask-gate.md). Full PM `canUseTool` hook deferred.
+
 ## 0.5.32
 
 P0.3 Approval timeout + Cancel clarity + inbound queue while RUNNING.

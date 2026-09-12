@@ -36,3 +36,11 @@ The worker prompt says: call these from the shell; do not wait for Cursor MCP.
 - `src/agent_discord/host/github.py` — `gh_auth_state`, `host_github_report`
 - `src/agent_discord/host/add.py` — `add_tool`, `add_github`
 - `src/agent_discord/puppetmaster/backend.py` — `host_reach` in the worker prompt
+
+## Per-tool gate (P1.4)
+
+When HOST write-gate is on, adapters should not treat coarse Always-allow as
+blanket shell. Call `tool_class_decision` then `raise_tool_gate` /
+`raise_ask_user` so the phone gets Allow / Deny for that class. Unknown tool
+classes fail closed. See [ask-gate](../cards/ask-gate.md).
+

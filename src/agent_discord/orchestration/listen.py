@@ -418,6 +418,19 @@ def drain_inbound(
             )
             continue
         follow_thread = _follow_thread_id(message, thread_id, orchestrator, job_pool)
+        if _absorb_spoken_gate(
+            orchestrator,
+            discord,
+            store,
+            message=message,
+            text=text,
+            channel_id=channel_id,
+            thread_id=follow_thread,
+        ):
+            watermark = _advance_listen_watermark(
+                store, watermark_key, created_ms, message.message_id, watermark
+            )
+            continue
         if follow_thread and _thread_has_running_job(orchestrator, job_pool, follow_thread):
             if not _claim_inbound(store, discord, message, channel_id):
                 watermark = _advance_listen_watermark(
@@ -521,6 +534,67 @@ def drain_inbound(
 
 
 
+
+
+
+
+def _absorb_spoken_gate(
+    orchestrator: Any,
+    discord: Any,
+    store: Any,
+    *,
+    message: DiscordMessage,
+    text: str,
+    channel_id: str,
+    thread_id: Optional[str],
+) -> bool:
+    """Spoken Allow / Always / Deny for parked write or tool/ask gates."""
+
+    from agent_discord.orchestration.ask_gate import parse_spoken_gate_verb
+
+    verb = parse_spoken_gate_verb(text)
+    if verb is None:
+        return False
+    run_id = _parked_run_for_destination(store, channel_id=channel_id, thread_id=thread_id)
+    if not run_id:
+        return False
+    if not _claim_inbound(store, discord, message, channel_id):
+        return True
+    applier = getattr(orchestrator, "apply_job_action", None)
+    if not callable(applier):
+        return True
+    try:
+        applier(verb, run_id)
+    except Exception:
+        pass
+    return True
+
+
+def _parked_run_for_destination(
+    store: Any,
+    *,
+    channel_id: str = "",
+    thread_id: Optional[str] = None,
+) -> str:
+    lister = getattr(store, "list_parked_approvals", None)
+    if not callable(lister):
+        return ""
+    try:
+        rows = list(lister())
+    except Exception:
+        return ""
+    tid = (thread_id or "").strip()
+    cid = (channel_id or "").strip()
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        row_thread = str(row.get("thread_id") or "").strip()
+        row_channel = str(row.get("channel_id") or "").strip()
+        if tid and row_thread == tid:
+            return str(row.get("run_id") or "").strip()
+        if not tid and cid and row_channel == cid and not row_thread:
+            return str(row.get("run_id") or "").strip()
+    return ""
 
 
 def _tick_approval_timeout_best_effort(

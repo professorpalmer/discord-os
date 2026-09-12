@@ -10,7 +10,7 @@ The live card is a `FLAG_COMPONENTS_V2` container edited in the job thread (`sen
 
 | State | How we get there | Buttons | Accent | Stage |
 |---|---|---|---|---|
-| parked | write-gate implement, HOST Jobs on `pending` | Allow / Always allow / Deny | work gold | Allow write |
+| parked | write-gate implement, HOST Jobs on `pending`, or mid-run tool/ask gate ([ask-gate](ask-gate.md)) | Allow / Always allow / Deny | work gold | Allow write / tool |
 | running | live cook | **Cancel** (phone interrupt on the live v2 card) | work gold | Working |
 | idle | Done / Failed / Cancelled **and** a job thread | Continue | live / fail / idle | Done / Failed / Cancelled |
 | done | settled receipt without a session thread | Continue + Retry | receipt chrome | receipt title |

@@ -17,6 +17,8 @@ WRITE_GATE_KEY = "write_gate"
 WRITE_SESSION_ALLOW_PREFIX = "write_session_allow:"
 # Always-allow lasts this many seconds, or until HOST Off clears it.
 WRITE_SESSION_ALLOW_TTL_SECONDS = 4 * 3600
+TOOL_CLASS_ALLOW_PREFIX = "tool_class_allow:"
+TOOL_CLASS_ALLOW_TTL_SECONDS = WRITE_SESSION_ALLOW_TTL_SECONDS
 DEFAULT_APPROVAL_TIMEOUT_MINUTES = 20
 MAX_APPROVAL_TIMEOUT_SECONDS = 24 * 3600
 DENIED_WRITE_SPOKEN = "Denied. Write was not started."
@@ -202,7 +204,7 @@ def clear_write_session_allow(store: Any, scope_id: str) -> None:
 
 
 def clear_write_session_allows(store: Any) -> None:
-    """Drop every Always-allow preference (HOST Off)."""
+    """Drop every Always-allow preference (HOST Off), including tool-class."""
 
     lister = getattr(store, "list_preferences", None)
     writer = getattr(store, "set_preference", None)
@@ -224,7 +226,9 @@ def clear_write_session_allows(store: Any) -> None:
             key = str(row[0])
         else:
             key = str(getattr(row, "key", "") or "")
-        if key.startswith(WRITE_SESSION_ALLOW_PREFIX):
+        if key.startswith(WRITE_SESSION_ALLOW_PREFIX) or key.startswith(
+            TOOL_CLASS_ALLOW_PREFIX
+        ):
             try:
                 writer(HOST_PREFS_WORKSPACE, key, "0")
             except Exception:
@@ -246,6 +250,68 @@ def writes_need_approval_for(
     if write_session_allows_writes(store, channel_id):
         return False
     return True
+
+
+def tool_class_allow_key(tool_class: str, scope_id: str) -> str:
+    klass = (tool_class or "").strip().lower()
+    scope = (scope_id or "").strip()
+    return f"{TOOL_CLASS_ALLOW_PREFIX}{klass}:{scope}"
+
+
+def set_tool_class_session_allow(
+    store: Any,
+    tool_class: str,
+    scope_id: str,
+    *,
+    ttl_seconds: int = TOOL_CLASS_ALLOW_TTL_SECONDS,
+) -> None:
+    """Always-allow one tool class for this channel/thread until TTL or HOST Off."""
+
+    from agent_discord.orchestration.ask_gate import normalize_tool_class
+
+    klass = normalize_tool_class(tool_class) or (tool_class or "").strip().lower()
+    scope = (scope_id or "").strip()
+    if not klass or not scope:
+        return
+    writer = getattr(store, "set_preference", None)
+    if not callable(writer):
+        return
+    ttl = max(60, int(ttl_seconds or TOOL_CLASS_ALLOW_TTL_SECONDS))
+    expires = int(time.time()) + ttl
+    writer(HOST_PREFS_WORKSPACE, tool_class_allow_key(klass, scope), str(expires))
+
+
+def tool_class_session_allows(store: Any, tool_class: str, scope_id: str) -> bool:
+    """True when Always-allow for this tool class is still live on the scope."""
+
+    from agent_discord.orchestration.ask_gate import normalize_tool_class
+
+    klass = normalize_tool_class(tool_class) or (tool_class or "").strip().lower()
+    scope = (scope_id or "").strip()
+    if not klass or not scope:
+        return False
+    raw = _host_pref(store, tool_class_allow_key(klass, scope))
+    if raw is None:
+        return False
+    try:
+        expires = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return False
+    if expires <= int(time.time()):
+        clear_tool_class_session_allow(store, klass, scope)
+        return False
+    return True
+
+
+def clear_tool_class_session_allow(store: Any, tool_class: str, scope_id: str) -> None:
+    writer = getattr(store, "set_preference", None)
+    if not callable(writer):
+        return
+    klass = (tool_class or "").strip().lower()
+    scope = (scope_id or "").strip()
+    if not klass or not scope:
+        return
+    writer(HOST_PREFS_WORKSPACE, tool_class_allow_key(klass, scope), "0")
 
 
 def approval_timeout_seconds(env: Optional[Mapping[str, str]] = None) -> int:
@@ -295,7 +361,7 @@ def expire_parked_approvals(
     now_ms: Optional[int] = None,
     env: Optional[Mapping[str, str]] = None,
 ) -> list[dict[str, Any]]:
-    """Auto-deny parked write-gates older than the approval timeout."""
+    """Auto-deny parked write-gates / tool / ask gates older than the timeout."""
 
     timeout_s = approval_timeout_seconds(env)
     if timeout_s <= 0:

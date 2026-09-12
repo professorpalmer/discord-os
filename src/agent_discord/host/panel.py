@@ -581,12 +581,35 @@ def handle_gateway_interaction(
     """ACK within Discord's 3s window, then paint the panel. Best-effort."""
 
     from agent_discord.host.actions import job_action_from_custom_id
+    from agent_discord.orchestration.ask_gate import ask_action_from_custom_id
 
     channel_id = interaction_channel_id(payload, channel_id)
     data = payload.get("data")
     custom_id = ""
     if isinstance(data, dict):
         custom_id = str(data.get("custom_id") or "")
+    ask = ask_action_from_custom_id(custom_id)
+    if ask is not None:
+        interaction_id, ix_token = interaction_ids(payload)
+        if interaction_id and ix_token:
+            try:
+                from agent_discord.discord.rest import callback_interaction
+
+                callback_interaction(
+                    interaction_id=interaction_id,
+                    interaction_token=ix_token,
+                    payload={"type": CALLBACK_DEFERRED_UPDATE},
+                    opener=opener,
+                )
+            except Exception:
+                pass
+        if callable(on_job):
+            try:
+                # option index rides in run_id as "run_id#idx" for apply_job_action ask
+                on_job("ask", f"{ask.run_id}#{ask.option_index}")
+            except Exception:
+                pass
+        return "ask"
     job = job_action_from_custom_id(custom_id)
     if job is not None:
         interaction_id, ix_token = interaction_ids(payload)
