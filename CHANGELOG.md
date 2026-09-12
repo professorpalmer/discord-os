@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Discord-half P0.2 — Always bind job thread on channel asks
+
+- Channel-parent asks with empty `thread_id` always create a Discord job thread
+  (user message when present; otherwise HOST Ask posts a channel starter).
+  `thread_id` is stored on the task; cards/progress go to that thread.
+- Existing in-thread steers unchanged (no nested thread).
+- Thread create failure (including Discord rate limit) fails closed with spoken
+  **Need** — no retry storm, no silent channel-only cook.
+- Docs: [jobs](docs/jobs/README.md), [cards](docs/cards/README.md).
+  Tests: `test_bind_job_thread.py`.
+- No version bump in this change — ship cadence / parent pack cuts the tag.
+
 ### Discord-half P0.1 — Dismiss / Ack failed Need
 
 - Failed job cards show **Dismiss** (Continue still available; Retry when no

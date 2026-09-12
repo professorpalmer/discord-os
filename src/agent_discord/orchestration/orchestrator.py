@@ -70,6 +70,12 @@ _SWARM_ROLES = (
     "test-coverage-reviewer",
 )
 _RATE_LIMIT_MARKERS = ("429", "rate limit", "rate_limited", "ratelimited")
+THREAD_BIND_RATE_SPOKEN = (
+    "Could not open a job thread — Discord rate limit. Try again in a minute."
+)
+THREAD_BIND_FAIL_SPOKEN = (
+    "Could not open a job thread. Cards need a thread so Need/Jobs stay findable."
+)
 
 
 def _monotonic() -> float:
@@ -325,6 +331,17 @@ class _LiveCard:
             self.orch._post_settle_messages(self.channel_id, self.thread_id, extras)
 
 
+
+def _posted_message_id(posted: Any) -> str:
+    if posted is None:
+        return ""
+    if isinstance(posted, list) and posted:
+        return str(getattr(posted[-1], "message_id", "") or "")
+    if isinstance(posted, dict):
+        return str(posted.get("message_id") or posted.get("id") or "")
+    return str(getattr(posted, "message_id", "") or "")
+
+
 class AgentOrchestrator:
     """intake → context snapshot → pinned dispatch → events → Discord → receipt."""
 
@@ -458,11 +475,16 @@ class AgentOrchestrator:
         if (
             self.post_progress_to_discord
             and self.discord is not None
-            and intake.message_id
-            and not intake.thread_id
+            and str(intake.channel_id or "").strip()
+            and not str(intake.thread_id or "").strip()
         ):
-            started = self._start_job_thread(
-                intake.channel_id, intake.message_id, intake.text
+            # Channel-parent asks always bind a Discord job thread (P0.2).
+            # message_id present → thread on the user ask; else HOST Ask posts
+            # a channel starter first. Existing thread_id steers stay untouched.
+            started, bind_err = self._ensure_job_thread(
+                intake.channel_id,
+                intake.text,
+                message_id=intake.message_id,
             )
             if started:
                 job_thread_id = started
@@ -473,11 +495,50 @@ class AgentOrchestrator:
                     except Exception:
                         pass
                 merger = getattr(self.store, "merge_task_metadata", None)
-                if callable(merger) and intake.message_id:
+                if callable(merger):
+                    meta_patch: dict[str, Any] = {"thread_id": started}
+                    if intake.message_id:
+                        meta_patch["message_id"] = intake.message_id
                     try:
-                        merger(task_id, {"message_id": intake.message_id})
+                        merger(task_id, meta_patch)
                     except Exception:
                         pass
+            else:
+                spoken = self._thread_bind_spoken(bind_err)
+                try:
+                    self.store.update_run(
+                        run_id,
+                        status=TaskStatus.FAILED,
+                        summary=spoken,
+                        error=spoken,
+                    )
+                except Exception:
+                    pass
+                self._run_status[run_id] = TaskStatus.FAILED
+                receipt = RunReceipt(
+                    task_id=task_id,
+                    run_id=run_id,
+                    status=TaskStatus.FAILED,
+                    summary=spoken,
+                    error=spoken,
+                )
+                if self.discord is not None:
+                    try:
+                        send_card(
+                            self.discord,
+                            intake.channel_id,
+                            reactive_receipt_card(receipt, has_thread=False),
+                        )
+                    except Exception:
+                        try:
+                            send = getattr(self.discord, "send_message", None)
+                            if callable(send):
+                                send(intake.channel_id, spoken)
+                        except Exception:
+                            pass
+                self._react_terminal(intake, TaskStatus.FAILED)
+                self._set_presence("idle", "Discord OS")
+                return receipt
         if job_thread_id:
             from agent_discord.orchestration.jobs import note_origin_thread
 
@@ -3021,23 +3082,65 @@ class AgentOrchestrator:
         elif status in {TaskStatus.FAILED, TaskStatus.CANCELLED}:
             self._react_intake(intake, "\u274c")
 
+    def _thread_bind_spoken(self, error: Optional[str]) -> str:
+        if self._is_rate_limit(error):
+            return THREAD_BIND_RATE_SPOKEN
+        return THREAD_BIND_FAIL_SPOKEN
+
+    def _ensure_job_thread(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        message_id: Optional[str] = None,
+    ) -> tuple[Optional[str], Optional[str]]:
+        """Create a Discord job thread for a channel-parent ask.
+
+        Returns ``(thread_id, error)``. Does not retry on rate limit — caller
+        speaks Need honestly. When ``message_id`` is empty (HOST Ask modal),
+        posts a channel starter then starts the thread from that message.
+        """
+
+        if self.discord is None:
+            return None, "no discord"
+        cid = (channel_id or "").strip()
+        if not cid:
+            return None, "no channel"
+        starter_mid = str(message_id or "").strip()
+        if not starter_mid:
+            body = (text or "job").strip() or "job"
+            if len(body) > 1800:
+                body = body[:1797] + "..."
+            try:
+                posted = self.discord.send_message(cid, body)
+            except Exception as exc:
+                return None, str(exc) or "starter post failed"
+            starter_mid = _posted_message_id(posted)
+            if not starter_mid:
+                return None, "starter post missing id"
+        opener = getattr(self.discord, "start_thread_from_message", None)
+        if not callable(opener):
+            return None, "provider cannot start a thread"
+        try:
+            title = (text or "job").replace("\n", " ").strip() or "job"
+            thread_id = opener(cid, starter_mid, title[:100])
+        except Exception as exc:
+            return None, str(exc) or "thread create failed"
+        tid = str(thread_id or "").strip()
+        if not tid:
+            return None, "thread create missing id"
+        return tid, None
+
     def _start_job_thread(
         self,
         channel_id: str,
         message_id: str,
         text: str,
     ) -> Optional[str]:
-        if self.discord is None:
-            return None
-        starter = getattr(self.discord, "start_thread_from_message", None)
-        if not callable(starter):
-            return None
-        try:
-            title = (text or "job").replace("\n", " ").strip() or "job"
-            thread_id = starter(channel_id, message_id, title[:100])
-        except Exception:
-            return None
-        return str(thread_id or "") or None
+        started, _err = self._ensure_job_thread(
+            channel_id, text, message_id=message_id
+        )
+        return started
 
     def _post_or_edit_progress(
         self,

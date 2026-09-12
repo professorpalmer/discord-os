@@ -1,6 +1,6 @@
 # Jobs
 
-Each ask is an OS thread **and** a Discord thread on the user message. That thread is the cowork space: describe an outcome, step away, come back to a spoken deliverable or a named failure — never a green OK with no answer. The parent channel stays the ask plus the thread starter. Job cards and answers stay in the thread. HOST stays in the channel and briefs parked / failed / live jobs before last Done. A **failed** Need can be **Dismiss**ed (or Ack) from the job card / Jobs select — marks cancelled so it leaves Need ranking without Continue/Retry. Up to eight live jobs by default (`DISCORD_OS_MAX_LIVE`). SQLite holds the DAG. Puppetmaster is the worker. Same machine. Not a cloud VM. A follow-up in a **live** job thread steers that worker. A follow-up in an **idle** (Done) thread starts a new job in the same thread, parented at the prior tip — threads are live sessions, not one-shots.
+Each ask is an OS thread **and** a Discord job thread. Channel-parent asks (typed message or HOST **Ask** modal) always bind a thread when `thread_id` is empty: start from the user message when present, otherwise post a channel starter then open the thread. That thread is the cowork space — Need/Jobs stay findable; cards and progress live there. Existing thread steers are untouched (no nested thread). If Discord thread create fails (including rate limit), the run fails closed with a spoken **Need** — no silent channel-only cook, no retry storm. The parent channel stays the ask plus the thread starter. HOST stays in the channel and briefs parked / failed / live jobs before last Done. A **failed** Need can be **Dismiss**ed (or Ack) from the job card / Jobs select — marks cancelled so it leaves Need ranking without Continue/Retry. Up to eight live jobs by default (`DISCORD_OS_MAX_LIVE`). SQLite holds the DAG. Puppetmaster is the worker. Same machine. Not a cloud VM. A follow-up in a **live** job thread steers that worker. A follow-up in an **idle** (Done) thread starts a new job in the same thread, parented at the prior tip — threads are live sessions, not one-shots.
 
 Analyze work overlaps. Implement and swarm writes serialize per resolved realm cwd so two channels do not fight one working tree.
 
@@ -22,6 +22,7 @@ A job that opened a GitHub PR (or is bound as last pusher) gets check conclusion
 
 ## Code
 
+- `src/agent_discord/orchestration/orchestrator.py` — `_ensure_job_thread` always-bind on channel-parent asks
 - `src/agent_discord/orchestration/jobs.py` — `JobPool`, `resolve_max_live`, `resolved_write_key`
 - `src/agent_discord/orchestration/listen.py` — claim, submit, per-destination watermark; `listen_destinations`
 - `src/agent_discord/persistence/sqlite.py` — session thread ids, parent channel, tip run, DOS-* mint
@@ -30,4 +31,4 @@ A job that opened a GitHub PR (or is bound as last pusher) gets check conclusion
 - `src/agent_discord/orchestration/job_briefing.py` — Need / Waiting / Live / Last (failed → Need; dismissed/cancelled → Last)
 - `src/agent_discord/orchestration/lineage.py` — DAG nodes, stacked descendants
 - `src/agent_discord/cli.py` — host / listen loop / lineage
-- Tests: `tests/test_jobs.py`, `tests/test_e2e_host.py`, `tests/test_orchestration.py`, `tests/test_lineage.py`, `tests/test_github_wake.py`, `tests/test_github_rules.py`
+- Tests: `tests/test_jobs.py`, `tests/test_bind_job_thread.py`, `tests/test_e2e_host.py`, `tests/test_orchestration.py`, `tests/test_lineage.py`, `tests/test_github_wake.py`, `tests/test_github_rules.py`

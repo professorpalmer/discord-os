@@ -145,8 +145,14 @@ class JobPool:
         return tid in _ORIGIN_THREADS
 
     def live_thread_ids(self) -> tuple[str, ...]:
+        """Live pool threads plus mid-run origin binds (HOST Ask creates thread after submit)."""
+
         with self._lock:
-            return tuple(dict.fromkeys(self._live_threads.values()))
+            ordered = list(dict.fromkeys(self._live_threads.values()))
+        for tid in _ORIGIN_THREADS:
+            if tid and tid not in ordered:
+                ordered.append(tid)
+        return tuple(ordered)
 
     def wait(self, timeout: Optional[float] = None) -> list[RunReceipt]:
         deadline = None if timeout is None else time.monotonic() + float(timeout)

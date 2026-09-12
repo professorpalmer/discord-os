@@ -826,11 +826,15 @@ def test_raise_tool_gate_always_stores_exact_tool(tmp_path: Path):
     ) == "raise_tool_gate"
     always = orch.apply_job_action("always", receipt.run_id)
     assert always.get("gate_result") == "always" or always.get("action") == "always"
-    assert tool_exact_session_allows(store, "Write", "ch") is True
+    task = store.get_task(receipt.task_id)
+    assert task is not None
+    scope = str(task.get("thread_id") or task.get("channel_id") or "").strip()
+    assert scope
+    assert tool_exact_session_allows(store, "Write", scope) is True
     # Class-wide write must NOT be auto-allowed from exact Always.
     from agent_discord.orchestration.service import tool_class_session_allows
 
-    assert tool_class_session_allows(store, "write", "ch") is False
+    assert tool_class_session_allows(store, "write", scope) is False
     store.close()
 
 

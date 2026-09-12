@@ -1,6 +1,6 @@
 # Cards
 
-One live card per job. That card lives in the **job thread**, not the channel. Components v2 is the console (``FLAG_COMPONENTS_V2`` container/section). Embeds are legacy only — ``send_card`` / ``edit_card`` keep a narrow TypeError embed fallback for ancient fakes; production Discord REST always paints v2. Discord Activities stay never. Done is a deliverable or a named failure, not a green card with no answer.
+One live card per job. That card lives in the **job thread**, not the channel. Channel-parent asks always bind a job thread first (HOST Ask included). Components v2 is the console (``FLAG_COMPONENTS_V2`` container/section). Embeds are legacy only — ``send_card`` / ``edit_card`` keep a narrow TypeError embed fallback for ancient fakes; production Discord REST always paints v2. Discord Activities stay never. Done is a deliverable or a named failure, not a green card with no answer.
 
 The moment an ask lands, Discord OS opens a thread on the user message and posts "On it." Then the worker starts. A Discord 503 on that first card is retried and does not kill the job. The channel stays free. Write-gate **Approve write** edits that same thread card. Approve resumes the same thread. HOST stays in the channel.
 

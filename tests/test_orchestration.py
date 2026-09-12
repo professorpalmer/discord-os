@@ -353,12 +353,17 @@ def test_token_stream_flushes_card_on_interval_not_per_token(tmp_path: Path, mon
         post_progress_to_discord=True,
     )
     receipt = orch.run_task(
-        TaskIntake(text="stream tokens", channel_id="ch", workspace_id="ws")
+        TaskIntake(
+            text="stream tokens",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="ask-stream-flush",
+        )
     )
     assert receipt.status == TaskStatus.COMPLETED
     assert 1 <= facade.edit_count <= 4
     assert facade.edit_count < 16
-    assert facade.thread_sends == 0
+    assert facade.thread_sends >= 1
     store.close()
 
 
@@ -402,9 +407,16 @@ def test_live_card_stays_one_message(tmp_path: Path, monkeypatch):
         post_progress_to_discord=True,
         host_repos=(),
     )
-    orch.run_task(TaskIntake(text="stream tokens", channel_id="ch", workspace_id="ws"))
+    orch.run_task(
+        TaskIntake(
+            text="stream tokens",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="ask-one-card",
+        )
+    )
     assert len(fake_discord.sent) == 1
-    assert facade.thread_sends == 0
+    assert facade.thread_sends >= 1
     body = "\n".join(
         str(child.get("content") or "")
         for row in ((fake_discord.sent[0].metadata or {}).get("components") or [])
@@ -456,7 +468,14 @@ def test_live_card_keeps_markdown_dialogue(tmp_path: Path, monkeypatch):
         post_progress_to_discord=True,
         host_repos=(),
     )
-    orch.run_task(TaskIntake(text="list prs", channel_id="ch", workspace_id="ws"))
+    orch.run_task(
+        TaskIntake(
+            text="list prs",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="ask-md",
+        )
+    )
     assert len(fake_discord.sent) == 1
     assert any("Open PRs" in blob for blob in facade.edit_blobs)
     store.close()
@@ -1314,14 +1333,25 @@ def test_completed_job_does_not_post_parent_channel_excerpt(tmp_path: Path):
     store.close()
 
 
-def test_job_without_thread_has_no_parent_excerpt(tmp_path: Path):
+def test_host_ask_without_message_id_still_binds_job_thread(tmp_path: Path):
+    """HOST Ask / channel-parent with empty thread_id posts starter + binds thread."""
+
     orch, store, fake_discord, _ = _orch(tmp_path)
     receipt = orch.run_task(
         TaskIntake(text="review invoices", channel_id="ch", workspace_id="ws")
     )
     assert receipt.status == TaskStatus.COMPLETED
-    assert not fake_discord.threads
-    assert _parent_headlines(fake_discord) == []
+    assert fake_discord.threads
+    thread_id = next(iter(fake_discord.threads))
+    task = store.get_task(receipt.task_id)
+    assert task is not None
+    assert task["thread_id"] == thread_id
+    assert any(getattr(m, "thread_id", None) == thread_id for m in fake_discord.sent)
+    # Parent may hold the Ask starter only — Done stays in the job thread.
+    parents = _parent_headlines(fake_discord)
+    assert len(parents) == 1
+    assert "review invoices" in (parents[0].content or "")
+    assert _parent_job_cards(fake_discord) == []
     store.close()
 
 
