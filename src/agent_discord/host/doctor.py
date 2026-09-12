@@ -212,9 +212,10 @@ def _check_host_allowlist(lines: list[str]) -> int:
     """Report allowlist status. Refuse unsafe configs (FAIL)."""
 
     from agent_discord.host.remote_cook import (
-        SSH_COOK_CAPABLE,
         SSH_COOK_UNREACHABLE,
-        probe_ssh_host,
+        SSH_REMOTE_CLI_MISSING,
+        SSH_REMOTE_OPENROUTER_MISSING,
+        probe_ssh_remote_ready,
         ssh_cook_enabled,
     )
     from agent_discord.host.runners import (
@@ -245,15 +246,27 @@ def _check_host_allowlist(lines: list[str]) -> int:
             )
         else:
             for host in ssh_hosts:
-                ok, detail = probe_ssh_host(host)
-                if ok:
+                result = probe_ssh_remote_ready(host)
+                if result.ok:
                     lines.append(
-                        f"OK host ssh {host.id}: cook-capable ({SSH_COOK_CAPABLE})"
+                        f"OK host ssh {host.id}: cook-capable ({result.summary})"
                     )
                 else:
-                    lines.append(
-                        f"WARN host ssh {host.id}: {SSH_COOK_UNREACHABLE} ({detail})"
-                    )
+                    # Honest Need/WARN before cook-time Deny — never print secrets.
+                    reason = result.reason or SSH_COOK_UNREACHABLE
+                    detail = (result.detail or "").strip()
+                    if reason in {
+                        SSH_REMOTE_CLI_MISSING,
+                        SSH_REMOTE_OPENROUTER_MISSING,
+                        SSH_COOK_UNREACHABLE,
+                    }:
+                        suffix = f" ({detail})" if detail else ""
+                        lines.append(f"WARN host ssh {host.id}: {reason}{suffix}")
+                    else:
+                        lines.append(
+                            f"WARN host ssh {host.id}: {SSH_COOK_UNREACHABLE} "
+                            f"({result.summary})"
+                        )
     local_ids = [
         host.id for host in hosts if (host.kind or "").strip().lower() == "local"
     ]

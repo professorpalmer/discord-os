@@ -2095,9 +2095,14 @@ def test_ssh_host_remote_cook_uses_ssh_not_local(tmp_path: Path, monkeypatch):
     class _Proc:
         def __init__(self, argv):
             self.returncode = 0
-            # Probe uses trailing "true"; cook runs puppetmaster agentic.
-            if argv and argv[-1] == "true":
-                self.stdout = ""
+            # Probe runs bash readiness script; cook runs puppetmaster agentic.
+            is_probe = "bash" in argv and any(
+                "DISCORD_OS_SSH_PROBE" in str(part) for part in argv
+            )
+            if is_probe:
+                self.stdout = (
+                    "DISCORD_OS_SSH_PROBE cli=puppetmaster openrouter=env\n"
+                )
                 self.stderr = ""
             else:
                 self.stdout = json.dumps(
@@ -2141,8 +2146,20 @@ def test_ssh_host_remote_cook_uses_ssh_not_local(tmp_path: Path, monkeypatch):
     assert any("puppetmaster" in " ".join(c) or "agentic" in " ".join(c) for c in calls)
     joined = " ".join(" ".join(c) for c in calls)
     assert "token=" not in joined
-    assert "OPENROUTER_API_KEY" not in joined
     assert "ghp_" not in joined
+    assert "sk-or-" not in joined
+    # Probe may mention the env *name*; never a secret value / assignment.
+    assert "OPENROUTER_API_KEY=" not in joined
+    cook_calls = [
+        c
+        for c in calls
+        if not (
+            "bash" in c
+            and any("DISCORD_OS_SSH_PROBE" in str(part) for part in c)
+        )
+    ]
+    cook_joined = " ".join(" ".join(c) for c in cook_calls)
+    assert "OPENROUTER_API_KEY" not in cook_joined
 
 
 def test_local_path_host_still_cooks(tmp_path: Path, monkeypatch):

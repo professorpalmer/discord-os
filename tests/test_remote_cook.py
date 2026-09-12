@@ -15,12 +15,17 @@ from agent_discord.contracts import (
 )
 from agent_discord.host.remote_cook import (
     SSH_COOK_CAPABLE,
+    SSH_REMOTE_CLI_MISSING,
+    SSH_REMOTE_OPENROUTER_MISSING,
+    SshProbeResult,
     SshRemoteCookBackend,
     assert_ssh_remote_cook_ready,
     build_remote_agentic_argv,
     probe_ssh_host,
+    probe_ssh_remote_ready,
     run_ssh_remote_cook,
     ssh_cook_enabled,
+    spoken_ssh_probe_deny,
     spoken_ssh_unreachable,
 )
 from agent_discord.host.runners import HostAllowlistError, RemoteHost, host_runner_argv
@@ -52,18 +57,28 @@ def test_ssh_cook_enabled_kill_switch(monkeypatch) -> None:
     assert ssh_cook_enabled() is False
 
 
+def _ready_stdout(cli: str = "puppetmaster", openrouter: str = "env") -> str:
+    return f"DISCORD_OS_SSH_PROBE cli={cli} openrouter={openrouter}\n"
+
+
+def _is_probe_argv(argv: list[str]) -> bool:
+    return "bash" in argv and any("DISCORD_OS_SSH_PROBE" in str(part) for part in argv)
+
+
 def test_probe_and_run_mock_ssh() -> None:
     host = RemoteHost(id="lab", label="Lab", kind="ssh", target="cary@lab.local")
     calls: list[list[str]] = []
 
     def _exec(argv, *, timeout_seconds=0):
         calls.append(list(argv))
-        if argv and argv[-1] == "true":
-            return _Proc(0)
+        if _is_probe_argv(argv):
+            return _Proc(0, stdout=_ready_stdout())
         return _Proc(0, stdout=json.dumps({"summary": "ok from lab"}))
 
     ok, detail = probe_ssh_host(host, exec_fn=_exec)
     assert ok and SSH_COOK_CAPABLE in detail
+    assert "cli=puppetmaster" in detail
+    assert "openrouter=env" in detail
 
     remote = build_remote_agentic_argv(_req())
     proc = run_ssh_remote_cook(host, remote, exec_fn=_exec)
@@ -71,15 +86,42 @@ def test_probe_and_run_mock_ssh() -> None:
     assert all(c[:3] == ["ssh", "-o", "BatchMode=yes"] for c in calls)
     blob = " ".join(" ".join(c) for c in calls)
     assert "token=" not in blob
-    assert "OPENROUTER" not in blob
+    # Probe script may mention the env *name*; cook argv must not carry a secret value.
+    cook_blobs = [" ".join(c) for c in calls if not _is_probe_argv(c)]
+    assert cook_blobs
+    assert all("sk-or-" not in b and "token=" not in b for b in cook_blobs)
+
+
+def test_probe_reports_missing_cli_and_openrouter() -> None:
+    host = RemoteHost(id="lab", label="Lab", kind="ssh", target="cary@lab.local")
+
+    def _no_cli(argv, *, timeout_seconds=0):
+        return _Proc(11, stdout=_ready_stdout(cli="missing", openrouter="env"))
+
+    result = probe_ssh_remote_ready(host, exec_fn=_no_cli)
+    assert result.ok is False
+    assert result.reason == SSH_REMOTE_CLI_MISSING
+    spoken = spoken_ssh_probe_deny("lab", result)
+    assert "Denied" in spoken and "CLI missing" in spoken
+    assert "sk-or" not in spoken
+
+    def _no_or(argv, *, timeout_seconds=0):
+        return _Proc(12, stdout=_ready_stdout(cli="puppetmaster", openrouter="missing"))
+
+    result = probe_ssh_remote_ready(host, exec_fn=_no_or)
+    assert result.ok is False
+    assert result.reason == SSH_REMOTE_OPENROUTER_MISSING
+    spoken = spoken_ssh_probe_deny("lab", result)
+    assert "OpenRouter" in spoken
+    assert "sk-or" not in spoken
 
 
 def test_backend_dispatch_success_and_unreachable() -> None:
     host = RemoteHost(id="lab", label="Lab", kind="ssh", target="cary@lab.local")
 
     def _ok(argv, *, timeout_seconds=0):
-        if argv and argv[-1] == "true":
-            return _Proc(0)
+        if _is_probe_argv(argv):
+            return _Proc(0, stdout=_ready_stdout())
         return _Proc(0, stdout=json.dumps({"summary": "remote done"}))
 
     backend = SshRemoteCookBackend(host=host, exec_fn=_ok, probe_first=True)
@@ -113,6 +155,13 @@ def test_assert_ready_fail_closed(monkeypatch) -> None:
         assert_ssh_remote_cook_ready(host, exec_fn=_bad)
     assert "ssh unreachable" in str(exc.value.spoken).lower()
     assert spoken_ssh_unreachable("lab").startswith("Denied.")
+
+    def _no_or(argv, *, timeout_seconds=0):
+        return _Proc(12, stdout=_ready_stdout(cli="puppetmaster", openrouter="missing"))
+
+    with pytest.raises(HostAllowlistError) as exc:
+        assert_ssh_remote_cook_ready(host, exec_fn=_no_or)
+    assert "openrouter" in str(exc.value.spoken).lower()
 
     # local / None no-op
     assert_ssh_remote_cook_ready(None)

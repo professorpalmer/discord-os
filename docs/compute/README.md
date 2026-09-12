@@ -27,7 +27,7 @@ Optional Marionette HTTP: `AGENT_DISCORD_BACKEND=marionette` plus `MARIONETTE_BA
 
 ## Path A progress pipe
 
-`SshRemoteCookBackend.stream` yields live `PROGRESS` from remote agentic stdout/stderr (mocked-SSH covered in `tests/test_remote_cook.py`). No local `deltas --follow` for remote jobs. Fail closed on unreachable SSH.
+`SshRemoteCookBackend.stream` yields live `PROGRESS` from remote agentic stdout/stderr (mocked-SSH covered in `tests/test_remote_cook.py`). No local `deltas --follow` for remote jobs. Fail closed on unreachable SSH, missing remote CLI, or missing remote OpenRouter (doctor WARN; cook Deny).
 
 ## Cancel honesty
 

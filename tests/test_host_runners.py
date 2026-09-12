@@ -13,8 +13,11 @@ from agent_discord.host.power import is_power_command, parse_power_command
 from agent_discord.host.remote_cook import (
     SSH_COOK_CAPABLE,
     SSH_COOK_UNREACHABLE,
+    SSH_REMOTE_CLI_MISSING,
+    SSH_REMOTE_OPENROUTER_MISSING,
     build_remote_agentic_argv,
     probe_ssh_host,
+    probe_ssh_remote_ready,
     ssh_cook_enabled,
 )
 from agent_discord.host.runners import (
@@ -223,32 +226,74 @@ def test_validate_and_doctor_allowlist(tmp_path: Path, monkeypatch) -> None:
     )
     monkeypatch.setenv("DISCORD_OS_SSH_COOK", "1")
 
-    def _fake_probe(host, **kwargs):
-        return True, SSH_COOK_CAPABLE
+    from agent_discord.host.remote_cook import SshProbeResult
 
-    monkeypatch.setattr(
-        "agent_discord.host.doctor.probe_ssh_host"
-        if False
-        else "agent_discord.host.remote_cook.probe_ssh_host",
-        _fake_probe,
-    )
+    def _fake_ready(host, **kwargs):
+        return SshProbeResult(
+            ok=True,
+            reason=SSH_COOK_CAPABLE,
+            cli="puppetmaster",
+            openrouter="env",
+        )
+
     # Doctor imports probe inside the function — patch the module used at call time.
     import agent_discord.host.remote_cook as rc
 
-    monkeypatch.setattr(rc, "probe_ssh_host", _fake_probe)
+    monkeypatch.setattr(rc, "probe_ssh_remote_ready", _fake_ready)
     code, lines = run_doctor(workspace=ws, plist_path=plist, home=home)
     assert any("host allowlist 1: lab" in line for line in lines), lines
     assert any(
-        "OK host ssh lab:" in line and "cook-capable" in line for line in lines
+        "OK host ssh lab:" in line
+        and "cook-capable" in line
+        and "cli=puppetmaster" in line
+        and "openrouter=env" in line
+        for line in lines
     ), lines
 
-    def _fail_probe(host, **kwargs):
-        return False, "Connection refused"
+    def _fail_ready(host, **kwargs):
+        return SshProbeResult(
+            ok=False,
+            reason=SSH_COOK_UNREACHABLE,
+            detail="Connection refused",
+        )
 
-    monkeypatch.setattr(rc, "probe_ssh_host", _fail_probe)
+    monkeypatch.setattr(rc, "probe_ssh_remote_ready", _fail_ready)
     code, lines = run_doctor(workspace=ws, plist_path=plist, home=home)
     assert any(
         "WARN host ssh lab:" in line and SSH_COOK_UNREACHABLE in line for line in lines
+    ), lines
+
+    def _missing_or(host, **kwargs):
+        return SshProbeResult(
+            ok=False,
+            reason=SSH_REMOTE_OPENROUTER_MISSING,
+            detail="OPENROUTER_API_KEY/vault absent",
+            cli="puppetmaster",
+            openrouter="missing",
+        )
+
+    monkeypatch.setattr(rc, "probe_ssh_remote_ready", _missing_or)
+    code, lines = run_doctor(workspace=ws, plist_path=plist, home=home)
+    assert any(
+        "WARN host ssh lab:" in line and SSH_REMOTE_OPENROUTER_MISSING in line
+        for line in lines
+    ), lines
+    assert not any("sk-or" in line.lower() for line in lines), lines
+
+    def _missing_cli(host, **kwargs):
+        return SshProbeResult(
+            ok=False,
+            reason=SSH_REMOTE_CLI_MISSING,
+            detail="puppetmaster/agentic not on PATH",
+            cli="missing",
+            openrouter="env",
+        )
+
+    monkeypatch.setattr(rc, "probe_ssh_remote_ready", _missing_cli)
+    code, lines = run_doctor(workspace=ws, plist_path=plist, home=home)
+    assert any(
+        "WARN host ssh lab:" in line and SSH_REMOTE_CLI_MISSING in line
+        for line in lines
     ), lines
 
     monkeypatch.setenv(
@@ -378,13 +423,19 @@ def test_remote_cook_argv_and_mock_probe() -> None:
 
     def _exec(argv, *, timeout_seconds=0):
         calls.append(list(argv))
-        return _Proc()
+        class _Ok:
+            returncode = 0
+            stdout = "DISCORD_OS_SSH_PROBE cli=puppetmaster openrouter=vault\n"
+            stderr = ""
+        return _Ok()
 
     ok, detail = probe_ssh_host(ssh, exec_fn=_exec)
     assert ok is True
     assert SSH_COOK_CAPABLE in detail
+    assert "openrouter=vault" in detail
     assert calls and calls[0][:3] == ["ssh", "-o", "BatchMode=yes"]
-    assert "true" in calls[0]
+    assert "bash" in calls[0]
+    assert any("DISCORD_OS_SSH_PROBE" in str(part) for part in calls[0])
 
     class _Bad:
         returncode = 255
@@ -397,3 +448,12 @@ def test_remote_cook_argv_and_mock_probe() -> None:
     ok, detail = probe_ssh_host(ssh, exec_fn=_bad)
     assert ok is False
     assert "refused" in detail.lower() or detail
+
+    class _NoCli:
+        returncode = 11
+        stdout = "DISCORD_OS_SSH_PROBE cli=missing openrouter=env\n"
+        stderr = ""
+
+    ok, detail = probe_ssh_host(ssh, exec_fn=lambda *a, **k: _NoCli())
+    assert ok is False
+    assert SSH_REMOTE_CLI_MISSING in detail

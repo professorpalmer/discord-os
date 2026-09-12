@@ -66,10 +66,73 @@ from agent_discord.puppetmaster.prompt_handoff import (
 # Doctor / spoken honesty once Path A is wired.
 SSH_COOK_CAPABLE = "cook via ssh BatchMode (remote agentic)"
 SSH_COOK_UNREACHABLE = "ssh unreachable / Deny"
+SSH_REMOTE_CLI_MISSING = "remote agentic CLI missing / Deny"
+SSH_REMOTE_OPENROUTER_MISSING = "remote OpenRouter not configured / Deny"
 SSH_PROBE_TIMEOUT_S = 5.0
+
+# Remote probe exit codes (printed status never includes secrets).
+_PROBE_EXIT_OK = 0
+_PROBE_EXIT_CLI = 11
+_PROBE_EXIT_OPENROUTER = 12
+
+# bash -lc body: report cli + openrouter presence without echoing key material.
+_REMOTE_READY_SCRIPT = r"""
+cli=missing
+or=missing
+if command -v puppetmaster >/dev/null 2>&1; then
+  cli=puppetmaster
+elif command -v agentic >/dev/null 2>&1; then
+  cli=agentic
+fi
+if [ -n "${OPENROUTER_API_KEY:-}" ]; then
+  or=env
+else
+  for v in \
+    "${AGENT_DISCORD_WORKSPACE:-}/keys/vault.json" \
+    "$HOME/discord-os/.agent-discord/keys/vault.json" \
+    "$HOME/.agent-discord/keys/vault.json"; do
+    case "$v" in
+      /*) ;;
+      *) continue ;;
+    esac
+    if [ -f "$v" ] && grep -q '"openrouter"' "$v" 2>/dev/null; then
+      or=vault
+      break
+    fi
+  done
+fi
+printf 'DISCORD_OS_SSH_PROBE cli=%s openrouter=%s\n' "$cli" "$or"
+if [ "$cli" = missing ]; then exit 11; fi
+if [ "$or" = missing ]; then exit 12; fi
+exit 0
+""".strip()
 
 ExecResult = Any
 ExecFn = Callable[..., ExecResult]
+
+
+@dataclass(frozen=True)
+class SshProbeResult:
+    """Structured Path A readiness for doctor + pre-cook gate (no secrets)."""
+
+    ok: bool
+    reason: str
+    detail: str = ""
+    cli: str = ""
+    openrouter: str = ""
+
+    @property
+    def summary(self) -> str:
+        if self.ok:
+            bits = [self.reason]
+            if self.cli:
+                bits.append(f"cli={self.cli}")
+            if self.openrouter:
+                bits.append(f"openrouter={self.openrouter}")
+            return "; ".join(bits)
+        if self.detail:
+            return f"{self.reason} ({self.detail})"
+        return self.reason
 
 
 def ssh_cook_enabled(*, env: Optional[Mapping[str, str]] = None) -> bool:
@@ -95,20 +158,61 @@ def spoken_ssh_cook_disabled(host_id: str) -> str:
     )
 
 
-def probe_ssh_host(
+def spoken_ssh_probe_deny(host_id: str, result: "SshProbeResult") -> str:
+    """Spoken Deny from a failed remote readiness probe (honest Need)."""
+
+    reason = (result.reason or SSH_COOK_UNREACHABLE).strip()
+    bit = (result.detail or "").strip()
+    # Avoid duplicating the reason when summary already embeds it.
+    if bit and bit not in reason and not reason.endswith(f"({bit})"):
+        why = f"{reason}: {bit}"
+    else:
+        why = reason
+    return spoken_host_deny(host_id, reason=why)
+
+
+def remote_ready_probe_command() -> list[str]:
+    """Argv fragment run on the remote (no secrets)."""
+
+    return ["bash", "-lc", _REMOTE_READY_SCRIPT]
+
+
+def _parse_probe_stdout(stdout: str) -> tuple[str, str]:
+    cli = ""
+    openrouter = ""
+    for line in str(stdout or "").splitlines():
+        if "DISCORD_OS_SSH_PROBE" not in line:
+            continue
+        for part in line.strip().split():
+            if part.startswith("cli="):
+                cli = part.split("=", 1)[1].strip()
+            elif part.startswith("openrouter="):
+                openrouter = part.split("=", 1)[1].strip()
+    return cli, openrouter
+
+
+def probe_ssh_remote_ready(
     host: RemoteHost,
     *,
     exec_fn: Optional[ExecFn] = None,
     timeout_seconds: float = SSH_PROBE_TIMEOUT_S,
-) -> tuple[bool, str]:
-    """Return ``(ok, detail)``. Soft probe for doctor + pre-cook gate."""
+) -> SshProbeResult:
+    """Probe SSH reachability plus remote CLI + OpenRouter presence (no secrets)."""
 
     kind = (host.kind or "").strip().lower()
     if kind != "ssh":
-        return False, f"not ssh (kind={host.kind!r})"
+        return SshProbeResult(
+            ok=False,
+            reason=SSH_COOK_UNREACHABLE,
+            detail=f"not ssh (kind={host.kind!r})",
+        )
     target = (host.target or "").strip()
     if not target:
-        return False, "missing ssh target"
+        return SshProbeResult(
+            ok=False,
+            reason=SSH_COOK_UNREACHABLE,
+            detail="missing ssh target",
+        )
     argv = [
         "ssh",
         "-o",
@@ -116,22 +220,85 @@ def probe_ssh_host(
         "-o",
         f"ConnectTimeout={max(1, int(timeout_seconds))}",
         target,
-        "true",
+        *remote_ready_probe_command(),
     ]
     try:
         proc = _run_exec(argv, exec_fn=exec_fn, timeout_seconds=timeout_seconds)
     except Exception as exc:  # noqa: BLE001 — probe must never raise to doctor
-        return False, str(exc)[:160]
+        return SshProbeResult(
+            ok=False,
+            reason=SSH_COOK_UNREACHABLE,
+            detail=str(exc)[:160],
+        )
     code = int(getattr(proc, "returncode", 1) or 0)
-    if code == 0:
-        return True, SSH_COOK_CAPABLE
-    err = (
-        str(getattr(proc, "stderr", "") or getattr(proc, "stdout", "") or "")
-        .strip()
-        .splitlines()
-    )
+    stdout = str(getattr(proc, "stdout", "") or "")
+    stderr = str(getattr(proc, "stderr", "") or "")
+    cli, openrouter = _parse_probe_stdout(stdout)
+    if code == _PROBE_EXIT_OK:
+        return SshProbeResult(
+            ok=True,
+            reason=SSH_COOK_CAPABLE,
+            cli=cli or "puppetmaster",
+            openrouter=openrouter or "present",
+        )
+    # Prefer structured readiness exits over transport heuristics.
+    if code == _PROBE_EXIT_CLI or cli == "missing":
+        return SshProbeResult(
+            ok=False,
+            reason=SSH_REMOTE_CLI_MISSING,
+            detail=(stderr.strip().splitlines() or [""])[0][:160]
+            or "puppetmaster/agentic not on PATH",
+            cli=cli or "missing",
+            openrouter=openrouter,
+        )
+    if code == _PROBE_EXIT_OPENROUTER or openrouter == "missing":
+        return SshProbeResult(
+            ok=False,
+            reason=SSH_REMOTE_OPENROUTER_MISSING,
+            detail=(stderr.strip().splitlines() or [""])[0][:160]
+            or "OPENROUTER_API_KEY/vault absent",
+            cli=cli,
+            openrouter=openrouter or "missing",
+        )
+    view = _ProcView(returncode=code, stdout=stdout, stderr=stderr)
+    if _is_ssh_transport_failure(view):
+        err = (stderr or stdout).strip().splitlines()
+        detail = (err[0] if err else f"exit {code}")[:160]
+        return SshProbeResult(
+            ok=False,
+            reason=SSH_COOK_UNREACHABLE,
+            detail=detail or f"exit {code}",
+        )
+    err = (stderr or stdout).strip().splitlines()
     detail = (err[0] if err else f"exit {code}")[:160]
-    return False, detail or f"exit {code}"
+    # Unknown remote failure — fail closed as unreachable/Deny for cook.
+    return SshProbeResult(
+        ok=False,
+        reason=SSH_COOK_UNREACHABLE,
+        detail=detail or f"exit {code}",
+        cli=cli,
+        openrouter=openrouter,
+    )
+
+
+def probe_ssh_host(
+    host: RemoteHost,
+    *,
+    exec_fn: Optional[ExecFn] = None,
+    timeout_seconds: float = SSH_PROBE_TIMEOUT_S,
+) -> tuple[bool, str]:
+    """Return ``(ok, detail)``. Soft probe for doctor + pre-cook gate.
+
+    Detail is the structured reason (capable / unreachable / missing CLI /
+    missing OpenRouter). Never includes secrets.
+    """
+
+    result = probe_ssh_remote_ready(
+        host, exec_fn=exec_fn, timeout_seconds=timeout_seconds
+    )
+    if result.ok:
+        return True, result.summary
+    return False, result.summary
 
 
 def _remote_agentic_flags(
@@ -730,11 +897,11 @@ class SshRemoteCookBackend:
         if not (self.host.target or "").strip():
             return spoken_host_deny(self.host.id, reason="missing ssh target")
         if self.probe_first:
-            ok, detail = probe_ssh_host(
+            result = probe_ssh_remote_ready(
                 self.host, exec_fn=self.exec_fn, timeout_seconds=SSH_PROBE_TIMEOUT_S
             )
-            if not ok:
-                return spoken_ssh_unreachable(self.host.id, detail=detail)
+            if not result.ok:
+                return spoken_ssh_probe_deny(self.host.id, result)
         if not self.available() and self.exec_fn is None:
             return spoken_ssh_unreachable(self.host.id, detail="ssh binary missing")
         return ""
@@ -863,9 +1030,9 @@ def assert_ssh_remote_cook_ready(
             spoken_host_deny(host.id, reason="missing ssh target"),
             host_id=host.id,
         )
-    ok, detail = probe_ssh_host(host, exec_fn=exec_fn)
-    if not ok:
+    result = probe_ssh_remote_ready(host, exec_fn=exec_fn)
+    if not result.ok:
         raise HostAllowlistError(
-            spoken_ssh_unreachable(host.id, detail=detail),
+            spoken_ssh_probe_deny(host.id, result),
             host_id=host.id,
         )

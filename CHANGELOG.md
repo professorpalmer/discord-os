@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### P0.5 Remote OpenRouter/CLI doctor probe
+
+Allowlisted `kind=ssh` hosts are doctor-probed for **remote** readiness, not
+only SSH reachability: `puppetmaster`/`agentic` on PATH and OpenRouter present
+(env or vault fingerprint). Doctor **OK**s cook-capable hosts with
+`cli=` / `openrouter=` (never secrets); **WARN**s unreachable, missing CLI, or
+missing OpenRouter so phone/doctor speaks honest Need before cook-time Deny.
+Path A preflight / `assert_ssh_remote_cook_ready` still fail closed. Keys never
+on argv. Tests mock SSH (`tests/test_remote_cook.py`,
+`tests/test_host_runners.py`). Docs: host README.
+
 ## 0.5.46
 
 ARG_MAX stdin/file handoff for oversized agentic prompts (local + Path A).
