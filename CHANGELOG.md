@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.31
 
 P0.2 Phone-visible host liveness / status Need.
 
