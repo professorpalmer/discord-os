@@ -334,8 +334,7 @@ class AgenticPuppetmasterBackend:
         finally:
             self._unregister_child(request.run_id, proc)
             self._cancel_requested.discard(request.run_id)
-
-
+            handoff.cleanup()
 
     def _agentic_flags(
         self,
