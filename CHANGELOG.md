@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.5.49
+
+Round-4 complete — reliability haul from 0.5.43 through 0.5.49 (P0–P2).
+
+### Round-4 complete (P0–P2 highlights since 0.5.43)
+
+- **Cancel honesty (0.5.43)**: spoken Cancel / abort paths match what Discord shows.
+- **Path A progress (0.5.44)**: remote SSH cook progress and honesty improvements.
+- **Live gate-hook (0.5.45)**: local agentic PreToolUse really fires via sitecustomize inject.
+- **ARG_MAX handoff (0.5.46)**: oversized prompts spill to stdin/file instead of E2BIG.
+- **Remote SSH doctor (0.5.47)**: cook-capable hosts probed for remote CLI + OpenRouter.
+- **P1 pack (0.5.48)**: watchdog install, never-READY Need, exact-tool Always, plan hold,
+  REQUIRE_OPERATORS when exposed, SSH gates honesty (Need + remote write Deny).
+- **AskUser multi-select (0.5.49)**: `allow_multiple` parks toggle options + Confirm/Deny;
+  empty Confirm stays parked (Need).
+
 ### Round-4 P2 (scoped)
 
 - **AskUserQuestion multi-select Confirm row**: `raise_ask_user(..., allow_multiple=True)`
@@ -9,9 +25,9 @@
   (Need). Single-select unchanged (immediate option resolve); five options keep
   Deny on a second row. Gate-hook reads `allow_multiple` / `allowMultiple` /
   `multiSelect` from ask tool input. Docs: [ask-gate](docs/cards/ask-gate.md).
-- **SSH gate bridge**: still deferred (not M-sized / not honest as phone cards).
-  Need + remote write Deny inject remain the Path A contract;
-  `DISCORD_OS_SSH_GATES=bridge` reserved.
+- **Deferred**: SSH gate live Discord bridge — still not shipped (not M-sized / not
+  honest as phone cards). Need + remote write Deny inject remain the Path A
+  contract; `DISCORD_OS_SSH_GATES=bridge` reserved.
 - Daemon/mux/queue + voice: no Round-4 honesty leftover beyond shipped spikes
   (Cancel / inbound queue / voice Deny stubs already honest).
 
