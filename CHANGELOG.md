@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.26
 
 Multi-host runners allowlist (P2.11). Fail-closed.
 
