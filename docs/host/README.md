@@ -2,6 +2,30 @@
 
 The host is the long-running process on this Mac: listen loop, JobPool, SQLite, Puppetmaster workers. Discord is only the remote.
 
+## Multi-host runners (fail-closed)
+
+Security posture first. Multi-host is an **explicit allowlist** seam — never a discovery protocol.
+
+| Rule | Behavior |
+|---|---|
+| Empty `DISCORD_OS_HOSTS` | Current single-host behavior only (this Mac is the computer). |
+| Unknown host id | **Fail closed** — spoken `Denied. Host '…' is not allowlisted.` No silent local fallback. |
+| On / Off / status | Always local on the control-plane Mac. Power never routes remotely. |
+| Credentials | Never in argv. SSH uses agent / `~/.ssh/config` only (`BatchMode=yes`). |
+
+```bash
+# JSON (preferred)
+DISCORD_OS_HOSTS=[{"id":"lab","label":"Lab Mac","ssh":"cary@lab.local","channels":["CHANNEL_ID"],"workdir":"/Users/cary/Projects"}]
+
+# Compact CSV
+DISCORD_OS_HOSTS=lab:ssh:cary@lab.local,nas:path:/Volumes/work
+```
+
+Bind a channel: `bind host lab` (or `/bind host lab`). Doctor reports allowlist status and **FAIL**s unsafe entries (duplicate ids, empty target, ssh targets that look like flag/password soup).
+
+This commit is the allowlist + routing seam. A later daemon can plug into `host_runner_argv` — full SSH fleet productization is out of scope here.
+
+
 `discord-os setup` / `host start` detaches it and posts the HOST card: On, Off, Ask, a More menu (Pair / Halt / Gate / Roles / GitHub / Files here or on host / Terminal on host / Browser here or on host), and Jobs. Dest is a noun: **here** stays in Discord (the tapping client — phone or desktop — opens the link or reads the listing). **host** opens a GUI on the listen machine. Discord does not send which client tapped; presence `client_status` is not a dest. The job line and select are a deterministic briefing over SQLite: parked / failed first, then waiting-on-CI, then live, then last Done. Not a second board. Message intake is REST. A Gateway is open **only** so those controls work. Do not run a second bot process on the same token. Discord has no tabs — the More select is the grouping.
 
 ## Power
@@ -39,6 +63,7 @@ discord-os host start --channel-id ID
 
 - `src/agent_discord/host/panel.py` — HOST card, Ask channel
 - `src/agent_discord/host/power.py` — armed / pid
+- `src/agent_discord/host/runners.py` — multi-host allowlist (fail-closed)
 - `src/agent_discord/host/install.py` — login item
 - `src/agent_discord/host/actions.py` — Terminal / files / browser
 - `src/agent_discord/cli.py` — `cmd_host_*`, `cmd_setup`

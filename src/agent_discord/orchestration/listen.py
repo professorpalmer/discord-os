@@ -792,6 +792,18 @@ def _absorb_power(
     publish_host_card(discord, store, channel_id, thread_id=thread_id)
 
 
+
+def _post_host_deny(
+    discord: Any, channel_id: str, thread_id: Optional[str], body: str
+) -> None:
+    try:
+        send = getattr(discord, "send_message", None)
+        if callable(send):
+            send(channel_id, body, thread_id=thread_id)
+    except Exception:
+        pass
+
+
 def _absorb_bind(
     message: DiscordMessage,
     *,
@@ -803,6 +815,44 @@ def _absorb_bind(
 ) -> None:
     store = getattr(orchestrator, "store", None)
     _claim_inbound(store, discord, message, channel_id)
+    from agent_discord.host.runners import (
+        HostAllowlistError,
+        bind_channel_host,
+        is_host_bind_command,
+        load_host_allowlist,
+        parse_host_bind_command,
+    )
+
+    if is_host_bind_command(message.content or ""):
+        host_id = parse_host_bind_command(message.content or "")
+        allowlist = load_host_allowlist()
+        try:
+            chosen_host = bind_channel_host(
+                store,
+                workspace_id=workspace_id,
+                channel_id=channel_id,
+                host_id=host_id,
+                allowlist=allowlist,
+            )
+        except HostAllowlistError as exc:
+            _post_host_deny(discord, channel_id, thread_id, str(exc.spoken))
+            publish_host_card(
+                discord,
+                store,
+                channel_id,
+                thread_id=thread_id,
+                realm=_realm_name(store, channel_id, workspace_id),
+            )
+            return
+        publish_host_card(
+            discord,
+            store,
+            channel_id,
+            thread_id=thread_id,
+            realm=_realm_name(store, channel_id, workspace_id) or chosen_host.id,
+        )
+        return
+
     name = parse_bind_command(message.content or "")
     repos = list(getattr(orchestrator, "host_repos", None) or load_host_repos())
     chosen = None

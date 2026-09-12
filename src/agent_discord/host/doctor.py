@@ -101,6 +101,8 @@ def run_doctor(
     else:
         lines.append(f"OK discord token source={source}")
 
+    fails += _check_host_allowlist(lines)
+
     db = ws / "agent_discord.sqlite3" if ws.exists() else None
     if db is not None and db.is_file():
         fails += _check_gateway(db, fix=fix, lines=lines, channel_id=channel_id)
@@ -108,6 +110,26 @@ def run_doctor(
         lines.append("WARN sqlite database missing; skip gateway/power checks")
 
     return (1 if fails else 0, lines)
+
+
+
+def _check_host_allowlist(lines: list[str]) -> int:
+    """Report allowlist status. Refuse unsafe configs (FAIL)."""
+
+    from agent_discord.host.runners import load_host_allowlist, validate_host_allowlist
+
+    hosts = load_host_allowlist()
+    if not hosts:
+        lines.append("OK host allowlist empty (single-host)")
+        return 0
+    ids = ",".join(host.id for host in hosts)
+    lines.append(f"OK host allowlist {len(hosts)}: {ids}")
+    problems = validate_host_allowlist(hosts)
+    fails = 0
+    for problem in problems:
+        lines.append(f"FAIL host allowlist: {problem}")
+        fails += 1
+    return fails
 
 
 def _check_plist(

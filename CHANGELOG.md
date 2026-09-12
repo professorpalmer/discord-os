@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+Multi-host runners allowlist (P2.11). Fail-closed.
+
+- `DISCORD_OS_HOSTS` explicit allowlist; empty keeps single-host.
+- Unknown host id → spoken Deny; no silent local fallback.
+- `bind host <id>`; doctor reports allowlist; Off/power stay local.
+- Runner argv never carries credentials.
+
 ## 0.5.25
 
 DisCode write-gate. Jobs Continue. Honest Done. V2 console.

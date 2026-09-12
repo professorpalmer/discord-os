@@ -623,6 +623,41 @@ class AgentOrchestrator:
             }
         )
         repos = self.host_repos if self.host_repos is not None else load_host_repos()
+        from agent_discord.host.runners import (
+            HostAllowlistError,
+            load_host_allowlist,
+            resolve_channel_host,
+        )
+
+        try:
+            remote_host = resolve_channel_host(
+                self.store,
+                intake.channel_id,
+                workspace_id=intake.workspace_id,
+                allowlist=load_host_allowlist(),
+            )
+        except HostAllowlistError as exc:
+            receipt = self._close_without_worker(
+                intake,
+                task_id=task_id,
+                run_id=run_id,
+                summary=str(exc.spoken),
+                live=live,
+            )
+            self._release_live_thread(job_thread_id, run_id)
+            return receipt
+        host_cwd = None
+        if remote_host is not None:
+            extra_meta["host_id"] = remote_host.id
+            extra_meta["host_label"] = remote_host.label
+            extra_meta["host_kind"] = remote_host.kind
+            if remote_host.workdir:
+                extra_meta["host_workdir"] = remote_host.workdir
+            # Local path-root hosts may supply the run cwd; ssh stays a routing seam.
+            if remote_host.kind == "local" and remote_host.target:
+                root = Path(remote_host.target).expanduser()
+                if root.is_dir():
+                    host_cwd = root.resolve()
         channel_realm = realm_for_channel(
             self.store,
             intake.channel_id,
@@ -636,7 +671,7 @@ class AgentOrchestrator:
         )
         if chosen is None:
             chosen = channel_realm
-        run_cwd = chosen.path if chosen is not None else self.compute_cwd
+        run_cwd = chosen.path if chosen is not None else (host_cwd or self.compute_cwd)
         if run_cwd is not None:
             extra_meta["cwd"] = str(run_cwd)
         if chosen is not None:
