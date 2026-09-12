@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+Companion web dashboard (P2.12). Read-only.
+
+- `discord-os host dashboard` serves loopback HTML + `/api/status` JSON.
+- Fail-closed bind (127.0.0.1); no write endpoints; no SSH targets or tokens in responses.
+
 ## 0.5.26
 
 Multi-host runners allowlist (P2.11). Fail-closed.

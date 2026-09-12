@@ -260,6 +260,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="Clear gateway_owners rows whose embedded pid is dead",
     )
     p_host_doctor.add_argument("--json", action="store_true")
+    p_host_dash = host_sub.add_parser(
+        "dashboard",
+        help="Read-only companion web dashboard (loopback by default)",
+    )
+    p_host_dash.add_argument(
+        "--host",
+        default=None,
+        help="Bind host (default: 127.0.0.1 / DISCORD_OS_DASHBOARD_HOST)",
+    )
+    p_host_dash.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Bind port (default: 8765 / DISCORD_OS_DASHBOARD_PORT)",
+    )
+    p_host_dash.add_argument(
+        "--allow-non-loopback",
+        action="store_true",
+        help="Permit non-loopback bind (fail-closed unless set)",
+    )
+    p_host_dash.add_argument(
+        "--once",
+        action="store_true",
+        help="Print JSON snapshot to stdout and exit (no HTTP server)",
+    )
+    p_host_dash.add_argument("--json", action="store_true", help="With --once, force JSON")
     p_host_run = host_sub.add_parser(
         "run",
         help="Foreground host loop (used by host start; prefer host start)",
@@ -399,6 +425,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_sched.add_argument("--channel-id", required=True)
     p_sched.add_argument("--workspace-id", default="default")
     p_sched.add_argument("prompt", nargs="+", help="Job text to dispatch when due")
+
+    p_dashboard = sub.add_parser(
+        "dashboard",
+        help="Alias for host dashboard (read-only companion web UI)",
+    )
+    p_dashboard.add_argument("--host", default=None)
+    p_dashboard.add_argument("--port", type=int, default=None)
+    p_dashboard.add_argument("--allow-non-loopback", action="store_true")
+    p_dashboard.add_argument("--once", action="store_true")
+    p_dashboard.add_argument("--json", action="store_true")
 
     p_spend = sub.add_parser("spend", help="Show session spend, set a cap, or halt new jobs")
     p_spend.add_argument("--cap", type=float, default=None, help="USD halt threshold")
@@ -1807,10 +1843,12 @@ def cmd_host(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         return cmd_host_status(args, out=out)
     if command == "doctor":
         return cmd_host_doctor(args, out=out)
+    if command == "dashboard":
+        return cmd_host_dashboard(args, out=out)
     if command == "run":
         args.announce_host = True
         return cmd_listen(args, out=out)
-    print("host: start, stop, status, doctor, or run", file=sys.stderr)
+    print("host: start, stop, status, doctor, dashboard, or run", file=sys.stderr)
     return 2
 
 
@@ -1951,6 +1989,58 @@ def cmd_host_doctor(args: argparse.Namespace, *, out: TextIO | None = None) -> i
         for line in lines:
             print(line, file=out)
     return code
+
+
+def cmd_host_dashboard(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
+    """Serve (or print) the read-only companion dashboard."""
+
+    out = out or sys.stdout
+    from agent_discord.host.dashboard import (
+        DashboardBindError,
+        build_status_snapshot,
+        resolve_bind_host,
+        resolve_bind_port,
+        serve_dashboard,
+    )
+
+    config = apply_runtime_secrets(load_config())
+    once = bool(getattr(args, "once", False))
+    if once:
+        payload = build_status_snapshot(workspace=config.workspace, config=config)
+        print(json.dumps(payload, indent=2, sort_keys=True), file=out)
+        return 0
+    try:
+        host = resolve_bind_host(
+            getattr(args, "host", None),
+            allow_non_loopback=bool(getattr(args, "allow_non_loopback", False)),
+        )
+        port = resolve_bind_port(getattr(args, "port", None))
+    except DashboardBindError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    try:
+        server = serve_dashboard(
+            host=host,
+            port=port,
+            allow_non_loopback=bool(getattr(args, "allow_non_loopback", False)),
+            workspace=config.workspace,
+        )
+    except DashboardBindError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    except OSError as exc:
+        print(f"dashboard: bind failed: {exc}", file=sys.stderr)
+        return 1
+    bind_host, bind_port = server.server_address[:2]
+    print(f"dashboard: http://{bind_host}:{bind_port}/ (read-only, Ctrl-C to stop)", file=out)
+    print(f"dashboard: json http://{bind_host}:{bind_port}/api/status", file=out)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("dashboard: stopped", file=out)
+    finally:
+        server.server_close()
+    return 0
 
 
 def cmd_connect(args: argparse.Namespace, *, out: TextIO | None = None, stdin: TextIO | None = None) -> int:
@@ -2229,6 +2319,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return cmd_note(args)
     if args.command == "host":
         return cmd_host(args)
+    if args.command == "dashboard":
+        return cmd_host_dashboard(args)
     if args.command == "listen":
         return cmd_listen(args)
     if args.command == "connect":

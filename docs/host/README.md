@@ -48,9 +48,30 @@ macOS LaunchAgent (`com.discord-os.host`) or the Windows equivalent from `host/i
 discord-os host status
 discord-os host doctor          # LaunchAgent / workspace / pid / gateway
 discord-os host doctor --fix   # clear dead-pid gateway locks only
+discord-os host dashboard       # read-only companion at http://127.0.0.1:8765/
 discord-os host stop
 discord-os host start --channel-id ID
 ```
+
+## Companion dashboard (read-only)
+
+Local HTTP glance at host status — version, power/armed, spend, recent jobs, doctor summary, and multi-host allowlist **ids** (no secrets). Mutating controls stay on the Discord HOST panel.
+
+```bash
+discord-os host dashboard          # http://127.0.0.1:8765/
+discord-os dashboard               # same (alias)
+discord-os host dashboard --once   # print JSON snapshot, no server
+```
+
+| Rule | Behavior |
+|---|---|
+| Bind | **Fail closed** to `127.0.0.1` (or `DISCORD_OS_DASHBOARD_HOST` if loopback). |
+| Non-loopback | Refused unless `--allow-non-loopback` (not recommended; no auth). |
+| Methods | GET / HEAD only. POST/PUT/PATCH/DELETE → 405. |
+| Secrets | No bot tokens, env dumps, SSH targets, or credentials in responses. |
+| Allowlist | Ids / labels / kinds only — never `target` / ssh user@host. |
+
+JSON: `GET /api/status`. HTML: `GET /`. Code: `src/agent_discord/host/dashboard.py`.
 
 ## Other host verbs
 
@@ -64,6 +85,7 @@ discord-os host start --channel-id ID
 - `src/agent_discord/host/panel.py` — HOST card, Ask channel
 - `src/agent_discord/host/power.py` — armed / pid
 - `src/agent_discord/host/runners.py` — multi-host allowlist (fail-closed)
+- `src/agent_discord/host/dashboard.py` — read-only companion web dashboard
 - `src/agent_discord/host/install.py` — login item
 - `src/agent_discord/host/actions.py` — Terminal / files / browser
 - `src/agent_discord/cli.py` — `cmd_host_*`, `cmd_setup`
