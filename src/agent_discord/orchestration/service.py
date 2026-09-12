@@ -434,6 +434,28 @@ def seed_spend_cap_from_env(store: Any, env: Optional[Mapping[str, str]] = None)
         return
 
 
+REQUIRE_OPERATORS_ENV = "DISCORD_OS_REQUIRE_OPERATORS"
+# Alias aligned with peer fail-closed allowlists (gjc-remote REQUIRE_ALLOWLIST).
+REQUIRE_ALLOWLIST_ENV = "DISCORD_OS_REQUIRE_ALLOWLIST"
+
+
+def require_operators(env: Optional[Mapping[str, str]] = None) -> bool:
+    """True when operator allowlist must be non-empty before dispatch.
+
+    Default off keeps single-user Mac UX (first armed human may seed owner).
+    Set ``DISCORD_OS_REQUIRE_OPERATORS=1`` (or ``DISCORD_OS_REQUIRE_ALLOWLIST=1``)
+    to refuse silent first-armed-human seed until Pair / ``discord-os pair`` /
+    ``DISCORD_OWNER_ID`` has paired an owner.
+    """
+
+    source = env if env is not None else os.environ
+    if _truthy(str(source.get(REQUIRE_OPERATORS_ENV) or "")):
+        return True
+    if _truthy(str(source.get(REQUIRE_ALLOWLIST_ENV) or "")):
+        return True
+    return False
+
+
 def author_is_operator(
     store: Any,
     user_id: Optional[str],
@@ -462,7 +484,22 @@ def operators_configured(store: Any) -> bool:
         return False
 
 
-def seed_owner_if_empty(store: Any, user_id: Optional[str]) -> bool:
+def seed_owner_if_empty(
+    store: Any,
+    user_id: Optional[str],
+    *,
+    intentional: bool = False,
+    env: Optional[Mapping[str, str]] = None,
+) -> bool:
+    """Seed first owner when the operators table is empty.
+
+    When ``require_operators`` is on, only *intentional* bootstrap paths may
+    seed (Pair button, explicit CLI). Silent first-armed-human / On / dispatch
+    seed is refused.
+    """
+
+    if require_operators(env) and not intentional:
+        return False
     seeder = getattr(store, "seed_owner_if_empty", None)
     if not callable(seeder):
         return False
@@ -472,14 +509,27 @@ def seed_owner_if_empty(store: Any, user_id: Optional[str]) -> bool:
         return False
 
 
-def author_may_dispatch(store: Any, user_id: Optional[str], *, role_ids: Optional[Sequence[str]] = None) -> bool:
-    """Fail closed after an owner exists. First armed human becomes owner."""
+def author_may_dispatch(
+    store: Any,
+    user_id: Optional[str],
+    *,
+    role_ids: Optional[Sequence[str]] = None,
+    env: Optional[Mapping[str, str]] = None,
+) -> bool:
+    """Fail closed after an owner exists.
+
+    Default: first armed human may become owner. With
+    ``DISCORD_OS_REQUIRE_OPERATORS=1``, refuse dispatch until an operator is
+    paired — no silent first-armed-human seed.
+    """
 
     uid = str(user_id or "").strip()
     if not uid:
         return False
     if not operators_configured(store):
-        return seed_owner_if_empty(store, uid)
+        if require_operators(env):
+            return False
+        return seed_owner_if_empty(store, uid, env=env)
     return author_is_operator(store, uid, role_ids=role_ids)
 
 
@@ -489,10 +539,12 @@ def author_may_operate(
     action: str = "",
     *,
     role_ids: Optional[Sequence[str]] = None,
+    env: Optional[Mapping[str, str]] = None,
 ) -> bool:
     _ = action
     if not operators_configured(store):
-        return True
+        # Empty allowlist: open panel until first pair, unless require is on.
+        return not require_operators(env)
     uid = str(user_id or "").strip()
     if not uid:
         return False

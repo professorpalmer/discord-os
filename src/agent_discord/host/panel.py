@@ -673,7 +673,15 @@ def handle_gateway_interaction(
 
     user_id = interaction_user_id(payload)
     role_ids = interaction_role_ids(payload)
-    if action in {"pair", "on"}:
+    if action == "pair":
+        # Intentional bootstrap — allowed even when REQUIRE_OPERATORS is on.
+        seeded = seed_owner_if_empty(store, user_id, intentional=True)
+        print(
+            f"panel {action} user={user_id or '-'} seeded={int(bool(seeded))}",
+            flush=True,
+        )
+    elif action == "on":
+        # Silent first-On seed only when require flag is off (default Mac UX).
         seeded = seed_owner_if_empty(store, user_id)
         print(
             f"panel {action} user={user_id or '-'} seeded={int(bool(seeded))}",

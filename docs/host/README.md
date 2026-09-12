@@ -34,13 +34,34 @@ Bind a channel: `bind host lab` (or `/bind host lab`). Doctor reports allowlist 
 
 | Discord | Meaning |
 |---|---|
-| On | Armed. First click may become owner. |
+| On | Armed. First click may become owner when require is **off** (default). |
 | Off → Confirm | Disarmed. Helper stays so On still works. |
 | Ask | Prompt into that channel. |
-| Pair | Owner / operators. |
+| Pair | Owner / operators. Intentional bootstrap even when require is on. |
 | Halt | Spend cap (OpenRouter usage cost on agentic receipts). `discord-os spend --resume` clears it. |
 
-Work is accepted only while On, and only from a paired operator after the first pair.
+Work is accepted only while On, and only from a paired operator after the first pair (or immediately when `DISCORD_OS_REQUIRE_OPERATORS=1` and operators are empty — dispatch refuses until Pair).
+
+## Operator bootstrap (fail-closed opt-in)
+
+Peer to gjc-remote `REQUIRE_ALLOWLIST`. Soft first-message-as-owner is convenient on a single-user Mac; harden it when the bot is exposed more broadly.
+
+| Rule | Behavior |
+|---|---|
+| Default (unset / `0`) | Current UX. First armed human / On / first dispatch may seed owner. |
+| `DISCORD_OS_REQUIRE_OPERATORS=1` | **Fail closed** — no silent seed. Dispatch refuses until an operator exists. |
+| Alias | `DISCORD_OS_REQUIRE_ALLOWLIST=1` same effect. |
+| Intentional bootstrap | HOST **Pair**, `discord-os pair --user-id ID`, or `DISCORD_OWNER_ID` / `DISCORD_OPERATOR_ROLE_IDS` at process start. |
+| Doctor | **FAIL** when require is on and operators are empty. |
+
+```bash
+# Harden (shared / multi-user / exposed bot)
+DISCORD_OS_REQUIRE_OPERATORS=1
+DISCORD_OWNER_ID=YOUR_DISCORD_USER_SNOWFLAKE
+
+# Or pair after start
+discord-os pair --user-id YOUR_DISCORD_USER_SNOWFLAKE --role owner
+```
 
 ## Login helper
 
@@ -114,6 +135,8 @@ Opt-in local spoken Done on this Mac. Discord voice-channel join is stubbed
 - `src/agent_discord/host/panel.py` — HOST card, Ask channel
 - `src/agent_discord/host/power.py` — armed / pid
 - `src/agent_discord/host/runners.py` — multi-host allowlist (fail-closed)
+- `src/agent_discord/orchestration/service.py` — operators / REQUIRE_OPERATORS
+- `src/agent_discord/host/doctor.py` — operators require check
 - `src/agent_discord/host/dashboard.py` — read-only companion web dashboard
 - `src/agent_discord/host/liveness.py` — phone-visible digest / HOST Need (P0.2)
 - `src/agent_discord/discord/tts.py` — local TTS + voice-join stub (P2.13)

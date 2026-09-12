@@ -24,6 +24,7 @@ discord-os status [--json]
 discord-os invite
 discord-os open {terminal,files,browser} [PATH_OR_URL] [--here|--host]
 discord-os pair --user-id ID [--role owner|operator]
+# With DISCORD_OS_REQUIRE_OPERATORS=1, pair (or DISCORD_OWNER_ID) before dispatch.
 discord-os schedule --every 1h --channel-id ID PROMPT
 discord-os spend [--cap USD] [--halt] [--resume]
 discord-os put|get|ls …

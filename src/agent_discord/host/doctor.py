@@ -105,11 +105,62 @@ def run_doctor(
 
     db = ws / "agent_discord.sqlite3" if ws.exists() else None
     if db is not None and db.is_file():
+        fails += _check_operators(db, lines)
         fails += _check_gateway(db, fix=fix, lines=lines, channel_id=channel_id)
     else:
         lines.append("WARN sqlite database missing; skip gateway/power checks")
+        fails += _check_operators(None, lines)
 
     return (1 if fails else 0, lines)
+
+
+
+def _check_operators(db: Optional[Path], lines: list[str]) -> int:
+    """FAIL when REQUIRE_OPERATORS is on and the operators table is empty."""
+
+    from agent_discord.orchestration.service import (
+        REQUIRE_ALLOWLIST_ENV,
+        REQUIRE_OPERATORS_ENV,
+        operators_configured,
+        require_operators,
+    )
+
+    if not require_operators():
+        lines.append(
+            f"OK operators require off ({REQUIRE_OPERATORS_ENV} unset)"
+        )
+        return 0
+    flag = REQUIRE_OPERATORS_ENV
+    if _truthy_env(REQUIRE_ALLOWLIST_ENV) and not _truthy_env(REQUIRE_OPERATORS_ENV):
+        flag = REQUIRE_ALLOWLIST_ENV
+    if db is None or not db.is_file():
+        lines.append(
+            f"FAIL operators empty while {flag}=1 (no sqlite)"
+        )
+        return 1
+    store = SQLiteStore(db)
+    store.initialize()
+    try:
+        if operators_configured(store):
+            ops = store.list_operators()
+            lines.append(f"OK operators {len(ops)} ({flag}=1)")
+            return 0
+        lines.append(
+            f"FAIL operators empty while {flag}=1 — pair via Pair / "
+            f"discord-os pair / DISCORD_OWNER_ID before dispatch"
+        )
+        return 1
+    finally:
+        store.close()
+
+
+def _truthy_env(name: str) -> bool:
+    return str(os.environ.get(name) or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 

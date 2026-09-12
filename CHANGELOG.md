@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+P1.5 Operator bootstrap harden (REQUIRE_ALLOWLIST-style).
+
+- Env `DISCORD_OS_REQUIRE_OPERATORS=1` (alias `DISCORD_OS_REQUIRE_ALLOWLIST=1`): refuse dispatch until an operator/owner is paired — no silent first-armed-human seed.
+- Default remains off (single-user Mac UX: first On / first armed human may seed owner).
+- Intentional bootstrap kept: HOST **Pair**, `discord-os pair`, `DISCORD_OWNER_ID` / `DISCORD_OPERATOR_ROLE_IDS`.
+- Doctor **FAIL**s when require is on and operators are empty.
+- Docs: [docs/host/README.md](docs/host/README.md). No version bump.
+
+
 ## 0.5.33
 
 P1.4 Per-tool / AskUserQuestion gate (surgical phone approve).

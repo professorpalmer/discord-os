@@ -16,9 +16,13 @@ from agent_discord.orchestration.listen import drain_inbound
 from agent_discord.orchestration.orchestrator import AgentOrchestrator
 from agent_discord.orchestration.receipts import render_receipt
 from agent_discord.orchestration.service import (
+    author_may_dispatch,
+    author_may_operate,
     format_usd,
     parse_every_seconds,
     parse_schedule_command,
+    require_operators,
+    seed_owner_if_empty,
     set_write_gate,
     spend_usd_from_usage,
 )
@@ -75,6 +79,52 @@ def test_first_armed_author_becomes_owner(tmp_path: Path):
     assert store.is_operator("human-1")
     assert backend.dispatch_count == 1
     store.close()
+
+
+def test_require_operators_refuses_silent_first_seed(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("DISCORD_OS_REQUIRE_OPERATORS", "1")
+    assert require_operators() is True
+    orch, store, fake, backend = _orch(tmp_path)
+    store.set_host_control("ch", armed=True)
+    fake.inbox.append(
+        DiscordMessage(
+            channel_id="ch",
+            content="what is Discord OS?",
+            message_id="12",
+            author_id="human-1",
+        )
+    )
+    receipts = drain_inbound(orch, orch.discord, channel_id="ch", workspace_id="ws", since_ms=0)
+    assert receipts == []
+    assert store.list_operators() == []
+    assert backend.dispatch_count == 0
+    assert author_may_dispatch(store, "human-1") is False
+    assert author_may_operate(store, "human-1", "on") is False
+    store.close()
+
+
+def test_require_operators_alias_allowlist(monkeypatch):
+    monkeypatch.delenv("DISCORD_OS_REQUIRE_OPERATORS", raising=False)
+    monkeypatch.setenv("DISCORD_OS_REQUIRE_ALLOWLIST", "1")
+    assert require_operators() is True
+
+
+def test_require_operators_intentional_pair_seed(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("DISCORD_OS_REQUIRE_OPERATORS", "1")
+    store = SQLiteStore(tmp_path / "pair.sqlite3")
+    store.initialize()
+    assert seed_owner_if_empty(store, "human-9") is False
+    assert store.list_operators() == []
+    assert seed_owner_if_empty(store, "human-9", intentional=True) is True
+    assert store.is_operator("human-9")
+    assert author_may_dispatch(store, "human-9") is True
+    store.close()
+
+
+def test_require_operators_default_off(monkeypatch):
+    monkeypatch.delenv("DISCORD_OS_REQUIRE_OPERATORS", raising=False)
+    monkeypatch.delenv("DISCORD_OS_REQUIRE_ALLOWLIST", raising=False)
+    assert require_operators() is False
 
 
 def test_implement_runs_without_approve_by_default(tmp_path: Path):

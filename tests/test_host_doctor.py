@@ -105,3 +105,55 @@ def test_doctor_fix_clears_stale_gateway(tmp_path: Path, monkeypatch) -> None:
     rows = list(store._connection().execute("SELECT * FROM gateway_owners"))
     store.close()
     assert rows == []
+
+
+def test_doctor_fail_empty_operators_when_require(tmp_path: Path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    ws = home / "discord-os" / ".agent-discord"
+    ws.mkdir(parents=True)
+    py = tmp_path / "python"
+    py.write_text("#!/bin/sh\n", encoding="utf-8")
+    py.chmod(0o755)
+    plist = home / "Library" / "LaunchAgents" / f"{SERVICE_LABEL}.plist"
+    _write_plist(plist, workspace=ws, cwd=home / "discord-os", python=py)
+    store = SQLiteStore(ws / "agent_discord.sqlite3")
+    store.initialize()
+    store.close()
+    monkeypatch.setenv("AGENT_DISCORD_WORKSPACE", str(ws))
+    monkeypatch.setenv("DISCORD_OS_REQUIRE_OPERATORS", "1")
+    from agent_discord import config as cfgmod
+
+    token_path = ws / "bot.token"
+    monkeypatch.setattr(cfgmod, "DEFAULT_HOST_BOT_TOKEN_PATH", token_path)
+    token_path.write_text("dummy-token\n", encoding="utf-8")
+    code, lines = run_doctor(workspace=ws, plist_path=plist, home=home)
+    assert code == 1
+    assert any(
+        line.startswith("FAIL operators empty while DISCORD_OS_REQUIRE_OPERATORS=1")
+        for line in lines
+    ), lines
+
+
+def test_doctor_ok_operators_when_require(tmp_path: Path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    ws = home / "discord-os" / ".agent-discord"
+    ws.mkdir(parents=True)
+    py = tmp_path / "python"
+    py.write_text("#!/bin/sh\n", encoding="utf-8")
+    py.chmod(0o755)
+    plist = home / "Library" / "LaunchAgents" / f"{SERVICE_LABEL}.plist"
+    _write_plist(plist, workspace=ws, cwd=home / "discord-os", python=py)
+    store = SQLiteStore(ws / "agent_discord.sqlite3")
+    store.initialize()
+    store.add_operator("owner-1", role="owner")
+    store.close()
+    monkeypatch.setenv("AGENT_DISCORD_WORKSPACE", str(ws))
+    monkeypatch.setenv("DISCORD_OS_REQUIRE_OPERATORS", "1")
+    from agent_discord import config as cfgmod
+
+    token_path = ws / "bot.token"
+    monkeypatch.setattr(cfgmod, "DEFAULT_HOST_BOT_TOKEN_PATH", token_path)
+    token_path.write_text("dummy-token\n", encoding="utf-8")
+    code, lines = run_doctor(workspace=ws, plist_path=plist, home=home)
+    assert any("OK operators 1" in line for line in lines), lines
+    assert not any(line.startswith("FAIL operators") for line in lines), lines
