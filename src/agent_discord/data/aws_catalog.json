@@ -367,9 +367,9 @@
     },
     {
       "id": "forum-tags",
-      "title": "Forum posts \u2192 JobPool intake (not tag taxonomy)",
+      "title": "Forum tags \u2194 JobPool ticket status (tags-as-tickets)",
       "rank": "experiment",
-      "adapt": "Scoped experiment: bind a GUILD_FORUM channel as a realm; new forum posts become JobPool jobs with thread_id=post. Fail closed if not forum or missing thread-list perms (spoken Need). Not a second job system; forum tags are still not ticket types. Categories may later group realms visually.",
+      "adapt": "Forum-as-realm deepen: map Discord available_tags by conventional status names (queued/running/done/failed/cancelled) onto JobPool TaskStatus; PATCH applied_tags on the post thread when status changes. Soft-skip when status tags absent; fail closed (spoken Need) on ACL. Does not create guild tags or a second job system.",
       "source": "job_7fbccfc4a5b8"
     },
     {

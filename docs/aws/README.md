@@ -32,7 +32,7 @@ World lifts (arxiv, OpenHands durable handles, Restate human-in-the-loop, Discor
 - A Temporal/Step Functions cluster (SQLite lineage on this Mac is the analog)
 - Discord Activities as a second dashboard (the live card cites lineage)
 - Per-realm bot tokens or VPC-style isolation of the Mac disk
-- Forum channels as a **second job system** (forum-as-realm experiment reuses JobPool only)
+- Forum channels as a **second job system** (forum-as-realm + tags-as-tickets reuse JobPool only; tags map status, not a desk)
 - Persisting Discord CDN URLs
 
 ## Code

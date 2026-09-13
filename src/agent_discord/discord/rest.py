@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
@@ -100,6 +100,61 @@ def list_active_threads(
         if isinstance(item, dict) and str(item.get("id") or "").strip():
             out.append(item)
     return tuple(out)
+
+
+def modify_channel(
+    *,
+    token: str,
+    channel_id: str,
+    payload: Mapping[str, Any],
+    opener: Optional[UrlOpener] = None,
+) -> dict[str, Any]:
+    """PATCH /channels/{channel.id}.
+
+    Forum/media threads use this for ``applied_tags`` (max 5 snowflakes).
+    Callers map 401/403 → spoken Need for tags-as-tickets.
+    """
+
+    cid = (channel_id or "").strip()
+    if not cid:
+        raise ToolInvocationError("Discord channel id required")
+    body = dict(payload or {})
+    raw = call_discord_json(
+        token, "PATCH", f"/channels/{cid}", payload=body, opener=opener
+    )
+    if not isinstance(raw, dict):
+        raise ToolInvocationError("Discord channel modify was not an object")
+    return raw
+
+
+def set_thread_applied_tags(
+    *,
+    token: str,
+    thread_id: str,
+    tag_ids: Sequence[str],
+    opener: Optional[UrlOpener] = None,
+) -> dict[str, Any]:
+    """Replace ``applied_tags`` on a forum/media thread (Discord max 5)."""
+
+    tid = (thread_id or "").strip()
+    if not tid:
+        raise ToolInvocationError("Discord thread id required")
+    ids: list[str] = []
+    seen: set[str] = set()
+    for raw in tag_ids or ():
+        tag = str(raw or "").strip()
+        if not tag or tag in seen:
+            continue
+        ids.append(tag)
+        seen.add(tag)
+        if len(ids) >= 5:
+            break
+    return modify_channel(
+        token=token,
+        channel_id=tid,
+        payload={"applied_tags": ids},
+        opener=opener,
+    )
 
 
 def fetch_bot_identity(

@@ -42,7 +42,7 @@ The host scans GitHub on that checkout before dispatch. The worker prompt starts
 (type 15 / `GUILD_FORUM`) as a normal realm checkout. New forum **posts**
 become JobPool intake with `thread_id = post thread` and
 `channel_id = forum parent` (cwd / bind key). Reuses `JobPool` + listen
-watermarks — no parallel ticket queue, no forum-tags-as-types product.
+watermarks — no parallel ticket queue.
 
 ```bash
 # Fail closed unless the channel is actually a forum + bot can list threads:
@@ -53,27 +53,52 @@ In-channel `bind <name>` on a forum channel auto-marks `forum=true` in
 binding metadata after a REST type + active-threads probe. Text channels
 stay unmarked.
 
+### Tags-as-tickets (deepen)
+
+When the forum already has `available_tags` whose **names** match conventional
+JobPool statuses, Discord OS maps them onto ticket status and `PATCH`es the
+post thread's `applied_tags` as the job moves:
+
+| Tag name aliases (case-insensitive) | JobPool `TaskStatus` |
+|---|---|
+| queued / pending / open / new | `pending` |
+| running / working / in-progress / progress | `running` (also `progress`) |
+| done / completed / complete | `completed` |
+| failed / fail / error / need | `failed` |
+| cancelled / canceled | `cancelled` |
+
+Honest limits:
+
+- Does **not** create guild `available_tags` — you add the status tags on the
+  forum in Discord. Soft-skip when none match.
+- Preserves non-status tags already on the post (priority, area, …); swaps
+  only the status tag; Discord max **5** applied tags.
+- Sync runs best-effort on job start (`running`) and terminal settle
+  (completed / failed / cancelled). ACL miss → spoken **Need**, cook continues.
+- Catalog `forum-tags` stays **experiment** (not a second desk UI).
+
 | Fail closed (spoken **Need**) | When |
 |---|---|
 | Not a forum | `--forum` or probe sees type ≠ 15 |
 | Missing perms | Cannot `GET …/threads/active` (401/403) |
+| Tag apply denied | Cannot `PATCH …/channels/{thread}` `applied_tags` (401/403) |
+| Required tags missing | Explicit require + no matching status tags |
 | No token | `--forum` without resolvable bot token |
 
-**Limits (honest):**
+**Also:**
 
-- Forum tags are **not** ticket types (catalog `forum-tags` = experiment for
-  post→JobPool intake only — not tag taxonomy).
 - The forum parent is **not** drained as a message channel; only post threads.
 - Categories still may group realms visually later; this does not invent a
   desk-in-Discord or a second JobPool.
-- Missing ACL posts a Need and skips that forum's discovery that tick.
+- Missing ACL on discovery posts a Need and skips that forum that tick.
 
-Code: `src/agent_discord/host/forum_realm.py`. See [aws map](../aws/README.md).
+Code: `src/agent_discord/host/forum_realm.py` (+ `modify_channel` /
+`set_thread_applied_tags` in Discord REST). See [aws map](../aws/README.md).
 
 ## Code
 
 - `src/agent_discord/host/realms.py` — parse, seed, bind, listen ids
-- `src/agent_discord/host/forum_realm.py` — forum experiment (type 15 + JobPool)
+- `src/agent_discord/host/forum_realm.py` — forum realm + tags-as-tickets (type 15 + JobPool + applied_tags)
 - `src/agent_discord/host/repos.py` — catalog, name match, host reach
 - `src/agent_discord/orchestration/listen.py` — `_absorb_bind`
 - `src/agent_discord/persistence/sqlite.py` — `merge_binding_metadata` (must merge, not wipe)

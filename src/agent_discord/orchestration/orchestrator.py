@@ -538,7 +538,9 @@ class AgentOrchestrator:
                                 send(intake.channel_id, spoken)
                         except Exception:
                             pass
-                self._react_terminal(intake, TaskStatus.FAILED)
+                self._react_terminal(
+                    intake, TaskStatus.FAILED, thread_id=job_thread_id
+                )
                 self._set_presence("idle", "Discord OS")
                 return receipt
         if job_thread_id:
@@ -546,6 +548,7 @@ class AgentOrchestrator:
 
             note_origin_thread(job_thread_id)
             self._mark_thread_live(job_thread_id, run_id)
+            self._sync_forum_ticket_tags(intake, job_thread_id, TaskStatus.RUNNING)
         live = _LiveCard(self, intake.channel_id, job_thread_id, run_id)
         resume_card = str((intake.metadata or {}).get("card_message_id") or "").strip()
         if resume_card:
@@ -1362,7 +1365,9 @@ class AgentOrchestrator:
         except Exception:
             pass
         self._release_live_thread(live.thread_id or job_thread_id, run_id)
-        self._react_terminal(intake, result.status)
+        self._react_terminal(
+            intake, result.status, thread_id=live.thread_id or job_thread_id
+        )
         self._set_presence("idle", "Discord OS")
         self._cook_backends.pop(run_id, None)
 
@@ -1465,7 +1470,9 @@ class AgentOrchestrator:
             source="orchestrator",
         )
         self._release_live_thread(live.thread_id or job_thread_id, run_id)
-        self._react_terminal(intake, final_status)
+        self._react_terminal(
+            intake, final_status, thread_id=live.thread_id or job_thread_id
+        )
         self._set_presence("idle", "Discord OS")
         return receipt
 
@@ -3271,7 +3278,9 @@ class AgentOrchestrator:
         )
         if self.post_progress_to_discord and self.discord is not None:
             live.finish(reactive_receipt_card(receipt, has_thread=bool(live.thread_id)), summary=spoken)
-        self._react_terminal(intake, TaskStatus.COMPLETED)
+        self._react_terminal(
+            intake, TaskStatus.COMPLETED, thread_id=live.thread_id
+        )
         self._set_presence("idle", "Discord OS")
         return receipt
 
@@ -3286,11 +3295,70 @@ class AgentOrchestrator:
         except Exception:
             pass
 
-    def _react_terminal(self, intake: TaskIntake, status: TaskStatus) -> None:
+    def _react_terminal(
+        self,
+        intake: TaskIntake,
+        status: TaskStatus,
+        *,
+        thread_id: Optional[str] = None,
+    ) -> None:
         if status == TaskStatus.COMPLETED:
             self._react_intake(intake, "\u2705")
         elif status in {TaskStatus.FAILED, TaskStatus.CANCELLED}:
             self._react_intake(intake, "\u274c")
+        tid = str(thread_id or intake.thread_id or "").strip()
+        if tid:
+            self._sync_forum_ticket_tags(intake, tid, status)
+
+    def _sync_forum_ticket_tags(
+        self,
+        intake: TaskIntake,
+        thread_id: str,
+        status: TaskStatus,
+    ) -> None:
+        """Forum tags-as-tickets: map JobPool status → Discord applied_tags."""
+
+        tid = str(thread_id or "").strip()
+        if not tid or self.store is None:
+            return
+        try:
+            from agent_discord.host.forum_realm import maybe_sync_forum_ticket_tags
+        except Exception:
+            return
+
+        def _need(spoken: str) -> None:
+            body = (spoken or "").strip()
+            if not body or self.discord is None:
+                return
+            send = getattr(self.discord, "send_message", None)
+            if not callable(send):
+                return
+            dest = str(intake.channel_id or "").strip()
+            if not dest:
+                return
+            try:
+                send(dest, body, thread_id=tid)
+            except TypeError:
+                try:
+                    send(dest, body)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+        try:
+            maybe_sync_forum_ticket_tags(
+                self.store,
+                discord=self.discord,
+                workspace_id=str(intake.workspace_id or "default"),
+                channel_id=str(intake.channel_id or ""),
+                thread_id=tid,
+                status=status,
+                on_need=_need,
+            )
+        except Exception:
+            # Never break cook / settle on tag sync.
+            pass
 
     def _thread_bind_spoken(self, error: Optional[str]) -> str:
         if self._is_rate_limit(error):

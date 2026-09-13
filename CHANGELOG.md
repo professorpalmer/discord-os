@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Forum tags-as-tickets (forum-as-realm deepen)
+
+- Honest Discord **forum tag ↔ JobPool ticket status** mapping when the forum
+  already has `available_tags` named like queued / running / done / failed /
+  cancelled (aliases listed in [realms](docs/realms/README.md)).
+- On job start and terminal settle, `PATCH` the post thread's `applied_tags`
+  (preserve non-status tags; Discord max 5). Soft-skip when no status tags
+  exist; spoken **Need** on ACL miss. Does **not** invent guild tags or a
+  second job system.
+- Bind/probe caches `tags_as_tickets` + `status_tag_ids` on the forum binding;
+  discovery remembers each post's `applied_tags`.
+- REST: `modify_channel` / `set_thread_applied_tags`. Tests:
+  `tests/test_forum_tags_as_tickets.py`.
+
 ### SSH live gate bridge (Path A)
 
 - **`DISCORD_OS_SSH_GATES=bridge`**: phone Allow / Deny / Always (and Ask /
