@@ -248,11 +248,17 @@ def test_voice_join_honesty_reserved_env() -> None:
     still = join_voice_channel("g", "c", env={ENV_TTS: "1"})
     assert still.ok is False
 
-    # Reserved VOICE_JOIN truthy is still an honest Deny
+    # VOICE_JOIN truthy is still an honest Deny (DAVE not shipped — not an unlock)
     reserved = join_voice_channel("g", "c", env={ENV_VOICE_JOIN: "1"})
     assert reserved.ok is False
     assert "Denied" in reserved.spoken
-    assert "reserved" in reserved.spoken.lower() or "not implemented" in reserved.spoken.lower()
+    spoken = reserved.spoken.lower()
+    assert (
+        "dave" in spoken
+        or "not an unlock" in spoken
+        or "libdave" in spoken
+        or "4017" in spoken
+    )
 
 
 def test_clear_needs_slash_fail_closed_and_dry_run(tmp_path: Path) -> None:
@@ -377,6 +383,6 @@ def test_voice_join_spoken_mentions_no_gateway() -> None:
     assert reserved.ok is False
     spoken = reserved.spoken.lower()
     assert "denied" in spoken
-    assert "not an unlock" in spoken or "reserved" in spoken
-    assert "opus" in spoken or "gateway" in spoken
+    assert "not an unlock" in spoken or "dave" in spoken
+    assert "libdave" in spoken or "udp" in spoken or "4017" in spoken or "dave" in spoken
 

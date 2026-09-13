@@ -45,7 +45,7 @@ Do not hardcode `actions="parked"` / `"running"` / `"idle"` / `"done"` at park, 
 - A full client UI, a dashboard rewrite of the card, or a React/web component that mirrors buttons.
 - Per-token re-layout, inner-scroll APIs Discord does not have, or a generic reactive widget kit.
 - New verbs beyond Allow / Always / Deny / Continue / Cancel / Retry / **Dismiss**.
-- Voice join + TTS — see [../host/voice.md](../host/voice.md) (P2.13 spike; out of scope for cards).
+- Voice join + TTS — see [../host/voice.md](../host/voice.md) (DAVE Deny; out of scope for cards).
 
 ## Code
 

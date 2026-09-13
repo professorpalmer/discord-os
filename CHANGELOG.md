@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Voice (next-wave #4) — DAVE-honest join surface
+
+- Re-checked Discord guild voice join for the phone-remote model: lasting join
+  needs Gateway Opcode 4 + voice WS + UDP, and since **2026-03-01** **DAVE
+  E2EE** (libdave; close **4017**). Discord OS does not ship that stack.
+- `join_voice_channel` still **Deny** (no half-wired Opcode 4). Opt-in
+  `DISCORD_OS_VOICE_JOIN=1` remains intent-only, not an unlock.
+- `leave_voice_channel` idle no-op (never holds a live session).
+- `speak_in_voice_channel` / `listen_in_voice_channel` parked **Deny** (no
+  guild duplex TTS/STT). Local Mac TTS + voice memos unchanged.
+- `layout.voice_state_update` payload helper (does not send).
+- `voice_capabilities()` matrix; doctor WARN cites DAVE / 4017.
+- Docs: [voice](docs/host/voice.md). Tests: `test_tts.py`, half-p2 voice.
+
 ### Path A edge races (beyond 0.5.54 Cancel/progress)
 
 - **Orphaned remote PIDs after Mac crash**: remote wrap keeps bash as process-group

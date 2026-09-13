@@ -174,6 +174,32 @@ def presence_update(*, status: str, name: str) -> dict[str, Any]:
     }
 
 
+def voice_state_update(
+    guild_id: str,
+    channel_id: Optional[str],
+    *,
+    self_mute: bool = True,
+    self_deaf: bool = True,
+) -> dict[str, Any]:
+    """Gateway Opcode 4 Voice State Update payload. Does not send on the wire.
+
+    ``channel_id=None`` disconnects. Default mute/deaf is honest for a silent
+    join attempt — Discord OS does not ship DAVE/libdave or Opus speak/listen.
+    """
+
+    guild = str(guild_id or "").strip()
+    channel = None if channel_id is None else str(channel_id).strip() or None
+    return {
+        "op": 4,
+        "d": {
+            "guild_id": guild,
+            "channel_id": channel,
+            "self_mute": bool(self_mute),
+            "self_deaf": bool(self_deaf),
+        },
+    }
+
+
 def working_presence(task_label: str) -> dict[str, Any]:
     """Gateway-ready presence payload. Does not send on the wire."""
 

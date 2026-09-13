@@ -129,17 +129,19 @@ ids). Posts to the host channel (or `DISCORD_OS_STATUS_THREAD_ID`) on **On**,
 - GitHub rules — exact repo/branch/conclusion filters; `new` cooks an unbound match, `single` follows up in the owning job
 - voice memo — local whisper CLI if on PATH ([voice.md](voice.md) for TTS / join spike)
 
-## Voice join + TTS (P2.13 spike)
+## Voice join + TTS (beyond P2.13)
 
-Opt-in local spoken Done on this Mac. Discord voice-channel join is stubbed
-**fail closed**. See [voice.md](voice.md).
+Opt-in local spoken Done on this Mac. Discord guild voice join re-checked:
+**DAVE E2EE** required since 2026-03-01 — fail closed (no libdave). See
+[voice.md](voice.md).
 
 | Rule | Behavior |
 |---|---|
 | Default | `DISCORD_OS_TTS` unset/off — no subprocess, no sound. |
 | Opt-in | `DISCORD_OS_TTS=1` + `say` / `espeak` on PATH. Argv only; keys never in argv. |
 | Missing CLI | Spoken Deny. Host keeps running. |
-| Voice join | Always Denied in this spike (gateway + Opus/UDP deferred). |
+| Voice join | Always Denied (DAVE / libdave not shipped; no half-wired Opcode 4). |
+| Guild speak/listen | Parked Deny — use local TTS + voice memos. |
 | Activities | Never. |
 
 ## Code
@@ -152,7 +154,7 @@ Opt-in local spoken Done on this Mac. Discord voice-channel join is stubbed
 - `src/agent_discord/host/dashboard.py` — read-only companion web dashboard
 - `src/agent_discord/host/liveness.py` — phone-visible digest / HOST Need (P0.2)
 - `src/agent_discord/host/status_digest.py` — Discord RO status digest from dashboard (P2.7)
-- `src/agent_discord/discord/tts.py` — local TTS + voice-join stub (P2.13)
+- `src/agent_discord/discord/tts.py` — local TTS + voice join/leave honesty (DAVE Deny)
 - `src/agent_discord/host/install.py` — login item
 - `src/agent_discord/host/actions.py` — Terminal / files / browser
 - `src/agent_discord/cli.py` — `cmd_host_*`, `cmd_setup`

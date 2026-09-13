@@ -496,13 +496,19 @@ def _host_run_pids() -> list[int]:
 
 
 def _warn_voice_join(lines: list[str]) -> None:
-    """WARN when DISCORD_OS_VOICE_JOIN is set — reserved Deny, not an unlock."""
+    """WARN when DISCORD_OS_VOICE_JOIN is set — DAVE not shipped; not an unlock."""
 
-    from agent_discord.discord.tts import ENV_VOICE_JOIN
+    from agent_discord.discord.tts import (
+        DAVE_REQUIRED_SINCE,
+        ENV_VOICE_JOIN,
+        VOICE_CLOSE_DAVE_REQUIRED,
+    )
 
     raw = str(os.environ.get(ENV_VOICE_JOIN) or "").strip().lower()
     if raw in {"1", "true", "yes", "on"}:
         lines.append(
-            f"WARN {ENV_VOICE_JOIN}={raw} is reserved — voice join still Deny "
-            "(no gateway Opus/UDP; unset to silence this WARN)"
+            f"WARN {ENV_VOICE_JOIN}={raw} marks join intent — still Deny "
+            f"(Discord DAVE E2EE required since {DAVE_REQUIRED_SINCE}, "
+            f"close {VOICE_CLOSE_DAVE_REQUIRED}; no libdave / voice UDP; "
+            "unset to silence this WARN)"
         )
