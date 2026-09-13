@@ -344,3 +344,161 @@ def test_orchestrator_cancel_uses_path_a_cook_backend(tmp_path) -> None:
     assert out["confirmed"] is True
     assert ssh.cancelled_ids == ["run-ssh"]
     assert local.cancelled is False
+
+
+def test_wrap_remote_pid_echo_has_orphan_watchdog() -> None:
+    wrapped = wrap_remote_command_with_pid_echo(
+        ["puppetmaster", "agentic", "hello", "--provider", "openrouter"]
+    )
+    blob = " ".join(wrapped)
+    assert "trap" in blob
+    assert "HUP" in blob
+    assert "oppid" in blob
+    assert "exec " not in blob
+    assert "OPENROUTER_API_KEY" not in blob
+
+
+def test_ssh_controlmaster_fresh_clears_stale(monkeypatch, tmp_path: Path) -> None:
+    from agent_discord.puppetmaster.cancel_honesty import (
+        ensure_ssh_controlmaster_fresh,
+        ssh_controlmaster_check,
+    )
+
+    sock = tmp_path / "cm.sock"
+    sock.write_text("stale", encoding="utf-8")
+    calls: list[str] = []
+
+    class _Proc:
+        def __init__(self, code: int) -> None:
+            self.returncode = code
+
+    def _exec(argv, timeout_seconds=5.0):
+        joined = " ".join(argv)
+        calls.append(joined)
+        if "-O check" in joined:
+            return _Proc(1)  # stale / missing master
+        if "-O exit" in joined:
+            return _Proc(0)
+        return _Proc(1)
+
+    assert (
+        ensure_ssh_controlmaster_fresh(
+            "cary@lab.local", control_path=str(sock), exec_fn=_exec
+        )
+        is True
+    )
+    assert any("-O check" in c for c in calls)
+    assert any("-O exit" in c for c in calls)
+    assert not sock.exists()
+    assert ssh_controlmaster_check("", control_path=str(sock)) is False
+
+
+def test_remote_pid_sidecar_reap_orphans(tmp_path: Path) -> None:
+    import json
+    import time
+
+    from agent_discord.puppetmaster.cancel_honesty import (
+        clear_remote_pid_sidecar,
+        persist_remote_pid_sidecar,
+        reap_orphaned_remote_pids,
+    )
+
+    path = persist_remote_pid_sidecar(
+        run_id="run-orphan",
+        remote_pid=4242,
+        host_target="cary@lab.local",
+        host_id="lab",
+        gate_root=tmp_path,
+    )
+    assert path
+    # Fresh sidecar (<30s) must not reap a live cook.
+    assert reap_orphaned_remote_pids(gate_root=tmp_path) == []
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    data["created_at_ms"] = int(time.time() * 1000) - 90_000
+    Path(path).write_text(json.dumps(data), encoding="utf-8")
+    signals: list[tuple] = []
+
+    class _Proc:
+        returncode = 0
+
+    def _exec(argv, timeout_seconds=8.0):
+        # argv: ssh … target remote-kill-cmd
+        signals.append((argv[-2], argv[-1]))
+        return _Proc()
+
+    out = reap_orphaned_remote_pids(gate_root=tmp_path, exec_fn=_exec)
+    assert len(out) == 1
+    assert out[0]["signaled"] is True
+    assert out[0]["remote_pid"] == 4242
+    assert signals and "4242" in signals[0][1]
+    assert not Path(path).exists()
+    clear_remote_pid_sidecar("missing", gate_root=tmp_path)
+
+
+def test_orch_settle_honors_cancel_over_completed(tmp_path: Path) -> None:
+    """Settle-vs-Cancel: Cancel mid-stream must not be overwritten by Completed."""
+
+    from agent_discord.contracts import (
+        DispatchEvent,
+        DispatchRequest,
+        DispatchResult,
+        EventKind,
+        ProgressSummary,
+        TaskIntake,
+        TaskStatus,
+    )
+    from agent_discord.orchestration.orchestrator import AgentOrchestrator
+    from agent_discord.persistence.sqlite import SQLiteStore
+    from agent_discord.puppetmaster.models import AGENTIC_MODEL_PIN
+
+    class _StreamBackend:
+        pin = AGENTIC_MODEL_PIN
+
+        def resolve_model(self, requested: str):
+            return self.pin
+
+        def available(self) -> bool:
+            return True
+
+        def status(self, run_id: str):
+            return TaskStatus.CANCELLED
+
+        def cancel(self, run_id: str) -> bool:
+            return True
+
+        def stream(self, request: DispatchRequest):
+            yield DispatchEvent(
+                kind=EventKind.RECEIPT,
+                summary=ProgressSummary(stage="done", message="late answer", percent=100.0),
+                payload={"summary": "late answer"},
+            )
+
+        def dispatch(self, request: DispatchRequest) -> DispatchResult:
+            return DispatchResult(
+                run_id=request.run_id,
+                status=TaskStatus.COMPLETED,
+                events=tuple(self.stream(request)),
+                final_summary="late answer",
+            )
+
+    store = SQLiteStore(tmp_path / "settle-cancel.sqlite3")
+    store.initialize()
+    backend = _StreamBackend()
+    orch = AgentOrchestrator(
+        store=store, backend=backend, post_progress_to_discord=False
+    )
+
+    # Pre-mark cancel so settle guard sees CANCELLED while stream yields RECEIPT.
+    original_stream = backend.stream
+
+    def _stream_then_cancel(request: DispatchRequest):
+        orch._run_status[request.run_id] = TaskStatus.CANCELLED
+        yield from original_stream(request)
+
+    backend.stream = _stream_then_cancel  # type: ignore[method-assign]
+    receipt = orch.run_task(
+        TaskIntake(text="what is Discord OS?", channel_id="ch", workspace_id="ws")
+    )
+    assert receipt.status == TaskStatus.CANCELLED
+    assert store.get_run(receipt.run_id)["status"] == TaskStatus.CANCELLED.value
+    store.close()

@@ -1280,6 +1280,23 @@ class AgentOrchestrator:
             _remember_process(token_text)
         safe_final_summary = spoken or "Worker finished without a written answer."
         safe_error = redact_text_markers(result.error) if result.error else None
+        # Settle-vs-Cancel / SSH-exit-vs-settle: Cancel painted mid-stream must
+        # win over a late COMPLETED receipt (no double-write Done after Cancelled).
+        if (
+            self._run_status.get(run_id) == TaskStatus.CANCELLED
+            or cook_backend.status(run_id) == TaskStatus.CANCELLED
+        ):
+            from dataclasses import replace as _replace_cancel
+
+            result = _replace_cancel(
+                result,
+                status=TaskStatus.CANCELLED,
+                error="cancelled",
+                final_summary="cancelled",
+            )
+            safe_final_summary = "cancelled"
+            safe_error = "cancelled"
+            spoken = "cancelled"
         self.store.update_run(
             run_id,
             status=result.status,

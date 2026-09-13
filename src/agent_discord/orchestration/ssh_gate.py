@@ -685,6 +685,17 @@ def ssh_write_gate_result(
     argv = ["ssh", "-o", "BatchMode=yes"]
     cpath = (control_path or "").strip()
     if cpath:
+        # Stale multiplex socket → writeback hang / lost Allow. Clear first.
+        try:
+            from agent_discord.puppetmaster.cancel_honesty import (
+                ensure_ssh_controlmaster_fresh,
+            )
+
+            ensure_ssh_controlmaster_fresh(
+                tgt, control_path=cpath, exec_fn=exec_fn, timeout_seconds=5.0
+            )
+        except Exception:
+            pass
         argv.extend(
             [
                 "-o",

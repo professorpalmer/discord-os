@@ -40,6 +40,22 @@ SSH cook backend for the run — never silent local cook. If interrupt cannot be
 confirmed, Discord speaks **Cancel unconfirmed** and does not paint Cancelled.
 See [cards/reactive.md](../cards/reactive.md).
 
+## Path A edge races (beyond 0.5.54)
+
+Best-effort hardenings for residual Path A races:
+
+| Race | Behavior |
+|---|---|
+| Orphaned remote pid after Mac crash | Remote bash trap + parent-death watchdog; durable pid sidecar reaped on next cook |
+| Stale ControlMaster socket | `ssh -O check` → exit/unlink before cook spawn and bridge writeback |
+| Gate-bridge writeback vs Cancel | Cancel Denies pending holds; skips Allow SSH writeback |
+| Settle vs Cancel / SSH exit vs settle | Cancelled wins over late Completed receipt (no Done double-write) |
+| Progress / GATE_PENDING on reconnect | Local mirror kept; stale master cleared before writeback; mid-pipe drop fail-closed |
+
+Never silent local cook for `kind=ssh`. Residual: a mid-cook SSH drop still loses
+live progress lines that were not yet received — Discord keeps the last card and
+fails closed (Cancel / Deny / spoken Need), it does not invent progress.
+
 ## Swarm-incomplete honesty
 
 Puppetmaster may exit `swarm exited with incomplete tasks` after an analyze-only

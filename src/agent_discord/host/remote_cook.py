@@ -26,8 +26,12 @@ from typing import Any, Callable, Iterator, Mapping, Optional, Sequence
 
 from agent_discord.puppetmaster.cancel_honesty import (
     cancel_receipt,
+    clear_remote_pid_sidecar,
+    ensure_ssh_controlmaster_fresh,
+    persist_remote_pid_sidecar,
     popen_kwargs_for_killable_child,
     process_is_alive,
+    reap_orphaned_remote_pids,
     resolve_ssh_control_path,
     ssh_controlmaster_exit,
     ssh_remote_signal,
@@ -490,6 +494,10 @@ def wrap_remote_command_with_pid_echo(remote_command: Sequence[str]) -> list[str
 
     Lets Path A cancel signal the remote process group without credentials in argv.
     Echoes to stdout and stderr so the progress pipe captures the pid sooner.
+
+    Keeps bash as the process-group leader (no ``exec``) with a HUP/INT/TERM trap
+    and a parent-death watchdog so a Mac crash / SSH drop best-effort reaps the
+    remote cook instead of leaving an orphaned OpenRouter worker.
     """
 
     import shlex
@@ -500,8 +508,15 @@ def wrap_remote_command_with_pid_echo(remote_command: Sequence[str]) -> list[str
     prelude = (
         'printf "DISCORD_OS_REMOTE_PID=%s\n" "$$"; '
         'printf "DISCORD_OS_REMOTE_PID=%s\n" "$$" >&2; '
+        "trap 'kill -TERM -$$ 2>/dev/null; kill -KILL -$$ 2>/dev/null; wait' "
+        "HUP INT TERM; "
+        '( oppid=$PPID; '
+        'while kill -0 "$oppid" 2>/dev/null; do sleep 2; done; '
+        'kill -TERM -$$ 2>/dev/null; sleep 1; '
+        'kill -KILL -$$ 2>/dev/null ) >/dev/null 2>&1 & '
     )
-    return ["bash", "-lc", f"{prelude}exec {inner}"]
+    # No exec: bash stays group leader so SIGHUP / watchdog can reap children.
+    return ["bash", "-lc", f"{prelude}{inner}"]
 
 
 def _is_ssh_transport_failure(proc: ExecResult) -> bool:
@@ -609,6 +624,15 @@ class SshRemoteCookBackend:
         """
 
         self._statuses[request.run_id] = TaskStatus.RUNNING
+        # Best-effort: reap remote pids left behind after a prior Mac crash.
+        try:
+            reap_orphaned_remote_pids(
+                gate_root=self.gate_root,
+                workspace=self.workspace,
+                exec_fn=self.exec_fn,
+            )
+        except Exception:
+            pass
         deny = self._preflight_deny()
         if deny:
             self._statuses[request.run_id] = TaskStatus.FAILED
@@ -775,8 +799,28 @@ class SshRemoteCookBackend:
                     )
                     return
                 if event.kind == EventKind.ERROR:
+                    # SSH exit vs Cancel: Cancel wins over transport/deny noise.
+                    if request.run_id in self._cancel_requested:
+                        self._statuses[request.run_id] = TaskStatus.CANCELLED
+                        yield DispatchEvent(
+                            kind=EventKind.CANCEL_REQUESTED,
+                            summary=ProgressSummary(
+                                stage="cancelled", message="cancelled"
+                            ),
+                        )
+                        return
                     self._statuses[request.run_id] = TaskStatus.FAILED
                 elif event.kind == EventKind.RECEIPT:
+                    # Settle-vs-Cancel: never Completing after Cancel requested.
+                    if request.run_id in self._cancel_requested:
+                        self._statuses[request.run_id] = TaskStatus.CANCELLED
+                        yield DispatchEvent(
+                            kind=EventKind.CANCEL_REQUESTED,
+                            summary=ProgressSummary(
+                                stage="cancelled", message="cancelled"
+                            ),
+                        )
+                        return
                     self._statuses[request.run_id] = TaskStatus.COMPLETED
                 yield event
             if request.run_id in self._cancel_requested:
@@ -818,6 +862,12 @@ class SshRemoteCookBackend:
                     exec_fn=self.exec_fn,
                 )
             )
+        # Gate-bridge writeback race: never Allow after Cancel — Deny pending holds
+        # so the remote worker unblocks fail-closed instead of hanging / double-write.
+        try:
+            self._deny_pending_bridge_gates(rid)
+        except Exception:
+            pass
         if self.control_path:
             ssh_controlmaster_exit(
                 self.host.target,
@@ -829,6 +879,9 @@ class SshRemoteCookBackend:
         confirmed = bool(local_ok) or (not process_is_alive(proc))
         if confirmed:
             self._statuses[rid] = TaskStatus.CANCELLED
+            clear_remote_pid_sidecar(
+                rid, gate_root=self.gate_root, workspace=self.workspace
+            )
         return bool(confirmed)
 
     def cancel_receipt_for(self, run_id: str):
@@ -847,6 +900,17 @@ class SshRemoteCookBackend:
     ) -> Any:
         from agent_discord.host.runners import host_runner_argv
 
+        # Stale ControlMaster socket: clear before cook so progress/writeback
+        # do not hang on a dead multiplex master (Mac sleep / prior Cancel).
+        if self.control_path:
+            try:
+                ensure_ssh_controlmaster_fresh(
+                    self.host.target,
+                    control_path=self.control_path,
+                    exec_fn=self.exec_fn,
+                )
+            except Exception:
+                pass
         argv = host_runner_argv(
             self.host, remote_command, control_path=self.control_path
         )
@@ -930,11 +994,15 @@ class SshRemoteCookBackend:
     def _flush_bridge_writebacks(self, run_id: str) -> None:
         from agent_discord.orchestration.ssh_gate import flush_bridge_writebacks
 
+        rid = (run_id or "").strip()
+        # Cancel wins: do not SSH-write Allow/Always after Cancel requested.
+        if rid and rid in self._cancel_requested:
+            return
         with self._child_lock:
             pending = {
-                rid: remote
-                for rid, remote in self._bridge_pending.items()
-                if rid not in self._bridge_written
+                req: remote
+                for req, remote in self._bridge_pending.items()
+                if req not in self._bridge_written
             }
         if not pending:
             return
@@ -943,6 +1011,62 @@ class SshRemoteCookBackend:
             host_target=self.host.target,
             pending_remote=pending,
             gate_root=self.gate_root,
+            workspace=self.workspace,
+            store=self.store,
+            control_path=self.control_path,
+            exec_fn=self.exec_fn,
+        )
+        if written:
+            with self._child_lock:
+                self._bridge_written.update(written)
+
+    def _deny_pending_bridge_gates(self, run_id: str) -> None:
+        """Fail-closed Deny for bridged holds when Cancel interrupts the cook."""
+
+        from agent_discord.orchestration.gate_hook import (
+            GateHoldResult,
+            complete_request,
+            ensure_run_gate_dir,
+            resolve_gate_root,
+            run_gate_dir,
+        )
+        from agent_discord.orchestration.ssh_gate import flush_bridge_writebacks
+
+        rid = (run_id or "").strip()
+        if not rid:
+            return
+        with self._child_lock:
+            pending = {
+                req: remote
+                for req, remote in self._bridge_pending.items()
+                if req not in self._bridge_written
+            }
+        if not pending:
+            return
+        root = self.gate_root
+        if root is None:
+            root = resolve_gate_root(
+                workspace=self.workspace, store=self.store, env=os.environ
+            )
+        run_dir = ensure_run_gate_dir(run_gate_dir(Path(root), rid))
+        for request_id in list(pending.keys()):
+            try:
+                complete_request(
+                    run_dir,
+                    GateHoldResult(
+                        request_id=request_id,
+                        decision="deny",
+                        reason="cancelled",
+                        tool_class="",
+                    ),
+                )
+            except Exception:
+                pass
+        written = flush_bridge_writebacks(
+            run_id=rid,
+            host_target=self.host.target,
+            pending_remote=pending,
+            gate_root=root,
             workspace=self.workspace,
             store=self.store,
             control_path=self.control_path,
@@ -983,6 +1107,18 @@ class SshRemoteCookBackend:
             if pid > 0:
                 with self._child_lock:
                     self._remote_pids[run_id] = pid
+                # Durable sidecar: Mac crash can still reap this remote pid later.
+                try:
+                    persist_remote_pid_sidecar(
+                        run_id=run_id,
+                        remote_pid=pid,
+                        host_target=self.host.target,
+                        host_id=self.host.id,
+                        gate_root=self.gate_root,
+                        workspace=self.workspace,
+                    )
+                except Exception:
+                    pass
             return True
 
         if has_pipes:
@@ -1166,6 +1302,9 @@ class SshRemoteCookBackend:
             # Keep remote pid while Cancel is racing the progress pipe.
             if rid not in self._cancel_requested:
                 self._remote_pids.pop(rid, None)
+                clear_remote_pid_sidecar(
+                    rid, gate_root=self.gate_root, workspace=self.workspace
+                )
 
     def _preflight_deny(self) -> str:
         if not ssh_cook_enabled():

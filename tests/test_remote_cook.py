@@ -604,3 +604,157 @@ def test_ssh_stream_bridge_fail_closed_missing_run_id(monkeypatch):
     events = list(backend.stream(req))
     assert any(e.kind == EventKind.ERROR for e in events)
     assert any("bridge cannot arm" in (e.summary.message or "").lower() or "Fail closed" in (e.summary.message or "") for e in events)
+
+
+def test_ssh_cancel_skips_allow_writeback_and_denies_pending(monkeypatch, tmp_path):
+    """Gate-bridge writeback race: Cancel must not SSH-write Allow; Deny pending."""
+
+    import threading
+    import time
+
+    from agent_discord.contracts import EventKind
+    from agent_discord.host.remote_cook import SshRemoteCookBackend
+    from agent_discord.host.runners import RemoteHost
+    from agent_discord.orchestration.gate_hook import (
+        GateHoldResult,
+        complete_request,
+        ensure_run_gate_dir,
+        read_result,
+        run_gate_dir,
+    )
+    from agent_discord.orchestration.ssh_gate import encode_gate_pending_line
+
+    monkeypatch.setenv("DISCORD_OS_SSH_GATES", "bridge")
+    host = RemoteHost(id="lab", kind="ssh", target="lab.example", label="lab")
+    gate_root = tmp_path / "gates"
+    backend = SshRemoteCookBackend(
+        host=host, probe_first=False, gate_root=gate_root, timeout_seconds=5.0
+    )
+
+    payload = {
+        "v": 1,
+        "request_id": "req-cancel",
+        "run_id": "r-cancel-bridge",
+        "tool_name": "write_file",
+        "tool_class": "write",
+        "detail": "x",
+        "kind": "tool_class",
+        "question": "",
+        "options": [],
+        "allow_multiple": False,
+        "created_at_ms": 1,
+        "remote_gate_dir": "/tmp/discord-os-ssh-gate-r-cancel-bridge",
+        "ssh_bridge": True,
+    }
+
+    class _Pipe:
+        def __init__(self, lines: list[str]) -> None:
+            self._lines = list(lines)
+            self._idx = 0
+            self._closed = threading.Event()
+
+        def readline(self) -> str:
+            if self._idx < len(self._lines):
+                line = self._lines[self._idx]
+                self._idx += 1
+                return line
+            self._closed.wait(timeout=3)
+            return ""
+
+    class _Child:
+        def __init__(self) -> None:
+            self.pid = 7777
+            self.returncode = None
+            self.stdout = _Pipe(
+                [
+                    "DISCORD_OS_REMOTE_PID=7777\n",
+                    encode_gate_pending_line(payload) + "\n",
+                ]
+            )
+            self.stderr = _Pipe([])
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            time.sleep(0.05)
+            return self.returncode if self.returncode is not None else -9
+
+        def terminate(self) -> None:
+            self.returncode = -15
+            self.stdout._closed.set()
+            self.stderr._closed.set()
+
+        def kill(self) -> None:
+            self.terminate()
+
+    writes: list[str] = []
+
+    class _ExecProc:
+        returncode = 0
+
+    def _exec(argv, timeout_seconds=15.0):
+        writes.append(" ".join(argv))
+        return _ExecProc()
+
+    run_dir = ensure_run_gate_dir(run_gate_dir(gate_root, "r-cancel-bridge"))
+    backend.exec_fn = _exec
+    backend.popen_fn = lambda argv, stdin_data=None: _Child()
+    monkeypatch.setattr(backend, "_preflight_deny", lambda: None)
+    monkeypatch.setattr(
+        "agent_discord.host.remote_cook.ssh_remote_signal", lambda *a, **k: True
+    )
+    monkeypatch.setattr(
+        "agent_discord.host.remote_cook.ssh_controlmaster_exit", lambda *a, **k: True
+    )
+    monkeypatch.setattr(
+        "agent_discord.host.remote_cook.ensure_ssh_controlmaster_fresh",
+        lambda *a, **k: True,
+    )
+
+    events: list = []
+    done = threading.Event()
+
+    def _cook() -> None:
+        try:
+            events.extend(backend.stream(
+                DispatchRequest(
+                    task_id="t1",
+                    run_id="r-cancel-bridge",
+                    prompt="implement",
+                    model=AGENTIC_MODEL_PIN.canonical,
+                    context=ContextSnapshot(
+                        task_id="t1", memories=(), bindings={}, provenance={}
+                    ),
+                    metadata={"compute_mode": "implement"},
+                )
+            ))
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=_cook, daemon=True)
+    thread.start()
+    deadline = time.time() + 3
+    while time.time() < deadline and "req-cancel" not in backend._bridge_pending:
+        time.sleep(0.05)
+    assert "req-cancel" in backend._bridge_pending
+    # Phone Allow would race Cancel — Cancel must Deny instead.
+    complete_request(
+        run_dir,
+        GateHoldResult(
+            request_id="req-cancel",
+            decision="allow",
+            reason="too late",
+            tool_class="write",
+        ),
+    )
+    assert backend.cancel("r-cancel-bridge") is True
+    assert done.wait(timeout=5)
+    held = read_result(run_dir, "req-cancel")
+    assert held is not None
+    assert held.decision == "deny"
+    # Flush after cancel must not push the prior Allow.
+    assert backend.status("r-cancel-bridge") == TaskStatus.CANCELLED
+    assert any(
+        e.kind == EventKind.CANCEL_REQUESTED for e in events
+    ) or backend.status("r-cancel-bridge") == TaskStatus.CANCELLED

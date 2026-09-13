@@ -129,7 +129,9 @@ resolver instead of resuming an implement.
   never silent ungated writes while bridge was requested. Default unset:
   write-gate on → spoken **Need** + remote Deny inject (honest gap).
   Analyze/read passthrough on the remote inject; ControlMaster auto when
-  unset so writeback multiplexes with the cook.
+  unset so writeback multiplexes with the cook. Cancel Denies pending bridged
+  holds (no Allow writeback after Cancel); stale ControlMaster cleared before
+  writeback.
 - ~~Per-tool (exact tool name) allowlists beyond class~~ — Always remembers
   the exact tool (`gate_tool` / `tool_exact_allow:`); wildcards rejected
 - ~~Multi-select AskUserQuestion confirm row~~ — `allow_multiple=True` toggles

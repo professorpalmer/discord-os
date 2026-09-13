@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Path A edge races (beyond 0.5.54 Cancel/progress)
+
+- **Orphaned remote PIDs after Mac crash**: remote wrap keeps bash as process-group
+  leader with HUP/INT/TERM trap + parent-death watchdog (no `exec`); durable
+  remote-pid sidecar + `reap_orphaned_remote_pids` on next Path A cook.
+- **ControlMaster socket stale**: `ensure_ssh_controlmaster_fresh` (`ssh -O check`
+  → `-O exit` / unlink literal path) before cook spawn and gate-bridge writeback.
+- **Gate-bridge writeback races with Cancel**: Cancel Denies pending bridged holds
+  and skips Allow/Always SSH writeback (fail closed; remote unblocks).
+- **Settle-vs-Cancel / SSH exit vs Discord settle**: Cancel wins over a late
+  COMPLETED receipt — orchestrator settle re-checks Cancelled before final
+  `update_run` / Done paint; Path A stream prefers CANCEL over RECEIPT/ERROR
+  once Cancel is requested.
+- **Progress-marker loss on reconnect**: GATE_PENDING already mirrored locally
+  survives a dead multiplex socket; stale ControlMaster cleared before writeback
+  so Allow is not lost on a hung master. Mid-pipe SSH drop still fail-closed
+  (honest Deny / Cancel) — no silent local cook.
+
+Tests: `test_cancel_honesty.py`, `test_remote_cook.py`.
+Docs: [compute](docs/compute/README.md), [ask-gate](docs/cards/ask-gate.md).
+
 ### Forum tags-as-tickets (forum-as-realm deepen)
 
 - Honest Discord **forum tag ↔ JobPool ticket status** mapping when the forum

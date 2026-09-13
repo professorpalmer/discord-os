@@ -237,6 +237,250 @@ def resolve_ssh_control_path(
     return (source.get("DISCORD_OS_SSH_CONTROL_PATH") or "").strip()
 
 
+
+
+def ssh_controlmaster_check(
+    target: str,
+    *,
+    control_path: str = "",
+    exec_fn: Any = None,
+    timeout_seconds: float = 5.0,
+) -> bool:
+    """True when ``ssh -O check`` reports a live ControlMaster for this path."""
+
+    tgt = (target or "").strip()
+    path = (control_path or "").strip()
+    if not tgt or not path:
+        return False
+    argv = [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        f"ControlPath={path}",
+        "-O",
+        "check",
+        tgt,
+    ]
+    try:
+        if exec_fn is not None:
+            proc = exec_fn(argv, timeout_seconds=float(timeout_seconds))
+            return int(getattr(proc, "returncode", 1) or 0) == 0
+        completed = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=float(timeout_seconds),
+            check=False,
+        )
+        return completed.returncode == 0
+    except Exception:
+        return False
+
+
+def ensure_ssh_controlmaster_fresh(
+    target: str,
+    *,
+    control_path: str = "",
+    exec_fn: Any = None,
+    timeout_seconds: float = 5.0,
+) -> bool:
+    """Best-effort clear a stale ControlMaster socket before Path A cook/writeback.
+
+    When ``ssh -O check`` fails, try ``-O exit`` and unlink a literal ControlPath
+    (no ssh tokens). Returns True when the master looks usable or was cleared;
+    False when no path/target — callers still proceed (ControlMaster is optional).
+    """
+
+    tgt = (target or "").strip()
+    path = (control_path or "").strip()
+    if not tgt or not path:
+        return False
+    if ssh_controlmaster_check(
+        tgt, control_path=path, exec_fn=exec_fn, timeout_seconds=timeout_seconds
+    ):
+        return True
+    ssh_controlmaster_exit(
+        tgt, control_path=path, exec_fn=exec_fn, timeout_seconds=timeout_seconds
+    )
+    # Literal paths only — never expand %r/%h/%p ourselves.
+    if "%" not in path:
+        try:
+            if os.path.exists(path):
+                os.unlink(path)
+        except OSError:
+            pass
+    # Cleared best-effort; cook may still start a fresh master via ControlMaster=auto.
+    return True
+
+
+def remote_pid_sidecar_dir(
+    *,
+    gate_root: Any = None,
+    workspace: Any = None,
+    env: Optional[Mapping[str, str]] = None,
+) -> str:
+    """Directory for durable Path A remote-pid sidecars (orphan reap after Mac crash)."""
+
+    source = dict(os.environ if env is None else env)
+    explicit = (source.get("DISCORD_OS_REMOTE_PID_DIR") or "").strip()
+    if explicit:
+        return explicit
+    if gate_root is not None:
+        try:
+            root = os.path.join(str(gate_root), "remote_pids")
+            os.makedirs(root, mode=0o700, exist_ok=True)
+            return root
+        except OSError:
+            pass
+    if workspace is not None:
+        try:
+            root = os.path.join(str(workspace), ".discord-os", "remote_pids")
+            os.makedirs(root, mode=0o700, exist_ok=True)
+            return root
+        except OSError:
+            pass
+    root = "/tmp/discord-os-remote-pids"
+    try:
+        os.makedirs(root, mode=0o700, exist_ok=True)
+    except OSError:
+        pass
+    return root
+
+
+def persist_remote_pid_sidecar(
+    *,
+    run_id: str,
+    remote_pid: int,
+    host_target: str,
+    host_id: str = "",
+    gate_root: Any = None,
+    workspace: Any = None,
+    env: Optional[Mapping[str, str]] = None,
+) -> str:
+    """Write a best-effort sidecar so a crashed Mac can reap an orphaned remote pid."""
+
+    rid = (run_id or "").strip()
+    pid = int(remote_pid or 0)
+    tgt = (host_target or "").strip()
+    if not rid or pid <= 0 or not tgt:
+        return ""
+    safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in rid)[:80] or "unknown"
+    folder = remote_pid_sidecar_dir(gate_root=gate_root, workspace=workspace, env=env)
+    path = os.path.join(folder, f"{safe}.json")
+    payload = {
+        "run_id": rid,
+        "remote_pid": pid,
+        "host_target": tgt,
+        "host_id": (host_id or "").strip(),
+        "created_at_ms": int(time.time() * 1000),
+    }
+    try:
+        import json
+
+        tmp = f"{path}.tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, separators=(",", ":"))
+        os.replace(tmp, path)
+        return path
+    except OSError:
+        return ""
+
+
+def clear_remote_pid_sidecar(
+    run_id: str,
+    *,
+    gate_root: Any = None,
+    workspace: Any = None,
+    env: Optional[Mapping[str, str]] = None,
+) -> None:
+    rid = (run_id or "").strip()
+    if not rid:
+        return
+    safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in rid)[:80] or "unknown"
+    folder = remote_pid_sidecar_dir(gate_root=gate_root, workspace=workspace, env=env)
+    path = os.path.join(folder, f"{safe}.json")
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def reap_orphaned_remote_pids(
+    *,
+    gate_root: Any = None,
+    workspace: Any = None,
+    exec_fn: Any = None,
+    max_age_seconds: float = 6 * 3600,
+    env: Optional[Mapping[str, str]] = None,
+) -> list[dict[str, Any]]:
+    """Best-effort kill remote pids left after a Mac crash / abrupt Path A exit.
+
+    Scans sidecars, signals each remote pid over BatchMode ssh, then clears the
+    sidecar. Never raises. Returns a list of attempt records (no secrets).
+    """
+
+    import json
+
+    folder = remote_pid_sidecar_dir(gate_root=gate_root, workspace=workspace, env=env)
+    out: list[dict[str, Any]] = []
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return out
+    now_ms = int(time.time() * 1000)
+    max_age_ms = int(max(60.0, float(max_age_seconds)) * 1000)
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        path = os.path.join(folder, name)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            continue
+        if not isinstance(data, dict):
+            continue
+        created = int(data.get("created_at_ms") or 0)
+        # Skip very fresh sidecars — cook may still be live on this Mac.
+        if created and (now_ms - created) < 30_000:
+            continue
+        if created and (now_ms - created) > max_age_ms:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            out.append({"run_id": data.get("run_id"), "action": "expired"})
+            continue
+        tgt = str(data.get("host_target") or "").strip()
+        pid = int(data.get("remote_pid") or 0)
+        rid = str(data.get("run_id") or "").strip()
+        ok = False
+        if tgt and pid > 0:
+            ok = bool(ssh_remote_signal(tgt, pid, exec_fn=exec_fn))
+            if ok:
+                # Follow with KILL best-effort for stubborn orphans.
+                ssh_remote_signal(tgt, pid, exec_fn=exec_fn, sig="KILL")
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        out.append(
+            {
+                "run_id": rid,
+                "host_id": data.get("host_id") or "",
+                "remote_pid": pid,
+                "signaled": ok,
+                "action": "reaped" if ok else "clear",
+            }
+        )
+    return out
+
+
 def wait_briefly_for_remote_pid(
     getter,
     *,
