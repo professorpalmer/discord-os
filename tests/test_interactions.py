@@ -387,14 +387,14 @@ def test_self_heal_registers_then_skips_when_stamp_current(tmp_path: Path):
         application_id="app",
         public_key="aa" * 32,
         interactions="http",
-        package_version="0.5.56",
+        package_version="0.5.57",
         register_fn=register,
     )
     assert first.registered is True
     assert first.attempted is True
     assert list(first.names) == ["connect", "open", "bind"]
     state = load_slash_registration_state(tmp_path)
-    assert state["package_version"] == "0.5.56"
+    assert state["package_version"] == "0.5.57"
     assert state["command_stamp"] == command_set_stamp()
 
     second = maybe_self_heal_slash_registration(
@@ -403,7 +403,7 @@ def test_self_heal_registers_then_skips_when_stamp_current(tmp_path: Path):
         application_id="app",
         public_key="aa" * 32,
         interactions="http",
-        package_version="0.5.56",
+        package_version="0.5.57",
         register_fn=register,
     )
     assert second.skipped is True
@@ -433,12 +433,12 @@ def test_self_heal_reregisters_on_version_change(tmp_path: Path):
         application_id="app",
         public_key="pk",
         interactions="http",
-        package_version="0.5.56",
+        package_version="0.5.57",
         register_fn=register,
     )
     assert again.registered is True
     assert len(calls) == 2
-    assert load_slash_registration_state(tmp_path)["package_version"] == "0.5.56"
+    assert load_slash_registration_state(tmp_path)["package_version"] == "0.5.57"
 
 
 def test_self_heal_register_failure_fail_soft(tmp_path: Path):
@@ -451,7 +451,7 @@ def test_self_heal_register_failure_fail_soft(tmp_path: Path):
         application_id="app",
         public_key="pk",
         interactions="http",
-        package_version="0.5.56",
+        package_version="0.5.57",
         register_fn=register,
     )
     assert result.attempted is True
