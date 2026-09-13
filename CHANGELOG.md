@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.5.56
+
+Policy #7 slash self-heal (tip `e713a0a`).
+
 ### Policy #7 — slash self-heal
 
 - When `AGENT_DISCORD_INTERACTIONS` is exposed (http/public), the listen host
