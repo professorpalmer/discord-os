@@ -64,7 +64,7 @@ SQLite `cancelled`.
 | Path | Kill | Confirmed paint |
 |---|---|---|
 | Local agentic | SIGTERM → SIGKILL process group of the tracked `puppetmaster agentic` child | Cancelled |
-| Path A SSH | Remote `kill` on echoed `DISCORD_OS_REMOTE_PID` (best-effort), optional ControlMaster `-O exit`, then local ssh process-group kill | Cancelled |
+| Path A SSH | Remote `kill` on echoed `DISCORD_OS_REMOTE_PID` (stdout+stderr; brief wait), optional ControlMaster `-O exit` via `DISCORD_OS_SSH_CONTROL_PATH`, then local ssh process-group kill. Orchestrator cancels the active SSH cook backend. | Cancelled |
 | No live child / kill fails | Spoken **Cancel unconfirmed**; status stays running (`cancellation_pending`) | Do **not** paint Done/Cancelled |
 
 Receipts are gjc-remote-shaped: `confirmed` vs `cancellation_pending`. Plan-park Cancel still denies ExitPlanMode (not a live-cook interrupt).

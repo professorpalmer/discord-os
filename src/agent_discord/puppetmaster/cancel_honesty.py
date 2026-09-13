@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 CANCEL_UNCONFIRMED_SPOKEN = "Cancel unconfirmed"
 CANCEL_CONFIRMED_SUMMARY = "cancelled"
@@ -221,3 +221,39 @@ def ssh_remote_signal(
         return completed.returncode in {0, 1}
     except Exception:
         return False
+
+
+def resolve_ssh_control_path(
+    *,
+    explicit: str = "",
+    env: Optional[Mapping[str, str]] = None,
+) -> str:
+    """ControlPath for best-effort ``ssh -O exit`` (env or explicit; never secrets)."""
+
+    path = (explicit or "").strip()
+    if path:
+        return path
+    source = dict(os.environ if env is None else env)
+    return (source.get("DISCORD_OS_SSH_CONTROL_PATH") or "").strip()
+
+
+def wait_briefly_for_remote_pid(
+    getter,
+    *,
+    timeout_seconds: float = 0.4,
+    poll_seconds: float = 0.05,
+) -> int:
+    """Poll until a remote pid is known or the brief Cancel race window elapses."""
+
+    deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+    while True:
+        try:
+            pid = int(getter() or 0)
+        except (TypeError, ValueError):
+            pid = 0
+        if pid > 0:
+            return pid
+        if time.monotonic() >= deadline:
+            return 0
+        time.sleep(max(0.01, float(poll_seconds)))
+

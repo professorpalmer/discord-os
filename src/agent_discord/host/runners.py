@@ -197,11 +197,14 @@ def bind_channel_host(
 def host_runner_argv(
     host: RemoteHost,
     remote_command: Sequence[str],
+    *,
+    control_path: str = "",
 ) -> list[str]:
     """Build ssh/local argv for remote cook (Path A). Never puts credentials in argv.
 
     Used by ``host.remote_cook`` to invoke remote ``puppetmaster agentic`` over
-    SSH ``BatchMode=yes`` (agent / ``~/.ssh/config`` only).
+    SSH ``BatchMode=yes`` (agent / ``~/.ssh/config`` only). When ``control_path``
+    is set, enable ControlMaster=auto so Cancel can ``ssh -O exit`` best-effort.
     """
 
     cmd = [str(part) for part in remote_command]
@@ -221,7 +224,21 @@ def host_runner_argv(
             host_id=host.id,
         )
     _refuse_credential_argv([target])
-    argv = ["ssh", "-o", "BatchMode=yes", target]
+    argv = ["ssh", "-o", "BatchMode=yes"]
+    cpath = (control_path or "").strip()
+    if cpath:
+        _refuse_credential_argv([cpath])
+        argv.extend(
+            [
+                "-o",
+                "ControlMaster=auto",
+                "-o",
+                f"ControlPath={cpath}",
+                "-o",
+                "ControlPersist=60",
+            ]
+        )
+    argv.append(target)
     workdir = (host.workdir or "").strip()
     if workdir:
         _refuse_credential_argv([workdir])

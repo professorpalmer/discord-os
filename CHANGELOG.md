@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Polish Wave 1 — swarm-incomplete honesty + Path A Cancel races
+
+- **Swarm-incomplete honesty (DOS-10036 class)**: when agentic / `workers:0` /
+  analyze-only streams a usable prose answer then Puppetmaster exits
+  `swarm exited with incomplete tasks`, Discord OS salvages the spoken answer
+  as **Completed** instead of painting a false failed Need. Backend exit
+  parsing, Path A remote cook, and orchestrator settle all share
+  `salvage_swarm_incomplete_answer`. Real provider failures stay Failed.
+- **Path A Cancel / progress races**: dual stdout/stderr PID echo; brief wait
+  for `DISCORD_OS_REMOTE_PID` before remote `kill`; optional ControlMaster via
+  `DISCORD_OS_SSH_CONTROL_PATH` (auto on cook argv); keep remote pid while
+  Cancel races unregister; orchestrator Cancel hits the **active SSH cook
+  backend** (not only local agentic). Progress pipe stays honest; never silent
+  local cook for `kind=ssh`.
+
+Tests: `test_swarm_incomplete_honesty.py`, `test_cancel_honesty.py`.
+Docs: [jobs](docs/jobs/README.md), [compute](docs/compute/README.md),
+[reactive](docs/cards/reactive.md).
+
 ## 0.5.53
 
 Discord-half EXTRAS — forum-as-realm experiment, slash deepen, poll surfaces, voice honesty.

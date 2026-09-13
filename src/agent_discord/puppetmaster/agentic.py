@@ -42,6 +42,7 @@ from agent_discord.puppetmaster.backend import (
     prepend_early_job_id,
     request_workdir,
     worker_env,
+    salvage_swarm_incomplete_answer,
 )
 from agent_discord.puppetmaster.models import AGENTIC_MODEL_PIN
 
@@ -189,8 +190,34 @@ class AgenticPuppetmasterBackend:
 
         safe_meta = _parse_safe_cli_completion(stdout or "", stderr or "")
         if proc.returncode != 0:
-            self._statuses[request.run_id] = TaskStatus.FAILED
             err = safe_meta.get("error") or (stderr or "").strip() or f"exit {proc.returncode}"
+            salvaged = salvage_swarm_incomplete_answer(
+                error=str(err),
+                stderr=stderr or "",
+                safe_meta=safe_meta if isinstance(safe_meta, dict) else {},
+                stdout=stdout or "",
+            )
+            if salvaged:
+                if isinstance(safe_meta, dict):
+                    safe_meta["summary"] = salvaged
+                    safe_meta["swarm_incomplete_salvaged"] = True
+                self._statuses[request.run_id] = TaskStatus.COMPLETED
+                return DispatchResult(
+                    run_id=request.run_id,
+                    status=TaskStatus.COMPLETED,
+                    events=(
+                        DispatchEvent(
+                            kind=EventKind.RECEIPT,
+                            summary=ProgressSummary(
+                                stage="done", message=salvaged, percent=100.0
+                            ),
+                            payload=safe_meta if isinstance(safe_meta, dict) else {"summary": salvaged},
+                        ),
+                    ),
+                    final_summary=salvaged,
+                    usage=usage_from_cli_meta(pin, self.cli, safe_meta),
+                )
+            self._statuses[request.run_id] = TaskStatus.FAILED
             return DispatchResult(
                 run_id=request.run_id,
                 status=TaskStatus.FAILED,

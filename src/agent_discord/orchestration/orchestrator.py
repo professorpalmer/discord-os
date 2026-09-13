@@ -383,6 +383,8 @@ class AgentOrchestrator:
         self._steer_lock = threading.Lock()
         self._live_threads: dict[str, str] = {}
         self._steer_inbox: dict[str, list[str]] = {}
+        # Path A Cancel must interrupt the SSH cook backend, not only local agentic.
+        self._cook_backends: dict[str, Any] = {}
         self.steer_count = 0
         self._lineage_tips: dict[str, str] = {}
 
@@ -864,18 +866,22 @@ class AgentOrchestrator:
                     stage="working",
                 )
                 progress_message_id = live.message_id
+        self._cook_backends[run_id] = cook_backend
         if workers:
-            return self.dispatch_swarm(
-                intake,
-                request,
-                task_id=task_id,
-                run_id=run_id,
-                workers=workers,
-                job_thread_id=job_thread_id,
-                progress_message_id=progress_message_id,
-                live=live,
-                backend=cook_backend,
-            )
+            try:
+                return self.dispatch_swarm(
+                    intake,
+                    request,
+                    task_id=task_id,
+                    run_id=run_id,
+                    workers=workers,
+                    job_thread_id=job_thread_id,
+                    progress_message_id=progress_message_id,
+                    live=live,
+                    backend=cook_backend,
+                )
+            finally:
+                self._cook_backends.pop(run_id, None)
         stream = getattr(cook_backend, "stream", None)
         if callable(stream):
             events_iter = stream(request)
@@ -1086,11 +1092,36 @@ class AgentOrchestrator:
                 from agent_discord.puppetmaster.backend import usage_from_cli_meta
 
                 usage = usage_from_cli_meta(pin, "", receipt_payload)
+            if (
+                streamed_status == TaskStatus.FAILED
+                and stream_error
+            ):
+                from agent_discord.puppetmaster.backend import salvage_swarm_incomplete_answer
+
+                progress_spoken = "\n".join(
+                    item.message for item in progress_items if (item.message or "").strip()
+                )
+                salvaged = salvage_swarm_incomplete_answer(
+                    error=str(stream_error),
+                    token_text=token_text or progress_spoken,
+                )
+                if salvaged:
+                    streamed_status = TaskStatus.COMPLETED
+                    stream_error = None
+                    final_bit = salvaged
+                else:
+                    final_bit = (
+                        progress_items[-1].message if progress_items else "completed"
+                    )
+            else:
+                final_bit = (
+                    progress_items[-1].message if progress_items else "completed"
+                )
             result = DispatchResult(
                 run_id=run_id,
                 status=streamed_status,
                 events=tuple(progress_items),
-                final_summary=progress_items[-1].message if progress_items else "completed",
+                final_summary=final_bit,
                 error=stream_error,
                 usage=usage,
             )
@@ -1113,17 +1144,40 @@ class AgentOrchestrator:
             self._run_status[run_id] = result.status
 
         if result.status == TaskStatus.FAILED:
-            writer = getattr(self.store, "record_failure", None)
-            if callable(writer):
-                try:
-                    writer(
-                        intake.workspace_id,
-                        run_id,
-                        result.error or result.final_summary or "failed",
-                    )
-                except Exception:
-                    pass
-            self._rollback_on_red(run_id)
+            from agent_discord.puppetmaster.backend import salvage_swarm_incomplete_answer
+
+            progress_spoken = "\n".join(
+                item.message
+                for item in progress_items
+                if (item.message or "").strip()
+            )
+            salvaged = salvage_swarm_incomplete_answer(
+                error=str(result.error or result.final_summary or ""),
+                token_text=token_text or progress_spoken or str(result.final_summary or ""),
+                stdout="",
+                safe_meta=receipt_payload if isinstance(receipt_payload, dict) else {},
+            )
+            if salvaged:
+                result = replace(
+                    result,
+                    status=TaskStatus.COMPLETED,
+                    error=None,
+                    final_summary=salvaged,
+                )
+                stream_error = None
+                self._run_status[run_id] = TaskStatus.COMPLETED
+            else:
+                writer = getattr(self.store, "record_failure", None)
+                if callable(writer):
+                    try:
+                        writer(
+                            intake.workspace_id,
+                            run_id,
+                            result.error or result.final_summary or "failed",
+                        )
+                    except Exception:
+                        pass
+                self._rollback_on_red(run_id)
 
         receipt_artifacts: list[ArtifactRef] = []
         for art in result.artifacts:
@@ -1290,6 +1344,7 @@ class AgentOrchestrator:
         self._release_live_thread(live.thread_id or job_thread_id, run_id)
         self._react_terminal(intake, result.status)
         self._set_presence("idle", "Discord OS")
+        self._cook_backends.pop(run_id, None)
 
         return receipt
 
@@ -3375,6 +3430,12 @@ class AgentOrchestrator:
         with self._steer_lock:
             return list(self._steer_inbox.pop(rid, []))
 
+    def _active_cook_backend(self, run_id: str) -> Any:
+        """Prefer the Path A / per-run cook backend when Cancel must kill remote."""
+
+        rid = (run_id or "").strip()
+        return self._cook_backends.get(rid) or self.backend
+
     def _cancel_live_cook(self, run_id: str) -> dict[str, Any]:
         """Phone Cancel honesty: kill child or speak Cancel unconfirmed (no false paint)."""
 
@@ -3385,10 +3446,17 @@ class AgentOrchestrator:
 
         rid = (run_id or "").strip()
         ok = False
+        cook = self._active_cook_backend(rid)
         try:
-            ok = bool(self.backend.cancel(rid))
+            ok = bool(cook.cancel(rid))
         except Exception:
             ok = False
+        # If Path A cook missed, still try the default backend once.
+        if not ok and cook is not self.backend:
+            try:
+                ok = bool(self.backend.cancel(rid))
+            except Exception:
+                ok = False
         receipt = cancel_receipt(confirmed=ok, run_id=rid)
         if ok:
             self._run_status[rid] = TaskStatus.CANCELLED
@@ -3498,7 +3566,10 @@ class AgentOrchestrator:
             pass
 
     def cancel(self, run_id: str) -> bool:
-        ok = bool(self.backend.cancel(run_id))
+        cook = self._active_cook_backend(run_id)
+        ok = bool(cook.cancel(run_id))
+        if not ok and cook is not self.backend:
+            ok = bool(self.backend.cancel(run_id))
         if ok:
             self._run_status[run_id] = TaskStatus.CANCELLED
             run = self.store.get_run(run_id)
@@ -3517,7 +3588,7 @@ class AgentOrchestrator:
     def status(self, run_id: str) -> TaskStatus:
         if run_id in self._run_status:
             return self._run_status[run_id]
-        backend_status = self.backend.status(run_id)
+        backend_status = self._active_cook_backend(run_id).status(run_id)
         run = self.store.get_run(run_id)
         if run:
             return TaskStatus(run["status"])

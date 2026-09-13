@@ -32,9 +32,20 @@ Optional Marionette HTTP: `AGENT_DISCORD_BACKEND=marionette` plus `MARIONETTE_BA
 ## Cancel honesty
 
 Local agentic and Path A SSH cooks register a killable child process group.
-Phone Cancel terminates that group (and best-effort remote pid on SSH). If the
-backend cannot confirm the interrupt, Discord speaks **Cancel unconfirmed** and
-does not paint Cancelled. See [cards/reactive.md](../cards/reactive.md).
+Phone Cancel terminates that group (and best-effort remote pid on SSH). Path A
+echoes `DISCORD_OS_REMOTE_PID` on stdout and stderr, waits briefly for the pid
+before remote `kill`, and optionally uses ControlMaster (`DISCORD_OS_SSH_CONTROL_PATH`)
+so `ssh -O exit` can confirm more often. Orchestrator Cancel targets the active
+SSH cook backend for the run — never silent local cook. If interrupt cannot be
+confirmed, Discord speaks **Cancel unconfirmed** and does not paint Cancelled.
+See [cards/reactive.md](../cards/reactive.md).
+
+## Swarm-incomplete honesty
+
+Puppetmaster may exit `swarm exited with incomplete tasks` after an analyze-only
+/ `workers:0` run already streamed a full prose answer. Discord OS salvages that
+answer as Completed (not a false failed Need). Provider auth / missing-CLI
+failures still fail closed.
 
 
 ## ARG_MAX / oversized prompts

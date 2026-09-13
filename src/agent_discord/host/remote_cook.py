@@ -28,9 +28,11 @@ from agent_discord.puppetmaster.cancel_honesty import (
     cancel_receipt,
     popen_kwargs_for_killable_child,
     process_is_alive,
+    resolve_ssh_control_path,
     ssh_controlmaster_exit,
     ssh_remote_signal,
     terminate_process_group,
+    wait_briefly_for_remote_pid,
 )
 
 from agent_discord.contracts import (
@@ -54,6 +56,7 @@ from agent_discord.puppetmaster.backend import (
     _event_from_cli_line,
     _parse_safe_cli_completion,
     _safe_dispatch_prompt,
+    salvage_swarm_incomplete_answer,
     usage_from_cli_meta,
 )
 from agent_discord.puppetmaster.models import AGENTIC_MODEL_PIN
@@ -448,16 +451,22 @@ def _default_popen(
 
 
 def wrap_remote_command_with_pid_echo(remote_command: Sequence[str]) -> list[str]:
-    """Prefix remote argv so the first stdout line is ``DISCORD_OS_REMOTE_PID=<pid>``.
+    """Prefix remote argv so the first line is ``DISCORD_OS_REMOTE_PID=<pid>``.
 
     Lets Path A cancel signal the remote process group without credentials in argv.
+    Echoes to stdout and stderr so the progress pipe captures the pid sooner.
     """
 
     import shlex
 
     inner = " ".join(shlex.quote(str(part)) for part in remote_command)
     # bash -lc so $$ is the remote shell pid (process group leader under ssh).
-    return ["bash", "-lc", f"echo DISCORD_OS_REMOTE_PID=$$; exec {inner}"]
+    # Dual stdout/stderr printf reduces Cancel-before-pid races on buffered pipes.
+    prelude = (
+        'printf "DISCORD_OS_REMOTE_PID=%s\n" "$$"; '
+        'printf "DISCORD_OS_REMOTE_PID=%s\n" "$$" >&2; '
+    )
+    return ["bash", "-lc", f"{prelude}exec {inner}"]
 
 
 def _is_ssh_transport_failure(proc: ExecResult) -> bool:
@@ -502,6 +511,10 @@ class SshRemoteCookBackend:
     _remote_pids: dict[str, int] = field(default_factory=dict, repr=False)
     _cancel_requested: set[str] = field(default_factory=set, repr=False)
     _child_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def __post_init__(self) -> None:
+        path = resolve_ssh_control_path(explicit=self.control_path)
+        object.__setattr__(self, "control_path", path)
 
     def resolve_model(self, requested: str) -> ModelPin:
         self.pin.assert_allowed(requested)
@@ -673,12 +686,21 @@ class SshRemoteCookBackend:
             remote_pid = int(self._remote_pids.get(rid) or 0)
         if proc is None:
             return False
+        # Brief wait: progress pipe may still be parsing the pid echo line.
+        if remote_pid <= 0:
+            remote_pid = wait_briefly_for_remote_pid(
+                lambda: self._remote_pids.get(rid) or 0,
+                timeout_seconds=0.45,
+            )
         # Prefer remote interrupt first so OpenRouter stops cooking, then local ssh.
+        remote_ok = False
         if remote_pid > 0:
-            ssh_remote_signal(
-                self.host.target,
-                remote_pid,
-                exec_fn=self.exec_fn,
+            remote_ok = bool(
+                ssh_remote_signal(
+                    self.host.target,
+                    remote_pid,
+                    exec_fn=self.exec_fn,
+                )
             )
         if self.control_path:
             ssh_controlmaster_exit(
@@ -687,6 +709,7 @@ class SshRemoteCookBackend:
                 exec_fn=self.exec_fn,
             )
         local_ok = terminate_process_group(proc, started_new_session=True)
+        _ = remote_ok  # best-effort; confirmation stays local-child based
         confirmed = bool(local_ok) or (not process_is_alive(proc))
         if confirmed:
             self._statuses[rid] = TaskStatus.CANCELLED
@@ -708,7 +731,9 @@ class SshRemoteCookBackend:
     ) -> Any:
         from agent_discord.host.runners import host_runner_argv
 
-        argv = host_runner_argv(self.host, remote_command)
+        argv = host_runner_argv(
+            self.host, remote_command, control_path=self.control_path
+        )
         # Guard local ssh argv as well (workdir-wrapped remote strings grow fast).
         from agent_discord.puppetmaster.prompt_handoff import needs_prompt_handoff
 
@@ -884,6 +909,25 @@ class SshRemoteCookBackend:
                     summary=ProgressSummary(stage="deny", message=spoken),
                 )
                 return
+            salvaged = salvage_swarm_incomplete_answer(
+                error=str(err),
+                stderr=stderr,
+                safe_meta=safe_meta if isinstance(safe_meta, dict) else {},
+                token_text=getattr(token_buffer, "text", "") or "",
+                stdout=stdout,
+            )
+            if salvaged:
+                if isinstance(safe_meta, dict):
+                    safe_meta["summary"] = salvaged
+                    safe_meta["swarm_incomplete_salvaged"] = True
+                yield DispatchEvent(
+                    kind=EventKind.RECEIPT,
+                    summary=ProgressSummary(
+                        stage="done", message=salvaged, percent=100.0
+                    ),
+                    payload=safe_meta if isinstance(safe_meta, dict) else {"summary": salvaged},
+                )
+                return
             yield DispatchEvent(
                 kind=EventKind.ERROR,
                 summary=ProgressSummary(stage="dispatch", message=str(err)[:500]),
@@ -914,7 +958,9 @@ class SshRemoteCookBackend:
             current = self._children.get(rid)
             if current is proc or current is None:
                 self._children.pop(rid, None)
-            self._remote_pids.pop(rid, None)
+            # Keep remote pid while Cancel is racing the progress pipe.
+            if rid not in self._cancel_requested:
+                self._remote_pids.pop(rid, None)
 
     def _preflight_deny(self) -> str:
         if not ssh_cook_enabled():
@@ -1020,12 +1066,14 @@ def make_ssh_cook_backend(
     exec_fn: Optional[ExecFn] = None,
     cli: str = "puppetmaster",
     timeout_seconds: float = 3600.0,
+    control_path: str = "",
 ) -> SshRemoteCookBackend:
     return SshRemoteCookBackend(
         host=host,
         cli=cli,
         exec_fn=exec_fn,
         timeout_seconds=timeout_seconds,
+        control_path=resolve_ssh_control_path(explicit=control_path),
     )
 
 

@@ -571,6 +571,53 @@ def choose_spoken_answer(*candidates: str) -> str:
     return ""
 
 
+
+SWARM_INCOMPLETE_MARKERS = (
+    "swarm exited with incomplete tasks",
+    "exited with incomplete tasks",
+)
+
+
+def is_swarm_incomplete_exit(text: str) -> bool:
+    """True when Puppetmaster raised the workers:0 / incomplete-swarm RuntimeError."""
+
+    lower = (text or "").lower()
+    return any(marker in lower for marker in SWARM_INCOMPLETE_MARKERS)
+
+
+def salvage_swarm_incomplete_answer(
+    *,
+    error: str = "",
+    stderr: str = "",
+    safe_meta: Optional[Mapping[str, Any]] = None,
+    token_text: str = "",
+    stdout: str = "",
+) -> str:
+    """When PM exits swarm-incomplete but prose already streamed, return that answer.
+
+    Empty string means do not salvage — keep FAILED / Need ranking.
+    Analyze-only / ``workers:0`` agentic often finishes the spoken answer then
+    raises ``swarm exited with incomplete tasks``; painting a false failed Need
+    is dishonest.
+    """
+
+    blob = "\n".join(bit for bit in (error, stderr, str((safe_meta or {}).get("error") or "")) if bit)
+    if not is_swarm_incomplete_exit(blob):
+        return ""
+    meta = safe_meta if isinstance(safe_meta, Mapping) else {}
+    spoken = choose_spoken_answer(
+        str(meta.get("summary") or ""),
+        token_text,
+        usable_worker_text(stdout or ""),
+    )
+    if not spoken or _is_placeholder_summary(spoken):
+        return ""
+    if provider_failure_spoken(spoken) or provider_failure_spoken(blob):
+        return ""
+    return spoken
+
+
+
 def _take_discord_answer(text: str) -> str:
     """If the worker labeled the user answer, keep only what follows."""
 
@@ -1239,6 +1286,23 @@ def iter_cli_process_events(
     safe_meta = _parse_safe_cli_completion(stdout, stderr)
     if proc.returncode not in {0, None}:
         err = safe_meta.get("error") or stderr.strip() or f"exit {proc.returncode}"
+        salvaged = salvage_swarm_incomplete_answer(
+            error=str(err),
+            stderr=stderr,
+            safe_meta=safe_meta if isinstance(safe_meta, dict) else {},
+            token_text=getattr(token_buffer, "text", "") or "",
+            stdout=stdout,
+        )
+        if salvaged:
+            if isinstance(safe_meta, dict):
+                safe_meta["summary"] = salvaged
+                safe_meta["swarm_incomplete_salvaged"] = True
+            yield DispatchEvent(
+                kind=EventKind.RECEIPT,
+                summary=ProgressSummary(stage="done", message=salvaged, percent=100.0),
+                payload=safe_meta if isinstance(safe_meta, dict) else {"summary": salvaged},
+            )
+            return
         yield DispatchEvent(
             kind=EventKind.ERROR,
             summary=ProgressSummary(stage="dispatch", message=str(err)),

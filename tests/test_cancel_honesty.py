@@ -260,6 +260,87 @@ def test_wrap_remote_pid_echo_has_no_secrets() -> None:
         ["puppetmaster", "agentic", "hello", "--provider", "openrouter"]
     )
     blob = " ".join(wrapped)
-    assert "DISCORD_OS_REMOTE_PID=$$" in blob
+    assert "DISCORD_OS_REMOTE_PID=" in blob
+    assert "$$" in blob
+    assert "printf" in blob
     assert "OPENROUTER" not in blob
     assert "token=" not in blob
+
+
+def test_resolve_ssh_control_path_from_env(monkeypatch) -> None:
+    from agent_discord.puppetmaster.cancel_honesty import resolve_ssh_control_path
+
+    monkeypatch.setenv("DISCORD_OS_SSH_CONTROL_PATH", "/tmp/dos-%r@%h:%p")
+    assert resolve_ssh_control_path() == "/tmp/dos-%r@%h:%p"
+    assert resolve_ssh_control_path(explicit="/explicit") == "/explicit"
+
+
+def test_host_runner_argv_adds_controlmaster_when_path_set() -> None:
+    from agent_discord.host.runners import RemoteHost, host_runner_argv
+
+    host = RemoteHost(id="lab", label="Lab", kind="ssh", target="cary@lab.local")
+    argv = host_runner_argv(
+        host,
+        ["true"],
+        control_path="/tmp/dos-cm-%r@%h:%p",
+    )
+    joined = " ".join(argv)
+    assert "ControlMaster=auto" in joined
+    assert "ControlPath=/tmp/dos-cm-%r@%h:%p" in joined
+    assert "BatchMode=yes" in joined
+    assert "OPENROUTER" not in joined
+
+
+def test_orchestrator_cancel_uses_path_a_cook_backend(tmp_path) -> None:
+    """Path A Cancel must call the SSH cook backend, not only local agentic."""
+
+    from agent_discord.orchestration.orchestrator import AgentOrchestrator
+    from agent_discord.persistence.sqlite import SQLiteStore
+    from agent_discord.puppetmaster.models import AGENTIC_MODEL_PIN
+
+    class _Local:
+        pin = AGENTIC_MODEL_PIN
+        cancelled = False
+
+        def resolve_model(self, requested: str):
+            return self.pin
+
+        def cancel(self, run_id: str) -> bool:
+            self.cancelled = True
+            return False
+
+        def status(self, run_id: str):
+            from agent_discord.contracts import TaskStatus
+
+            return TaskStatus.RUNNING
+
+    class _Ssh:
+        cancelled_ids: list[str] = []
+
+        def cancel(self, run_id: str) -> bool:
+            self.cancelled_ids.append(run_id)
+            return True
+
+        def status(self, run_id: str):
+            from agent_discord.contracts import TaskStatus
+
+            return TaskStatus.CANCELLED
+
+    store = SQLiteStore(tmp_path / "cancel-path-a.sqlite3")
+    store.initialize()
+    local = _Local()
+    ssh = _Ssh()
+    orch = AgentOrchestrator(store=store, backend=local, post_progress_to_discord=False)
+    orch._cook_backends["run-ssh"] = ssh
+    store.create_task(
+        task_id="t1",
+        workspace_id="ws",
+        channel_id="ch",
+        intake_text="cook",
+    )
+    from agent_discord.contracts import TaskStatus as TS
+    store.create_run(run_id="run-ssh", task_id="t1", model="m", adapter_name="a", status=TS.RUNNING)
+    out = orch._cancel_live_cook("run-ssh")
+    assert out["confirmed"] is True
+    assert ssh.cancelled_ids == ["run-ssh"]
+    assert local.cancelled is False
