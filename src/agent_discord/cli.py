@@ -1481,6 +1481,7 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
 
     seed_spend_cap_from_env(store)
     seed_write_gate_from_env(store)
+    _maybe_self_heal_slash(config, out=out)
     resolution = resolve_compute(config)
     if args.fake:
         provider = FakeDiscordMCPProvider(persist_dir=config.workspace / "fake_discord")
@@ -2511,6 +2512,43 @@ def cmd_open(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     return 0 if result.opened else 1
 
 
+def _maybe_self_heal_slash(config, *, out=None) -> None:
+    """Version-aware slash re-register when interactions are exposed. Fail soft."""
+
+    out = out or sys.stdout
+    try:
+        from agent_discord.discord.interactions import maybe_self_heal_slash_registration
+    except Exception:
+        return
+    try:
+        result = maybe_self_heal_slash_registration(
+            workspace=config.workspace,
+            token=getattr(config, "discord_bot_token", "") or "",
+            application_id=getattr(config, "discord_application_id", "") or "",
+            public_key=getattr(config, "discord_public_key", "") or "",
+            interactions=getattr(config, "interactions", "") or "",
+        )
+    except Exception as exc:  # noqa: BLE001 — never crash listen
+        print(f"WARN slash self-heal error: {exc}", file=sys.stderr, flush=True)
+        return
+    for warn in result.warnings:
+        print(f"WARN {warn}", file=sys.stderr, flush=True)
+    if result.registered:
+        names = ", ".join(result.names) if result.names else "(none)"
+        print(
+            f"slash self-heal registered ({result.package_version} / "
+            f"{result.command_stamp}): {names}",
+            file=out,
+            flush=True,
+        )
+    elif result.attempted and not result.registered:
+        print(
+            f"WARN slash self-heal: {result.reason}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+
 def cmd_interactions(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     out = out or sys.stdout
     config = apply_runtime_secrets(load_config())
@@ -2537,6 +2575,22 @@ def cmd_interactions(args: argparse.Namespace, *, out: TextIO | None = None) -> 
         except Exception as exc:
             print(f"interactions: register failed: {exc}", file=sys.stderr)
             return 1
+        try:
+            from agent_discord import __version__ as _ver
+            from agent_discord.discord.interactions import (
+                command_set_stamp,
+                save_slash_registration_state,
+            )
+
+            save_slash_registration_state(
+                config.workspace,
+                package_version=_ver,
+                command_stamp=command_set_stamp(),
+                names=names,
+                guild_id=args.guild_id or "",
+            )
+        except OSError as exc:
+            print(f"interactions: stamp save failed: {exc}", file=sys.stderr)
     payload = {
         "interactions": config.interactions,
         "registered": names,

@@ -45,16 +45,20 @@ From Discord: `bind puppetmaster`, `bind memory`. Same SQLite rows. No slash `/a
 
 Discord OS stays text-first. Slash is **opt-in** and default **off** (`AGENT_DISCORD_INTERACTIONS=off`). Text bind / power / open verbs and the HOST panel remain the supported path.
 
-When you opt in (`AGENT_DISCORD_INTERACTIONS=http`), register + serve:
+When you opt in (`AGENT_DISCORD_INTERACTIONS=http`), the listen host **self-heals**
+slash registration (version-aware — re-registers when the installed package
+version or command-set stamp changes). Missing application id / token / public
+key fails soft (doctor WARN; host does not crash). Optional manual re-register
+remains. Serve still needs a public HTTPS tunnel:
 
 ```bash
 # .env: AGENT_DISCORD_INTERACTIONS=http  DISCORD_PUBLIC_KEY=…  DISCORD_APPLICATION_ID=…
+# Host listen self-heals registration; optional manual:
 discord-os interactions --register   # guild or global thin aliases
-# Re-run after every upgrade so phone slash/autocomplete match the install
 discord-os interactions --serve      # loopback /interactions; tunnel → Developer Portal URL
 ```
 
-Registered aliases (same verbs as text; no `/add`): `/bind`, `/status`, `/on`, `/off`, `/stop` (alias of `/off`), plus existing `/open` and `/connect`. Phone autocomplete only — listen message-prefix is unchanged.
+Registered aliases (same verbs as text; no `/add`): `/bind`, `/status`, `/on`, `/off`, `/stop` (alias of `/off`), plus existing `/open` and `/connect`. Phone autocomplete only — listen message-prefix is unchanged. See [slash](../host/slash.md).
 
 ## Code
 

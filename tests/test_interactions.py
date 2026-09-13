@@ -21,7 +21,10 @@ from agent_discord.discord.interactions import (
     RESPONSE_PONG,
     STATUS_COMMAND,
     STOP_COMMAND,
+    command_set_stamp,
     handle_interaction_payload,
+    load_slash_registration_state,
+    maybe_self_heal_slash_registration,
     register_opt_in_commands,
     serve_interactions,
     verify_ed25519,
@@ -318,4 +321,141 @@ def test_slash_bind_realm(tmp_path: Path, monkeypatch):
 def test_slash_no_add_command():
     names = {item["name"] for item in OPT_IN_COMMANDS}
     assert "add" not in names
+
+
+def test_command_set_stamp_stable():
+    a = command_set_stamp()
+    b = command_set_stamp()
+    assert a == b
+    assert len(a) == 16
+
+
+def test_self_heal_skips_when_interactions_off(tmp_path: Path):
+    calls: list[dict] = []
+
+    def register(**kwargs):
+        calls.append(kwargs)
+        return ["connect"]
+
+    result = maybe_self_heal_slash_registration(
+        workspace=tmp_path,
+        token="tok",
+        application_id="app",
+        public_key="aa" * 32,
+        interactions="off",
+        register_fn=register,
+    )
+    assert result.skipped is True
+    assert result.reason == "interactions off"
+    assert not calls
+    assert load_slash_registration_state(tmp_path) == {}
+
+
+def test_self_heal_fail_soft_missing_credentials(tmp_path: Path):
+    calls: list[dict] = []
+
+    def register(**kwargs):
+        calls.append(kwargs)
+        return ["connect"]
+
+    result = maybe_self_heal_slash_registration(
+        workspace=tmp_path,
+        token="",
+        application_id="",
+        public_key="",
+        interactions="http",
+        register_fn=register,
+    )
+    assert result.skipped is True
+    assert result.reason == "missing credentials"
+    assert not calls
+    assert any("DISCORD_BOT_TOKEN" in w for w in result.warnings)
+    assert any("DISCORD_APPLICATION_ID" in w for w in result.warnings)
+    assert any("DISCORD_PUBLIC_KEY" in w for w in result.warnings)
+
+
+def test_self_heal_registers_then_skips_when_stamp_current(tmp_path: Path):
+    calls: list[int] = []
+
+    def register(**kwargs):
+        calls.append(1)
+        return ["connect", "open", "bind"]
+
+    first = maybe_self_heal_slash_registration(
+        workspace=tmp_path,
+        token="tok",
+        application_id="app",
+        public_key="aa" * 32,
+        interactions="http",
+        package_version="0.5.56",
+        register_fn=register,
+    )
+    assert first.registered is True
+    assert first.attempted is True
+    assert list(first.names) == ["connect", "open", "bind"]
+    state = load_slash_registration_state(tmp_path)
+    assert state["package_version"] == "0.5.56"
+    assert state["command_stamp"] == command_set_stamp()
+
+    second = maybe_self_heal_slash_registration(
+        workspace=tmp_path,
+        token="tok",
+        application_id="app",
+        public_key="aa" * 32,
+        interactions="http",
+        package_version="0.5.56",
+        register_fn=register,
+    )
+    assert second.skipped is True
+    assert second.reason == "stamp current"
+    assert len(calls) == 1
+
+
+def test_self_heal_reregisters_on_version_change(tmp_path: Path):
+    calls: list[str] = []
+
+    def register(**kwargs):
+        calls.append("x")
+        return ["connect"]
+
+    maybe_self_heal_slash_registration(
+        workspace=tmp_path,
+        token="tok",
+        application_id="app",
+        public_key="pk",
+        interactions="public",
+        package_version="0.5.55",
+        register_fn=register,
+    )
+    again = maybe_self_heal_slash_registration(
+        workspace=tmp_path,
+        token="tok",
+        application_id="app",
+        public_key="pk",
+        interactions="http",
+        package_version="0.5.56",
+        register_fn=register,
+    )
+    assert again.registered is True
+    assert len(calls) == 2
+    assert load_slash_registration_state(tmp_path)["package_version"] == "0.5.56"
+
+
+def test_self_heal_register_failure_fail_soft(tmp_path: Path):
+    def register(**kwargs):
+        raise RuntimeError("discord 401")
+
+    result = maybe_self_heal_slash_registration(
+        workspace=tmp_path,
+        token="tok",
+        application_id="app",
+        public_key="pk",
+        interactions="http",
+        package_version="0.5.56",
+        register_fn=register,
+    )
+    assert result.attempted is True
+    assert result.registered is False
+    assert "401" in result.reason
+    assert load_slash_registration_state(tmp_path) == {}
 

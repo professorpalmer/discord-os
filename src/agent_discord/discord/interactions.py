@@ -10,13 +10,22 @@ P2.9 / Discord-half EXTRAS: slash aliases ``/bind`` ``/status`` ``/on``
 ``/off`` ``/stop`` plus read-only ``/job`` and ``/clear-needs`` when
 ``AGENT_DISCORD_INTERACTIONS=http`` and commands are registered. Opt-in
 autocomplete enriches ``/bind`` names and ``/job`` ``DOS-*`` codes.
-Re-run ``discord-os interactions --register`` after upgrade. Text + HOST
-panel remain the default. No slash ``/add``.
+
+When Interactions are exposed (``AGENT_DISCORD_INTERACTIONS=http`` / public),
+the listen host **self-heals** slash registration (same as
+``discord-os interactions --register``): version-aware — re-registers when the
+installed package version or command-set stamp changes. Missing
+``DISCORD_APPLICATION_ID`` / bot token / public key fails soft (WARN / doctor
+honesty; host does not crash). Manual ``--register`` remains available.
+Text + HOST panel remain the default. No slash ``/add``.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence
@@ -153,6 +162,206 @@ OPT_IN_COMMANDS = (
     STOP_COMMAND,
     CLEAR_NEEDS_COMMAND,
 )
+
+SLASH_REGISTRATION_STATE = "slash_registration.json"
+_INTERACTIONS_EXPOSED = frozenset({"http", "https", "public", "on", "1", "true", "yes"})
+
+
+@dataclass(frozen=True)
+class SlashHealResult:
+    """Outcome of version-aware slash self-heal. Never raises to the host."""
+
+    attempted: bool = False
+    registered: bool = False
+    skipped: bool = True
+    reason: str = ""
+    names: tuple[str, ...] = ()
+    package_version: str = ""
+    command_stamp: str = ""
+    warnings: tuple[str, ...] = field(default_factory=tuple)
+
+
+def command_set_stamp(commands: Sequence[Mapping[str, Any]] | None = None) -> str:
+    """Stable fingerprint of the opt-in slash command set (names + options)."""
+
+    payload = list(commands) if commands is not None else list(OPT_IN_COMMANDS)
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def slash_registration_state_path(workspace: Path) -> Path:
+    return Path(workspace) / SLASH_REGISTRATION_STATE
+
+
+def load_slash_registration_state(workspace: Path) -> dict[str, Any]:
+    path = slash_registration_state_path(workspace)
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_slash_registration_state(
+    workspace: Path,
+    *,
+    package_version: str,
+    command_stamp: str,
+    names: Sequence[str],
+    guild_id: str = "",
+) -> None:
+    ws = Path(workspace)
+    ws.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "package_version": str(package_version or "").strip(),
+        "command_stamp": str(command_stamp or "").strip(),
+        "registered_names": [str(n) for n in names],
+        "guild_id": str(guild_id or "").strip(),
+    }
+    slash_registration_state_path(ws).write_text(
+        json.dumps(payload, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def interactions_exposed(
+    interactions: str = "",
+    *,
+    env: Optional[Mapping[str, str]] = None,
+) -> bool:
+    """True when slash Interactions are opted in (http/public path)."""
+
+    raw = str(interactions or "").strip().lower()
+    if raw:
+        return raw in _INTERACTIONS_EXPOSED
+    source = env if env is not None else os.environ
+    return str(source.get("AGENT_DISCORD_INTERACTIONS") or "").strip().lower() in (
+        _INTERACTIONS_EXPOSED
+    )
+
+
+def maybe_self_heal_slash_registration(
+    *,
+    workspace: Path,
+    token: str = "",
+    application_id: str = "",
+    public_key: str = "",
+    interactions: str = "",
+    guild_id: str = "",
+    package_version: str = "",
+    env: Optional[Mapping[str, str]] = None,
+    opener: Optional[Callable[..., Any]] = None,
+    register_fn: Optional[Callable[..., list[str]]] = None,
+) -> SlashHealResult:
+    """Re-register slash commands when version/stamp drifts. Fail soft.
+
+    Equivalent of ``discord-os interactions --register`` for the listen host
+    when ``AGENT_DISCORD_INTERACTIONS`` is exposed. Missing application id,
+    bot token, or public key does not crash the host — returns warnings for
+    doctor / log honesty. Manual ``--register`` still works and updates the
+    same stamp file.
+    """
+
+    from agent_discord import __version__ as installed_version
+
+    version = str(package_version or installed_version or "").strip()
+    stamp = command_set_stamp()
+    warnings: list[str] = []
+
+    if not interactions_exposed(interactions, env=env):
+        return SlashHealResult(
+            attempted=False,
+            registered=False,
+            skipped=True,
+            reason="interactions off",
+            package_version=version,
+            command_stamp=stamp,
+        )
+
+    tok = str(token or "").strip()
+    app_id = str(application_id or "").strip()
+    pub = str(public_key or "").strip()
+    if not tok:
+        warnings.append("DISCORD_BOT_TOKEN missing — slash self-heal skipped")
+    if not app_id:
+        warnings.append("DISCORD_APPLICATION_ID missing — slash self-heal skipped")
+    if not pub:
+        warnings.append(
+            "DISCORD_PUBLIC_KEY missing — slash serve/verify unavailable "
+            "(registration still needs token + application id)"
+        )
+    if not tok or not app_id:
+        return SlashHealResult(
+            attempted=False,
+            registered=False,
+            skipped=True,
+            reason="missing credentials",
+            package_version=version,
+            command_stamp=stamp,
+            warnings=tuple(warnings),
+        )
+
+    prior = load_slash_registration_state(workspace)
+    prior_version = str(prior.get("package_version") or "").strip()
+    prior_stamp = str(prior.get("command_stamp") or "").strip()
+    guild = str(guild_id or "").strip()
+    if prior_version == version and prior_stamp == stamp:
+        return SlashHealResult(
+            attempted=False,
+            registered=False,
+            skipped=True,
+            reason="stamp current",
+            names=tuple(str(n) for n in (prior.get("registered_names") or [])),
+            package_version=version,
+            command_stamp=stamp,
+            warnings=tuple(warnings),
+        )
+
+    register = register_fn or register_opt_in_commands
+    try:
+        names = list(
+            register(
+                token=tok,
+                application_id=app_id,
+                guild_id=guild,
+                opener=opener,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 — fail soft; host must keep listening
+        warnings.append(f"slash self-heal register failed: {exc}")
+        return SlashHealResult(
+            attempted=True,
+            registered=False,
+            skipped=False,
+            reason=f"register failed: {exc}",
+            package_version=version,
+            command_stamp=stamp,
+            warnings=tuple(warnings),
+        )
+
+    try:
+        save_slash_registration_state(
+            workspace,
+            package_version=version,
+            command_stamp=stamp,
+            names=names,
+            guild_id=guild,
+        )
+    except OSError as exc:
+        warnings.append(f"slash stamp save failed: {exc}")
+
+    return SlashHealResult(
+        attempted=True,
+        registered=True,
+        skipped=False,
+        reason="registered",
+        names=tuple(names),
+        package_version=version,
+        command_stamp=stamp,
+        warnings=tuple(warnings),
+    )
 
 
 class InteractionError(ValueError):

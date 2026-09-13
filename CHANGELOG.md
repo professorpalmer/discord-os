@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Policy #7 — slash self-heal
+
+- When `AGENT_DISCORD_INTERACTIONS` is exposed (http/public), the listen host
+  **self-heals** slash registration (same as `discord-os interactions --register`).
+- **Version-aware**: re-registers when installed package version or opt-in
+  command-set stamp differs; stamp in workspace `slash_registration.json`.
+- **Fail soft** if missing `DISCORD_APPLICATION_ID` / bot token / public key —
+  WARN + doctor honesty; host does not crash. Manual `--register` optional.
+- Docs: [slash](docs/host/slash.md), setup. Module:
+  `maybe_self_heal_slash_registration`.
+
 ## 0.5.55
 
 Next-wave ship: SSH live gate bridge, forum tags-as-tickets, Path A edge races, voice DAVE fail-closed + local TTS/memo, CI drain flake (tip `9751530`).

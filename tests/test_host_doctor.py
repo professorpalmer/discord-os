@@ -209,3 +209,32 @@ def test_doctor_warn_operators_empty_desk(tmp_path: Path, monkeypatch) -> None:
     code, lines = run_doctor(workspace=ws, plist_path=plist, home=home)
     assert any(line.startswith("WARN operators empty") for line in lines), lines
     assert not any("FAIL operators empty while AGENT_DISCORD_INTERACTIONS" in line for line in lines), lines
+
+
+def test_doctor_slash_self_heal_warns_when_pending(tmp_path: Path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    ws = home / "discord-os" / ".agent-discord"
+    ws.mkdir(parents=True)
+    py = tmp_path / "python"
+    py.write_text("#!/bin/sh\n", encoding="utf-8")
+    py.chmod(0o755)
+    plist = home / "Library" / "LaunchAgents" / f"{SERVICE_LABEL}.plist"
+    _write_plist(plist, workspace=ws, cwd=home / "discord-os", python=py)
+    store = SQLiteStore(ws / "agent_discord.sqlite3")
+    store.initialize()
+    store.close()
+    monkeypatch.setenv("AGENT_DISCORD_WORKSPACE", str(ws))
+    monkeypatch.setenv("AGENT_DISCORD_INTERACTIONS", "http")
+    monkeypatch.delenv("DISCORD_APPLICATION_ID", raising=False)
+    monkeypatch.delenv("DISCORD_PUBLIC_KEY", raising=False)
+    monkeypatch.delenv("DISCORD_OS_REQUIRE_OPERATORS", raising=False)
+    monkeypatch.delenv("DISCORD_OS_REQUIRE_ALLOWLIST", raising=False)
+    from agent_discord import config as cfgmod
+
+    token_path = ws / "bot.token"
+    monkeypatch.setattr(cfgmod, "DEFAULT_HOST_BOT_TOKEN_PATH", token_path)
+    token_path.write_text("dummy-token\n", encoding="utf-8")
+    _code, lines = run_doctor(workspace=ws, plist_path=plist, home=home)
+    assert any("WARN" in line and "APPLICATION_ID" in line for line in lines), lines
+    assert any("slash self-heal" in line for line in lines), lines
+

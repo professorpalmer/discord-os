@@ -15,9 +15,27 @@ Opt in only when you want Discord application-command autocomplete on phone:
 AGENT_DISCORD_INTERACTIONS=http
 DISCORD_PUBLIC_KEY=…          # Developer Portal → General Information
 DISCORD_APPLICATION_ID=…
-discord-os interactions --register
+# Host self-heals slash registration on listen (version-aware).
+# Optional manual: discord-os interactions --register
 discord-os interactions --serve
 # paste YOUR public HTTPS URL into Interactions Endpoint URL (not a chat paste)
+```
+
+## Self-heal (policy #7)
+
+When `AGENT_DISCORD_INTERACTIONS` is exposed (`http` / public), the listen host
+**self-heals** slash registration — same effect as
+`discord-os interactions --register`. It is **version-aware**: re-registers when
+the installed `discord-os` package version changes or the opt-in command-set
+stamp differs (new slash options / autocomplete flags). State lives in
+workspace `slash_registration.json`.
+
+**Fail soft:** missing `DISCORD_APPLICATION_ID`, bot token, or public key does
+**not** crash the host. Doctor prints WARN honesty; listen continues on the
+text + HOST path. Optional manual re-register remains:
+
+```bash
+discord-os interactions --register
 ```
 
 ## Registered aliases
@@ -36,14 +54,10 @@ discord-os interactions --serve
 
 **Not registered:** `/add`. Use `discord-os add …` or in-channel `bind`.
 
-After `pip install -U discord-os` (and host bounce), re-run:
-
-```bash
-discord-os interactions --register
-```
-
-so Discord picks up new commands (`/job` autocomplete, `/clear-needs`, richer
-option flags). Skipping re-register leaves the phone on the old command set.
+After `pip install -U discord-os` (and host bounce), self-heal re-registers on
+the next listen when the package version / command stamp drifts. Manual
+`--register` is still fine (updates the same stamp). Skipping both leaves the
+phone on the old command set until the next successful heal.
 
 ## Autocomplete
 
@@ -52,11 +66,11 @@ Discord type-4 focus events return up to 25 choices:
 - `/bind name` — host repos + aliases, `memory`, allowlisted `host <id>`
 - `/job code` — recent `DOS-*` codes from workspace SQLite (channel-scoped when known)
 
-Re-run `discord-os interactions --register` after upgrading so Discord sees
-`autocomplete: true` on those options.
+Self-heal (or `discord-os interactions --register`) after upgrading so Discord
+sees `autocomplete: true` on those options.
 
 ## Wiring
 
 Handlers open workspace SQLite and reuse power/bind parse + absorb helpers. HOST card paint stays on the Gateway listen loop. Slash ACK is ephemeral. `/job` never mutates job state.
 
-Code: `src/agent_discord/discord/interactions.py`.
+Code: `src/agent_discord/discord/interactions.py` (`maybe_self_heal_slash_registration`).

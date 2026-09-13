@@ -103,6 +103,7 @@ def run_doctor(
 
     fails += _check_host_allowlist(lines)
     _warn_voice_join(lines)
+    _check_slash_self_heal(cfg, ws, lines)
 
     db = ws / "agent_discord.sqlite3" if ws.exists() else None
     if db is not None and db.is_file():
@@ -494,6 +495,59 @@ def _host_run_pids() -> list[int]:
         found.append(pid)
     return found
 
+
+
+def _check_slash_self_heal(cfg: AppConfig, workspace: Path, lines: list[str]) -> None:
+    """WARN/OK honesty for opt-in slash self-heal (never FAIL — fail soft)."""
+
+    from agent_discord.discord.interactions import (
+        command_set_stamp,
+        interactions_exposed,
+        load_slash_registration_state,
+    )
+    from agent_discord.orchestration.service import interactions_public
+
+    exposed = interactions_exposed(getattr(cfg, "interactions", "") or "") or interactions_public()
+    if not exposed:
+        return
+
+    token_ok = bool(str(getattr(cfg, "discord_bot_token", "") or "").strip())
+    app_ok = bool(str(getattr(cfg, "discord_application_id", "") or "").strip())
+    pub_ok = bool(str(getattr(cfg, "discord_public_key", "") or "").strip())
+    if not token_ok:
+        lines.append("WARN slash self-heal: DISCORD_BOT_TOKEN missing (register skipped)")
+    if not app_ok:
+        lines.append(
+            "WARN slash self-heal: DISCORD_APPLICATION_ID missing (register skipped)"
+        )
+    if not pub_ok:
+        lines.append(
+            "WARN slash self-heal: DISCORD_PUBLIC_KEY missing "
+            "(serve/verify unavailable; optional manual re-register still needs app id)"
+        )
+
+    stamp = command_set_stamp()
+    state = load_slash_registration_state(workspace) if workspace.exists() else {}
+    prior_ver = str(state.get("package_version") or "").strip()
+    prior_stamp = str(state.get("command_stamp") or "").strip()
+    if prior_ver == __version__ and prior_stamp == stamp:
+        names = state.get("registered_names") or []
+        label = ", ".join(str(n) for n in names) if names else "ok"
+        lines.append(
+            f"OK slash self-heal current ({__version__} / {stamp}): {label}"
+        )
+        return
+    if not prior_ver and not prior_stamp:
+        lines.append(
+            f"WARN slash self-heal pending — host will register on listen "
+            f"({__version__} / {stamp}); optional: discord-os interactions --register"
+        )
+        return
+    lines.append(
+        f"WARN slash stamp stale (was {prior_ver or '?'} / {prior_stamp or '?'}; "
+        f"now {__version__} / {stamp}) — host re-registers on listen; "
+        "optional: discord-os interactions --register"
+    )
 
 def _warn_voice_join(lines: list[str]) -> None:
     """WARN when DISCORD_OS_VOICE_JOIN is set — DAVE not shipped; not an unlock."""
