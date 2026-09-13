@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.5.54
+
+Polish Wave 1+2 + HOST Update-available pill (tip `faed868`).
+
 ### Polish Wave 1 — swarm-incomplete honesty + Path A Cancel races
 
 - **Swarm-incomplete honesty (DOS-10036 class)**: when agentic / `workers:0` /
