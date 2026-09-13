@@ -10,7 +10,7 @@ Each tool call then runs ``discord-os gate-hook`` (stdin JSON → stdout
 does not run (fail closed). Allow / Always → original tool runs.
 
 Stdlib only: the puppetmaster pipx venv may not import ``agent_discord``.
-Path A SSH cooks do not share this Mac's gate queue — see ask-gate residual.
+Path A SSH: set DISCORD_OS_SSH_GATES=bridge for live reverse hold; see ask-gate / ssh_gate.
 """
 
 from __future__ import annotations

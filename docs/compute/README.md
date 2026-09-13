@@ -34,7 +34,7 @@ Optional Marionette HTTP: `AGENT_DISCORD_BACKEND=marionette` plus `MARIONETTE_BA
 Local agentic and Path A SSH cooks register a killable child process group.
 Phone Cancel terminates that group (and best-effort remote pid on SSH). Path A
 echoes `DISCORD_OS_REMOTE_PID` on stdout and stderr, waits briefly for the pid
-before remote `kill`, and optionally uses ControlMaster (`DISCORD_OS_SSH_CONTROL_PATH`)
+before remote `kill`, and optionally uses ControlMaster (`DISCORD_OS_SSH_CONTROL_PATH` (also auto when `DISCORD_OS_SSH_GATES=bridge`))
 so `ssh -O exit` can confirm more often. Orchestrator Cancel targets the active
 SSH cook backend for the run — never silent local cook. If interrupt cannot be
 confirmed, Discord speaks **Cancel unconfirmed** and does not paint Cancelled.

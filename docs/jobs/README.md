@@ -15,7 +15,7 @@ Default live ceiling is **8** (`DISCORD_OS_MAX_LIVE`). Raise it when the machine
 
 The host loop REST-polls live thread ids and recent idle session threads (from SQLite) too. Idle-thread follow-ups start a new job in that thread, parented at the prior tip. Each session thread keeps its own listen watermark so parent-channel tips (HOST panel paints) cannot hide older unread thread messages. `--once` waits the pool. The host loop reaps finished receipts without blocking the next channel.
 
-Parked write-gate and per-tool / AskUserQuestion gates auto-deny after `DISCORD_OS_APPROVAL_TIMEOUT_MINUTES` (default 20). A live tool-class hold blocks the worker until Allow / Deny / Always or that timeout (local agentic PreToolUse via gate-inject sitecustomize → `discord-os gate-hook`). Path A SSH: live Discord hold does not share the gate queue yet; write-gate on → Need + remote write Deny. See [ask-gate](../cards/ask-gate.md).
+Parked write-gate and per-tool / AskUserQuestion gates auto-deny after `DISCORD_OS_APPROVAL_TIMEOUT_MINUTES` (default 20). A live tool-class hold blocks the worker until Allow / Deny / Always or that timeout (local agentic PreToolUse via gate-inject sitecustomize → `discord-os gate-hook`). Path A SSH: `DISCORD_OS_SSH_GATES=bridge` for live phone Allow/Deny across remote cook; default unset → write-gate on speaks Need + remote write Deny. See [ask-gate](../cards/ask-gate.md).
 
 Each run writes a SQLite lineage DAG (`node_key = sha256(step, input, parents)`). Done cites artifact sha256. Retry starts a new run parented at the previous tip. Query: `discord-os lineage [RUN_ID|DOS-10001]`.
 

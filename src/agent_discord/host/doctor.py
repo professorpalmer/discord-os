@@ -272,11 +272,18 @@ def _check_host_allowlist(lines: list[str]) -> int:
                     )
                     from agent_discord.orchestration.ssh_gate import ssh_gates_cross
 
-                    if not ssh_gates_cross():
+                    if ssh_gates_cross():
+                        lines.append(
+                            f"OK host ssh {host.id}: SSH gate bridge armed "
+                            "(DISCORD_OS_SSH_GATES=bridge — phone Allow/Deny "
+                            "across Path A)"
+                        )
+                    else:
                         lines.append(
                             f"WARN host ssh {host.id}: gates do not cross SSH yet "
                             "(write-gate holds local-only; remote writes Deny when "
-                            "write-gate on)"
+                            "write-gate on; set DISCORD_OS_SSH_GATES=bridge for "
+                            "live phone cards)"
                         )
                 else:
                     # Honest Need/WARN before cook-time Deny — never print secrets.

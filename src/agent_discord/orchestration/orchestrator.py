@@ -725,6 +725,8 @@ class AgentOrchestrator:
                 cook_backend = make_ssh_cook_backend(
                     remote_host,
                     exec_fn=self.ssh_exec,
+                    workspace=self.workspace,
+                    store=self.store,
                 )
                 # Preflight already probed; avoid a second BatchMode round-trip.
                 cook_backend.probe_first = False
@@ -747,12 +749,30 @@ class AgentOrchestrator:
                 extra_meta["host_workdir"] = remote_host.workdir
             # Path A: stamp write-gate so SSH cook can speak Need + fail-close
             # remote writes when Discord gate holds cannot cross SSH yet.
+            # When DISCORD_OS_SSH_GATES=bridge, arm live phone Allow/Deny instead.
             if (remote_host.kind or "").strip().lower() == "ssh":
                 try:
                     from agent_discord.orchestration.service import writes_need_approval
-                    from agent_discord.orchestration.ssh_gate import ssh_gates_cross
+                    from agent_discord.orchestration.ssh_gate import (
+                        remote_gate_dir_for_run,
+                        ssh_gates_cross,
+                    )
+                    from agent_discord.orchestration.gate_hook import (
+                        ensure_run_gate_dir,
+                        resolve_gate_root,
+                        run_gate_dir,
+                    )
 
-                    if writes_need_approval(self.store) and not ssh_gates_cross():
+                    if ssh_gates_cross():
+                        extra_meta["ssh_gate_bridge"] = True
+                        extra_meta["ssh_gate_remote_dir"] = remote_gate_dir_for_run(
+                            run_id
+                        )
+                        root = resolve_gate_root(
+                            workspace=self.workspace, store=self.store
+                        )
+                        ensure_run_gate_dir(run_gate_dir(root, run_id))
+                    elif writes_need_approval(self.store):
                         extra_meta["ssh_write_gate"] = True
                 except Exception:
                     pass

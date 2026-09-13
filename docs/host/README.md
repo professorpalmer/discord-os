@@ -15,6 +15,7 @@ Security posture first. Multi-host is an **explicit allowlist** seam — never a
 | On / Off / status | Always local on the control-plane Mac. Power never routes remotely. |
 | Credentials | Never in argv. SSH uses agent / `~/.ssh/config` only (`BatchMode=yes`). Control plane does **not** tunnel `OPENROUTER_API_KEY` — configure OpenRouter on the remote. |
 | Kill switch | `DISCORD_OS_SSH_COOK=0` restores spoken Deny for ssh hosts (routing-only). Default on. |
+| SSH gate bridge | `DISCORD_OS_SSH_GATES=bridge` — live phone Allow/Deny/Always across Path A (pending markers + SSH result writeback). Default unset = Need + remote Deny when write-gate on. Fail closed if bridge cannot arm. |
 
 ```bash
 # JSON (preferred)

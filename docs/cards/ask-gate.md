@@ -121,12 +121,15 @@ resolver instead of resuming an implement.
   `sitecustomize.py`, which wraps `AgenticAdapter._execute_tool` and runs
   `discord-os gate-hook` before each tool. Deny / timeout → tool does not run.
   Write-gate off / session Always still auto-allow via listen drain (no card).
-- **Path A SSH gates**: live Discord hold still does **not** share this Mac's
-  `DISCORD_OS_GATE_*` file queue. `DISCORD_OS_SSH_GATES=bridge` stays reserved
-  until a real reverse hold ships (larger than M — do not fake phone cards).
-  When write-gate is on, Path A speaks **Need** and fail-closes remote
-  write/edit/shell tools (sitecustomize inject) instead of silent ungated
-  writes. Analyze/read SSH cooks unchanged.
+- **Path A SSH gates (live bridge)**: set `DISCORD_OS_SSH_GATES=bridge` so
+  remote cook emits `DISCORD_OS_GATE_PENDING` markers, this Mac mirrors them
+  into `DISCORD_OS_GATE_*`, listen parks phone Allow / Deny / Always (or
+  Ask / Plan) cards, and Path A SSH-writes results back to the remote queue.
+  Fail closed when bridge cannot arm (missing `run_id` / wrap failure) —
+  never silent ungated writes while bridge was requested. Default unset:
+  write-gate on → spoken **Need** + remote Deny inject (honest gap).
+  Analyze/read passthrough on the remote inject; ControlMaster auto when
+  unset so writeback multiplexes with the cook.
 - ~~Per-tool (exact tool name) allowlists beyond class~~ — Always remembers
   the exact tool (`gate_tool` / `tool_exact_allow:`); wildcards rejected
 - ~~Multi-select AskUserQuestion confirm row~~ — `allow_multiple=True` toggles
@@ -141,6 +144,7 @@ resolver instead of resuming an implement.
   `raise_tool_gate` / `raise_ask_user` / resolve
 - `src/agent_discord/puppetmaster/agentic.py` — stamps gate env + PYTHONPATH inject on spawn
 - `src/agent_discord/orchestration/gate_inject/sitecustomize.py` — wraps agentic `_execute_tool`
+- `src/agent_discord/orchestration/ssh_gate.py` — Path A gap Deny inject + live bridge
 - `src/agent_discord/host/panel.py` — ask button → `on_job("ask", run#idx)`
 - `src/agent_discord/orchestration/listen.py` — spoken Allow / Deny / Always;
   drain pending hook files

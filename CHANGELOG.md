@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### SSH live gate bridge (Path A)
+
+- **`DISCORD_OS_SSH_GATES=bridge`**: phone Allow / Deny / Always (and Ask /
+  Plan parks) hold the remote Path A worker mid-cook. Remote sitecustomize
+  emits `DISCORD_OS_GATE_PENDING` markers; Mac mirrors into the local gate
+  queue; listen parks Discord cards; Path A SSH-writes results back.
+  ControlMaster auto when unset. Fail closed when bridge cannot arm.
+- Default unset unchanged: write-gate on → spoken Need + remote Deny inject
+  (honest gap). Docs: [ask-gate](docs/cards/ask-gate.md), host README.
+- Tests: `tests/test_remote_cook.py` bridge wrap / pending / fail-closed.
+
 ## 0.5.54
 
 Polish Wave 1+2 + HOST Update-available pill (tip `faed868`).

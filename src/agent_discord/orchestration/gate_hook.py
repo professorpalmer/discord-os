@@ -1117,8 +1117,9 @@ no result → deny.
 Local agentic: PYTHONPATH prepends gate_inject/sitecustomize.py so
 AgenticAdapter._execute_tool invokes this hook before each tool.
 
-Path A SSH: gate queue stays on this Mac — gates across SSH are not
-wired yet (P1).
+Path A SSH: set DISCORD_OS_SSH_GATES=bridge for live phone Allow/Deny
+across remote cook (pending markers + SSH result writeback). Default
+unset keeps Need + remote Deny when write-gate is on.
 
 In-process adapters: request_tool_hold / request_plan_hold.
 """

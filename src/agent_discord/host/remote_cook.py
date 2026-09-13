@@ -180,6 +180,18 @@ def spoken_ssh_gates_need(host_id: str) -> str:
     return _need(host_id)
 
 
+def spoken_ssh_gates_bridge_armed(host_id: str) -> str:
+    from agent_discord.orchestration.ssh_gate import spoken_ssh_gates_bridge_armed as _msg
+
+    return _msg(host_id)
+
+
+def spoken_ssh_gates_bridge_denied(host_id: str, *, detail: str = "") -> str:
+    from agent_discord.orchestration.ssh_gate import spoken_ssh_gates_bridge_denied as _msg
+
+    return _msg(host_id, detail=detail)
+
+
 def spoken_ssh_probe_deny(host_id: str, result: "SshProbeResult") -> str:
     """Spoken Deny from a failed remote readiness probe (honest Need)."""
 
@@ -528,12 +540,17 @@ class SshRemoteCookBackend:
     exec_fn: Optional[ExecFn] = None
     probe_first: bool = True
     control_path: str = ""
+    gate_root: Optional[Path] = None
+    workspace: Optional[Path] = None
+    store: Any = None
     popen_fn: Optional[Callable[[list[str]], Any]] = None
     _statuses: dict[str, TaskStatus] = field(default_factory=dict)
     _children: dict[str, Any] = field(default_factory=dict, repr=False)
     _remote_pids: dict[str, int] = field(default_factory=dict, repr=False)
     _cancel_requested: set[str] = field(default_factory=set, repr=False)
     _child_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _bridge_pending: dict[str, str] = field(default_factory=dict, repr=False)
+    _bridge_written: set[str] = field(default_factory=set, repr=False)
 
     def __post_init__(self) -> None:
         path = resolve_ssh_control_path(explicit=self.control_path)
@@ -617,27 +634,103 @@ class SshRemoteCookBackend:
             )
             return
         from agent_discord.orchestration.ssh_gate import (
+            bridge_control_path,
+            remote_gate_dir_for_run,
             ssh_gates_cross,
             wrap_remote_argv_with_ssh_gate,
+            wrap_remote_argv_with_ssh_gate_bridge,
+        )
+        from agent_discord.orchestration.gate_hook import (
+            ensure_run_gate_dir,
+            gate_timeout_seconds,
+            resolve_gate_root,
+            run_gate_dir,
         )
 
         meta = request.metadata or {}
-        gate_block = (not ssh_gates_cross()) and bool(
+        bridge = ssh_gates_cross()
+        gate_block = (not bridge) and bool(
             meta.get("ssh_write_gate") or meta.get("write_gate")
         )
-        remote_argv = wrap_remote_argv_with_ssh_gate(
-            list(handoff.argv), enabled=bool(gate_block)
-        )
-        if gate_block:
+        remote_argv = list(handoff.argv)
+        if bridge:
+            # Live phone Allow/Deny across SSH — fail closed if we cannot arm.
+            rid = (request.run_id or "").strip()
+            if not rid:
+                self._statuses[request.run_id] = TaskStatus.FAILED
+                yield DispatchEvent(
+                    kind=EventKind.ERROR,
+                    summary=ProgressSummary(
+                        stage="deny",
+                        message=spoken_ssh_gates_bridge_denied(
+                            self.host.id, detail="missing run_id"
+                        ),
+                    ),
+                )
+                return
+            # Prefer ControlMaster so writeback multiplexes with the cook.
+            if not (self.control_path or "").strip():
+                object.__setattr__(
+                    self,
+                    "control_path",
+                    bridge_control_path(env=os.environ),
+                )
+            remote_dir = str(meta.get("ssh_gate_remote_dir") or "").strip() or remote_gate_dir_for_run(
+                rid
+            )
+            # Ensure local gate queue exists so listen can park Discord cards.
+            root = self.gate_root
+            if root is None:
+                root = resolve_gate_root(
+                    workspace=self.workspace, store=self.store, env=os.environ
+                )
+                object.__setattr__(self, "gate_root", Path(root))
+            ensure_run_gate_dir(run_gate_dir(Path(root), rid))
+            timeout_s = gate_timeout_seconds(os.environ)
+            remote_argv = wrap_remote_argv_with_ssh_gate_bridge(
+                remote_argv,
+                run_id=rid,
+                remote_gate_dir=remote_dir,
+                timeout_seconds=timeout_s,
+            )
+            if not remote_argv:
+                self._statuses[request.run_id] = TaskStatus.FAILED
+                yield DispatchEvent(
+                    kind=EventKind.ERROR,
+                    summary=ProgressSummary(
+                        stage="deny",
+                        message=spoken_ssh_gates_bridge_denied(
+                            self.host.id, detail="bridge wrap failed"
+                        ),
+                    ),
+                )
+                return
             yield DispatchEvent(
                 kind=EventKind.PROGRESS,
                 summary=ProgressSummary(
-                    stage="need",
-                    message=spoken_ssh_gates_need(self.host.id),
+                    stage="gate",
+                    message=spoken_ssh_gates_bridge_armed(self.host.id),
                     percent=1.0,
-                    details={"host_id": self.host.id, "ssh_gates": "gap"},
+                    details={
+                        "host_id": self.host.id,
+                        "ssh_gates": "bridge",
+                    },
                 ),
             )
+        else:
+            remote_argv = wrap_remote_argv_with_ssh_gate(
+                remote_argv, enabled=bool(gate_block)
+            )
+            if gate_block:
+                yield DispatchEvent(
+                    kind=EventKind.PROGRESS,
+                    summary=ProgressSummary(
+                        stage="need",
+                        message=spoken_ssh_gates_need(self.host.id),
+                        percent=1.0,
+                        details={"host_id": self.host.id, "ssh_gates": "gap"},
+                    ),
+                )
         wrapped = wrap_remote_command_with_pid_echo(remote_argv)
         try:
             proc = self._spawn_ssh_cook(wrapped, stdin_data=handoff.stdin_data)
@@ -778,13 +871,95 @@ class SshRemoteCookBackend:
             )
         return _default_popen(list(argv), stdin_data=stdin_data)
 
+    def _note_bridge_pending(self, run_id: str, line: str) -> Optional[DispatchEvent]:
+        """Mirror a remote GATE_PENDING marker into the local gate queue."""
+
+        from agent_discord.orchestration.ssh_gate import (
+            GATE_PENDING_MARKER,
+            mirror_gate_pending_to_local,
+            parse_gate_pending_line,
+        )
+
+        if GATE_PENDING_MARKER not in (line or ""):
+            return None
+        payload = parse_gate_pending_line(line)
+        if not payload:
+            return DispatchEvent(
+                kind=EventKind.PROGRESS,
+                summary=ProgressSummary(
+                    stage="gate",
+                    message="SSH gate pending unreadable — fail closed on remote timeout",
+                    percent=None,
+                    details={"host_id": self.host.id, "ssh_gates": "bridge"},
+                ),
+            )
+        remote_dir = str(payload.get("remote_gate_dir") or "").strip()
+        request_id = str(payload.get("request_id") or "").strip()
+        if request_id and remote_dir:
+            with self._child_lock:
+                self._bridge_pending[request_id] = remote_dir
+        try:
+            mirror_gate_pending_to_local(
+                payload,
+                gate_root=self.gate_root,
+                workspace=self.workspace,
+                store=self.store,
+            )
+        except Exception:
+            pass
+        tool = str(payload.get("tool_name") or payload.get("tool_class") or "tool")
+        detail = str(payload.get("detail") or "")[:120]
+        msg = f"Waiting for Allow: `{tool}`"
+        if detail:
+            msg = f"{msg} — {detail}"
+        return DispatchEvent(
+            kind=EventKind.PROGRESS,
+            summary=ProgressSummary(
+                stage="gate",
+                message=msg,
+                percent=None,
+                details={
+                    "host_id": self.host.id,
+                    "ssh_gates": "bridge",
+                    "request_id": request_id,
+                    "tool_name": tool,
+                },
+            ),
+        )
+
+    def _flush_bridge_writebacks(self, run_id: str) -> None:
+        from agent_discord.orchestration.ssh_gate import flush_bridge_writebacks
+
+        with self._child_lock:
+            pending = {
+                rid: remote
+                for rid, remote in self._bridge_pending.items()
+                if rid not in self._bridge_written
+            }
+        if not pending:
+            return
+        written = flush_bridge_writebacks(
+            run_id=run_id,
+            host_target=self.host.target,
+            pending_remote=pending,
+            gate_root=self.gate_root,
+            workspace=self.workspace,
+            store=self.store,
+            control_path=self.control_path,
+            exec_fn=self.exec_fn,
+        )
+        if written:
+            with self._child_lock:
+                self._bridge_written.update(written)
+
     def _iter_ssh_cook_events(
         self, run_id: str, proc: Any
     ) -> Iterator[DispatchEvent]:
         """Drain SSH child stdout/stderr into live PROGRESS, then terminal event.
 
-        Captures ``DISCORD_OS_REMOTE_PID`` for Cancel. Does not follow local
-        ``puppetmaster deltas`` (remote job is not on this Mac).
+        Captures ``DISCORD_OS_REMOTE_PID`` for Cancel and ``DISCORD_OS_GATE_PENDING``
+        for the SSH live gate bridge. Does not follow local ``puppetmaster deltas``
+        (remote job is not on this Mac).
         """
 
         model = self.pin.canonical
@@ -838,6 +1013,7 @@ class SshRemoteCookBackend:
                 try:
                     item = line_queue.get(timeout=0.05)
                 except queue.Empty:
+                    self._flush_bridge_writebacks(run_id)
                     if run_id in self._cancel_requested:
                         break
                     if time.monotonic() > deadline:
@@ -853,6 +1029,11 @@ class SshRemoteCookBackend:
                     continue
                 line = str(item)
                 if _note_remote_pid(line):
+                    continue
+                gate_event = self._note_bridge_pending(run_id, line)
+                if gate_event is not None:
+                    yield gate_event
+                    self._flush_bridge_writebacks(run_id)
                     continue
                 if run_id in self._cancel_requested:
                     break
@@ -872,6 +1053,7 @@ class SshRemoteCookBackend:
                         ),
                         payload=event.payload,
                     )
+                self._flush_bridge_writebacks(run_id)
             try:
                 proc.wait(timeout=2)
             except Exception:
@@ -1090,6 +1272,9 @@ def make_ssh_cook_backend(
     cli: str = "puppetmaster",
     timeout_seconds: float = 3600.0,
     control_path: str = "",
+    gate_root: Optional[Path] = None,
+    workspace: Optional[Path] = None,
+    store: Any = None,
 ) -> SshRemoteCookBackend:
     return SshRemoteCookBackend(
         host=host,
@@ -1097,6 +1282,9 @@ def make_ssh_cook_backend(
         exec_fn=exec_fn,
         timeout_seconds=timeout_seconds,
         control_path=resolve_ssh_control_path(explicit=control_path),
+        gate_root=Path(gate_root) if gate_root is not None else None,
+        workspace=Path(workspace) if workspace is not None else None,
+        store=store,
     )
 
 
