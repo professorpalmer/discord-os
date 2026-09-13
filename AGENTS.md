@@ -6,8 +6,9 @@ Discord is the screen. This process is the computer. The phone is the remote. On
 
 1. [README.md](README.md) — setup, phone verbs, index
 2. [docs/README.md](docs/README.md) — feature map
-3. The feature folder that matches the ask (`docs/realms`, `docs/jobs`, `docs/aws`, …)
-4. CodeGraph, then the files that page names
+3. [docs/host/policy.md](docs/host/policy.md) — HARD locks (do not invent)
+4. The feature folder that matches the ask (`docs/realms`, `docs/jobs`, `docs/aws`, …)
+5. CodeGraph, then the files that page names
 
 Do not crawl the tree first. Each `docs/<feature>/README.md` lists the modules that own that seam.
 

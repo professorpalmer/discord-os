@@ -8,6 +8,7 @@ Surface README is first run plus this map. Feature pages live in their own folde
 |---|---|
 | [setup](setup/README.md) | First run, `add`, why there is no wizard |
 | [host](host/README.md) | On/Off/Ask, watchdogs, status digest, TTS, REQUIRE_OPERATORS, LaunchAgent |
+| [host/policy](host/policy.md) | **HARD locks** (SSH OPT-IN, forum tags, Path A, gateway, Update, voice, spend, desk, slash, CU PARKED) |
 | [realms](realms/README.md) | Channel = checkout |
 | [jobs](jobs/README.md) | Parallel cooks, `DISCORD_OS_MAX_LIVE`, live session threads |
 | [tools](tools/README.md) | Named CLI/HTTP catalog |

@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### TIDY ALL polish (pre-0.5.57)
+
+- **Quiet listen drain / Errno 49**: REST retries `TimeoutError` and transient
+  OSError (macOS **EADDRNOTAVAIL=49**, reset/refused/unreachable) in addition to
+  URLError / 502–504. Listen quiet-logs those after retries — **no fake Gateway
+  READY**. `note_gateway_expected` no longer sets `connected=True`.
+- **HARD locks policy page**: [`docs/host/policy.md`](docs/host/policy.md)
+  stamps all 10 locks (SSH bridge OPT-IN, no forum auto-tags, Path A never
+  silent local, single gateway, Update=PyPI, voice local TTS/memo, spend
+  honesty, desk single-user OK, slash self-heal, CU/docker PARKED).
+- **Slash self-heal residual**: pass `listen --guild-id` / `DISCORD_GUILD_ID`
+  into version-aware register.
+- **Forum tags soak**: extra status name aliases (todo/active/blocked/cancel/
+  stopped/…); doctor WARN when forum realm lacks a status tag map; still never
+  auto-creates guild `available_tags`.
+- Doctor tip cites policy locks; `.env.example` documents `DISCORD_OS_SSH_GATES`
+  OPT-IN + `DISCORD_GUILD_ID`.
+
 ## 0.5.56
 
 Policy #7 slash self-heal (tip `e713a0a`).

@@ -1,5 +1,7 @@
 # Host
 
+
+**HARD locks:** [policy.md](policy.md) — SSH bridge OPT-IN, no forum auto-tags, Path A never silent local, single gateway, Update=PyPI, voice local TTS/memo, spend honesty, desk single-user OK, slash self-heal, CU/docker PARKED.
 The host is the long-running process on this Mac: listen loop, JobPool, SQLite, Puppetmaster workers. Discord is only the remote.
 
 ## Multi-host runners (fail-closed)
