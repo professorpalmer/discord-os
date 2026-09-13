@@ -139,10 +139,13 @@ def test_drain_with_pool_returns_while_jobs_run(tmp_path: Path):
             job_pool=pool,
         )
     )
+    elapsed = time.monotonic() - started
     assert immediate == []
     assert pool.live_count() == 2
-    # Drain must return before slow backends finish (not a tight wall budget).
-    assert time.monotonic() - started < backend.hold
+    # Drain must return while jobs still live. Soft wall budget — CI can
+    # jitter past hold by a few ms (3.11 lost <hold by ~0.2ms).
+    assert elapsed < backend.hold + 0.1
+    assert len(backend.ended) < 2
     receipts = pool.wait(timeout=3.0)
     assert len(receipts) == 2
     store.close()
