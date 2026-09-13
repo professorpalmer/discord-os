@@ -573,6 +573,16 @@ def render_host_card(
     return host_card(armed=armed, channel_id=channel_id).text
 
 
+def _host_description(*, last_job: str = "", update_pill: str = "") -> str:
+    """HOST card body: optional Update-available pill above the Jobs briefing line."""
+
+    pill = (update_pill or "").strip()
+    job = (last_job or "").strip()
+    if pill and job:
+        return f"{pill}\n{job}"
+    return pill or job
+
+
 def host_card(
     *,
     armed: bool,
@@ -592,6 +602,7 @@ def host_card(
     bank: bool = False,
     github: str = "",
     spend_known: bool = True,
+    update_pill: str = "",
 ) -> CardMessage:
     _ = channel_id
     fields = _host_status_fields(
@@ -632,7 +643,7 @@ def host_card(
     return CardMessage(
         kind="HOST",
         title="Halted" if halted and armed else ("Running" if armed else "Stopped"),
-        description=last_job.strip(),
+        description=_host_description(last_job=last_job, update_pill=update_pill),
         color=COLOR_FAIL if halted and armed else (COLOR_LIVE if armed else COLOR_IDLE),
         avatar_url=avatar_url,
         fields=fields,

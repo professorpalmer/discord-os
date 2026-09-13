@@ -50,6 +50,7 @@ When you opt in (`AGENT_DISCORD_INTERACTIONS=http`), register + serve:
 ```bash
 # .env: AGENT_DISCORD_INTERACTIONS=http  DISCORD_PUBLIC_KEY=…  DISCORD_APPLICATION_ID=…
 discord-os interactions --register   # guild or global thin aliases
+# Re-run after every upgrade so phone slash/autocomplete match the install
 discord-os interactions --serve      # loopback /interactions; tunnel → Developer Portal URL
 ```
 

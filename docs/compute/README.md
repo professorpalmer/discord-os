@@ -27,7 +27,7 @@ Optional Marionette HTTP: `AGENT_DISCORD_BACKEND=marionette` plus `MARIONETTE_BA
 
 ## Path A progress pipe
 
-`SshRemoteCookBackend.stream` yields live `PROGRESS` from remote agentic stdout/stderr (mocked-SSH covered in `tests/test_remote_cook.py`). No local `deltas --follow` for remote jobs. Fail closed on unreachable SSH, missing remote CLI, or missing remote OpenRouter (doctor WARN; cook Deny).
+`SshRemoteCookBackend.stream` yields live `PROGRESS` from remote agentic stdout/stderr (mocked-SSH covered in `tests/test_remote_cook.py`). No local `deltas --follow` for remote jobs. Fail closed on unreachable SSH, missing remote CLI, or missing/sealed remote OpenRouter (doctor WARN; cook Deny). Probe reports `openrouter=env|vault|vault-sealed|missing` over BatchMode — `vault` is decrypt-ready presence (entry + master.key); `vault-sealed` means the entry exists but cannot decrypt. Secrets never on argv.
 
 ## Cancel honesty
 

@@ -21,6 +21,27 @@ Tests: `test_swarm_incomplete_honesty.py`, `test_cancel_honesty.py`.
 Docs: [jobs](docs/jobs/README.md), [compute](docs/compute/README.md),
 [reactive](docs/cards/reactive.md).
 
+### Polish Wave 2 — vault probe, slash re-register, Roles/poll honesty
+
+- **Remote OpenRouter vault probe deepen**: Path A BatchMode probe reports
+  `openrouter=env|vault|vault-sealed|missing`. `vault` means entry + `master.key`
+  (decrypt-ready presence); `vault-sealed` is honest WARN/Deny (entry without
+  master — cannot decrypt). No secrets on argv / probe stdout.
+- **Slash re-register after upgrade**: docs/copy stress
+  `discord-os interactions --register` after pip upgrade so phone autocomplete
+  and new slash options land.
+- **Roles / poll honesty**: Roles stays **modal-only** (no ephemeral Roles
+  fantasy). Preference poll remains non-blocking — never a live gate replace.
+
+### HOST Update-available pill
+
+- HOST master-controller card shows **Update available · X.Y.Z** when the
+  installed `discord-os` version is behind PyPI latest. Fail soft when PyPI is
+  unreachable. No auto-upgrade. Disable with `DISCORD_OS_UPDATE_CHECK=0`.
+- Upgrade: `pip install -U discord-os` into the host venv, then bounce the
+  LaunchAgent (`discord-os host restart` / kick `com.discord-os.host`).
+
+
 ## 0.5.53
 
 Discord-half EXTRAS — forum-as-realm experiment, slash deepen, poll surfaces, voice honesty.

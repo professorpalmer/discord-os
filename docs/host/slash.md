@@ -36,7 +36,7 @@ discord-os interactions --serve
 
 **Not registered:** `/add`. Use `discord-os add …` or in-channel `bind`.
 
-After upgrading Discord OS, re-run:
+After `pip install -U discord-os` (and host bounce), re-run:
 
 ```bash
 discord-os interactions --register

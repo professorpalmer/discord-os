@@ -233,6 +233,7 @@ def _check_host_allowlist(lines: list[str]) -> int:
         SSH_COOK_UNREACHABLE,
         SSH_REMOTE_CLI_MISSING,
         SSH_REMOTE_OPENROUTER_MISSING,
+        SSH_REMOTE_OPENROUTER_VAULT_SEALED,
         probe_ssh_remote_ready,
         ssh_cook_enabled,
     )
@@ -284,6 +285,7 @@ def _check_host_allowlist(lines: list[str]) -> int:
                     if reason in {
                         SSH_REMOTE_CLI_MISSING,
                         SSH_REMOTE_OPENROUTER_MISSING,
+                        SSH_REMOTE_OPENROUTER_VAULT_SEALED,
                         SSH_COOK_UNREACHABLE,
                     }:
                         suffix = f" ({detail})" if detail else ""

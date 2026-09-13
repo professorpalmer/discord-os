@@ -71,14 +71,19 @@ SSH_COOK_CAPABLE = "cook via ssh BatchMode (remote agentic)"
 SSH_COOK_UNREACHABLE = "ssh unreachable / Deny"
 SSH_REMOTE_CLI_MISSING = "remote agentic CLI missing / Deny"
 SSH_REMOTE_OPENROUTER_MISSING = "remote OpenRouter not configured / Deny"
+SSH_REMOTE_OPENROUTER_VAULT_SEALED = (
+    "remote OpenRouter vault present but sealed (no master.key) / Deny"
+)
 SSH_PROBE_TIMEOUT_S = 5.0
 
 # Remote probe exit codes (printed status never includes secrets).
 _PROBE_EXIT_OK = 0
 _PROBE_EXIT_CLI = 11
 _PROBE_EXIT_OPENROUTER = 12
+_PROBE_EXIT_VAULT_SEALED = 13
 
-# bash -lc body: report cli + openrouter presence without echoing key material.
+# bash -lc body: report cli + openrouter presence vs decrypt-ready (no secrets).
+# openrouter=env | vault (entry+master) | vault-sealed (entry, no master) | missing.
 _REMOTE_READY_SCRIPT = r"""
 cli=missing
 or=missing
@@ -99,7 +104,12 @@ else
       *) continue ;;
     esac
     if [ -f "$v" ] && grep -q '"openrouter"' "$v" 2>/dev/null; then
-      or=vault
+      master="$(dirname "$v")/master.key"
+      if [ -f "$master" ] && [ -s "$master" ]; then
+        or=vault
+      else
+        or=vault-sealed
+      fi
       break
     fi
   done
@@ -107,6 +117,7 @@ fi
 printf 'DISCORD_OS_SSH_PROBE cli=%s openrouter=%s\n' "$cli" "$or"
 if [ "$cli" = missing ]; then exit 11; fi
 if [ "$or" = missing ]; then exit 12; fi
+if [ "$or" = vault-sealed ]; then exit 13; fi
 exit 0
 """.strip()
 
@@ -261,6 +272,18 @@ def probe_ssh_remote_ready(
             or "puppetmaster/agentic not on PATH",
             cli=cli or "missing",
             openrouter=openrouter,
+        )
+    if (
+        code == _PROBE_EXIT_VAULT_SEALED
+        or openrouter == "vault-sealed"
+    ):
+        return SshProbeResult(
+            ok=False,
+            reason=SSH_REMOTE_OPENROUTER_VAULT_SEALED,
+            detail=(stderr.strip().splitlines() or [""])[0][:160]
+            or "vault entry present; master.key missing (cannot decrypt)",
+            cli=cli,
+            openrouter=openrouter or "vault-sealed",
         )
     if code == _PROBE_EXIT_OPENROUTER or openrouter == "missing":
         return SshProbeResult(

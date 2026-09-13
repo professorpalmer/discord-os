@@ -207,7 +207,7 @@ def _more_select_options(
         {
             "label": "Post preference poll",
             "value": POLL_ID,
-            "description": "Non-blocking poll (not a live gate)",
+            "description": "Preference survey only — never a live gate",
         }
     )
     if write_gate:
@@ -435,15 +435,13 @@ def gate_menu_payload(*, write_gate: bool) -> dict[str, Any]:
 
 
 def roles_menu_payload() -> dict[str, Any]:
-    """Ephemeral Roles entry — Confirm opens the role-id modal on next tap path."""
+    """Roles is modal-only — never an ephemeral fantasy Roles UI.
 
-    return _ephemeral_operator_menu(
-        content="Add an operator role id? Confirm opens the role form.",
-        confirm_id=ROLES_OPEN_ID,
-        cancel_id=ROLES_CANCEL_ID,
-        confirm_label="Add role",
-        confirm_style=STYLE_PRIMARY,
-    )
+    Kept as an alias to ``roles_modal_payload`` for older call sites / tests.
+    Pair / Gate keep ephemeral Confirm menus; Roles does not.
+    """
+
+    return roles_modal_payload()
 
 
 def browser_remote_modal_payload() -> dict[str, Any]:
@@ -593,6 +591,13 @@ def host_panel_payload(
         last_job = _panel_last_job(store, channel_id)
         realm = _panel_realm(store, channel_id)
         bank = _panel_bank(store, channel_id)
+    update_pill = ""
+    try:
+        from agent_discord.host.update_check import update_available_pill
+
+        update_pill = update_available_pill()
+    except Exception:
+        update_pill = ""
     card = host_card(
         armed=armed,
         channel_id=channel_id,
@@ -611,6 +616,7 @@ def host_panel_payload(
         realm=realm,
         bank=bank,
         github=_panel_github(),
+        update_pill=update_pill,
     )
     # Discord-half P1: HOST Jobs chrome accent follows top Need/Live/Done bucket.
     if (
@@ -950,7 +956,7 @@ def handle_gateway_interaction(
         _ack_interaction(payload, ask_modal_payload(), opener=opener)
         return action
     if action == "roles":
-        # Feasible path: modal is the operator form (ephemeral menu Confirm → modal).
+        # Roles stays modal (snowflake id). Not an ephemeral Pair/Gate-style menu.
         _ack_interaction(payload, roles_modal_payload(), opener=opener)
         return action
     if action == "pair":
