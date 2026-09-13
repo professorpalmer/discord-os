@@ -74,8 +74,17 @@ def is_transient_discord_network_error(exc: BaseException) -> bool:
         if code == getattr(errno, "ETIME", -1):
             return True
     msg = str(exc or "").lower()
-    if "discord rest unreachable" in msg or "timed out" in msg:
-        if "http 401" in msg or "http 403" in msg or "http 4" in msg:
+    if "http 401" in msg or "http 403" in msg:
+        return False
+    # Live Mac saw ssl/urllib "The read operation timed out" outside TimeoutError.
+    if (
+        "discord rest unreachable" in msg
+        or "timed out" in msg
+        or "timeout" in msg
+        or "eaddrnotavail" in msg
+        or "can't assign requested address" in msg
+    ):
+        if "http 4" in msg and "http 408" not in msg and "http 429" not in msg:
             return False
         return True
     return False

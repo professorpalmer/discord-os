@@ -51,6 +51,12 @@ def test_transient_classifier_errno_49_and_timeout() -> None:
     assert is_transient_discord_network_error(
         ToolInvocationError("Discord REST unreachable (timeout)")
     )
+    assert is_transient_discord_network_error(
+        OSError("The read operation timed out")
+    )
+    assert "timeout" in transient_network_label(
+        OSError("The read operation timed out")
+    ) or "timed out" in str(OSError("The read operation timed out")).lower()
 
 
 def test_rest_retries_timeout_then_succeeds(monkeypatch) -> None:

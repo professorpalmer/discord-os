@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.5.58
+
+Live soak after 0.5.57: widen quiet-drain transient classifier for ssl/urllib
+"The read operation timed out" (and EADDRNOTAVAIL text) so listen does not
+spam `listen drain failed` after REST retries — still no fake READY.
+
 ## 0.5.57
 
 TIDY ALL polish (tip packs `6699544` + `d8028e6`).
