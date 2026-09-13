@@ -61,11 +61,11 @@ post thread's `applied_tags` as the job moves:
 
 | Tag name aliases (case-insensitive) | JobPool `TaskStatus` |
 |---|---|
-| queued / pending / open / new | `pending` |
-| running / working / in-progress / progress | `running` (also `progress`) |
-| done / completed / complete | `completed` |
-| failed / fail / error / need | `failed` |
-| cancelled / canceled | `cancelled` |
+| queued / pending / open / new / todo | `pending` |
+| running / working / in-progress / progress / live / active | `running` |
+| done / completed / complete / success | `completed` |
+| failed / fail / error / need / blocked | `failed` |
+| cancelled / canceled / cancel / stopped | `cancelled` |
 
 Honest limits:
 

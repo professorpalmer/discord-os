@@ -104,6 +104,8 @@ def run_doctor(
     fails += _check_host_allowlist(lines)
     _warn_voice_join(lines)
     _check_slash_self_heal(cfg, ws, lines)
+    _check_policy_locks_tip(lines)
+    _check_forum_tags_honesty(cfg, ws, lines)
 
     db = ws / "agent_discord.sqlite3" if ws.exists() else None
     if db is not None and db.is_file():
@@ -276,14 +278,14 @@ def _check_host_allowlist(lines: list[str]) -> int:
                     if ssh_gates_cross():
                         lines.append(
                             f"OK host ssh {host.id}: SSH gate bridge armed "
-                            "(DISCORD_OS_SSH_GATES=bridge — phone Allow/Deny "
+                            "(OPT-IN DISCORD_OS_SSH_GATES=bridge — phone Allow/Deny "
                             "across Path A)"
                         )
                     else:
                         lines.append(
                             f"WARN host ssh {host.id}: gates do not cross SSH yet "
                             "(write-gate holds local-only; remote writes Deny when "
-                            "write-gate on; set DISCORD_OS_SSH_GATES=bridge for "
+                            "write-gate on; OPT-IN DISCORD_OS_SSH_GATES=bridge for "
                             "live phone cards)"
                         )
                 else:
@@ -495,6 +497,86 @@ def _host_run_pids() -> list[int]:
         found.append(pid)
     return found
 
+
+
+
+def _check_policy_locks_tip(lines: list[str]) -> None:
+    """Point operators at the stamped HARD locks page (never FAIL)."""
+
+    lines.append(
+        "OK policy locks — see docs/host/policy.md "
+        "(SSH bridge OPT-IN; no forum auto-tags; Path A never silent local; "
+        "single gateway; Update=PyPI; voice local TTS/memo; spend honesty; "
+        "desk single-user OK; slash self-heal; CU/docker PARKED)"
+    )
+
+
+def _check_forum_tags_honesty(cfg: AppConfig, workspace: Path, lines: list[str]) -> None:
+    """WARN when a forum realm is bound without status tag map (manual tags only)."""
+
+    db = getattr(cfg, "database_path", None)
+    if db is None:
+        return
+    path = Path(db)
+    if not path.is_file():
+        return
+    try:
+        from agent_discord.host.realms import binding_metadata
+        from agent_discord.host.forum_realm import STATUS_TAG_IDS_KEY, TAGS_AS_TICKETS_FLAG
+        from agent_discord.persistence.sqlite import SQLiteStore
+    except Exception:
+        return
+    store = None
+    try:
+        store = SQLiteStore(path)
+        store.initialize()
+        lister = getattr(store, "list_bindings", None)
+        if not callable(lister):
+            return
+        try:
+            rows = list(lister() or [])
+        except TypeError:
+            # Some stores require workspace_id
+            rows = list(lister("default") or [])
+        except Exception:
+            rows = []
+        seen = 0
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            try:
+                meta = binding_metadata(row)
+            except Exception:
+                continue
+            if not meta.get("forum"):
+                continue
+            cid = str(row.get("channel_id") or meta.get("channel_id") or "").strip()
+            if not cid:
+                continue
+            seen += 1
+            ids = meta.get(STATUS_TAG_IDS_KEY) or {}
+            enabled = bool(meta.get(TAGS_AS_TICKETS_FLAG)) or bool(ids)
+            if enabled and isinstance(ids, dict) and ids:
+                lines.append(
+                    f"OK forum tags-as-tickets {cid}: "
+                    f"{len(ids)} status tag(s) mapped (manual guild tags only)"
+                )
+            else:
+                lines.append(
+                    f"WARN forum {cid}: forum realm without status tag map — "
+                    "add queued/running/done/failed/cancelled tags in Discord "
+                    "(Discord OS never auto-creates available_tags)"
+                )
+            if seen >= 8:
+                break
+    except Exception:
+        return
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
 
 
 def _check_slash_self_heal(cfg: AppConfig, workspace: Path, lines: list[str]) -> None:

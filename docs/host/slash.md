@@ -28,7 +28,9 @@ When `AGENT_DISCORD_INTERACTIONS` is exposed (`http` / public), the listen host
 `discord-os interactions --register`. It is **version-aware**: re-registers when
 the installed `discord-os` package version changes or the opt-in command-set
 stamp differs (new slash options / autocomplete flags). State lives in
-workspace `slash_registration.json`.
+workspace `slash_registration.json`. Optional `DISCORD_GUILD_ID` (or
+`listen --guild-id`) registers guild commands for faster Discord
+propagation; unset → application-global.
 
 **Fail soft:** missing `DISCORD_APPLICATION_ID`, bot token, or public key does
 **not** crash the host. Doctor prints WARN honesty; listen continues on the

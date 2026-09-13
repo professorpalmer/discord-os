@@ -92,3 +92,15 @@ Code: `src/agent_discord/discord/gateway_health.py` + listen digest / doctor.
 - Not Activities
 - Not Puppetmaster (cook backend) — liveness is inline
 - Dashboard stays read-only
+
+## Quiet listen drain (timeout / Errno 49)
+
+REST intake retries transient network errors (HTTP 502/503/504, `TimeoutError`,
+macOS **Errno 49** `EADDRNOTAVAIL`, connection reset / refused / unreachable).
+The listen loop **quiet-logs** those after REST retries — it does **not** invent
+Gateway **READY** and does not escalate a Need storm every poll tick. Real
+non-transient drain failures still print `listen drain failed: …`.
+
+Panel Gateway READY still requires a real Discord WS `READY` event
+(`note_ready`). `note_gateway_expected` alone is not READY.
+

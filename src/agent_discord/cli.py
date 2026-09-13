@@ -1481,7 +1481,11 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
 
     seed_spend_cap_from_env(store)
     seed_write_gate_from_env(store)
-    _maybe_self_heal_slash(config, out=out)
+    _maybe_self_heal_slash(
+        config,
+        out=out,
+        guild_id=str(getattr(args, "guild_id", None) or ""),
+    )
     resolution = resolve_compute(config)
     if args.fake:
         provider = FakeDiscordMCPProvider(persist_dir=config.workspace / "fake_discord")
@@ -1680,7 +1684,37 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                         )
                     )
                 except Exception as exc:
-                    print(f"listen drain failed: {exc}", flush=True)
+                    # Quiet transient network (timeout / Errno 49) — REST already
+                    # retried; do not spam Need or invent Gateway READY.
+                    try:
+                        from agent_discord.discord.rest import (
+                            is_transient_discord_network_error,
+                            transient_network_label,
+                        )
+                        from agent_discord.discord.errors import ToolInvocationError
+
+                        transient = is_transient_discord_network_error(exc) or (
+                            isinstance(exc, ToolInvocationError)
+                            and is_transient_discord_network_error(exc)
+                        )
+                    except Exception:
+                        transient = False
+                    if transient:
+                        try:
+                            label = transient_network_label(exc)
+                        except Exception:
+                            label = "network"
+                        # Rate-limit quiet line (once per ~30s wall).
+                        now = time.time()
+                        last = float(getattr(cmd_listen, "_quiet_drain_at", 0.0) or 0.0)
+                        if now - last >= 30.0:
+                            cmd_listen._quiet_drain_at = now  # type: ignore[attr-defined]
+                            print(
+                                f"listen drain quiet retry ({label}) — not READY",
+                                flush=True,
+                            )
+                    else:
+                        print(f"listen drain failed: {exc}", flush=True)
             while True:
                 try:
                     ask_channel, prompt, replay_of = asks.get_nowait()
@@ -2512,7 +2546,7 @@ def cmd_open(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     return 0 if result.opened else 1
 
 
-def _maybe_self_heal_slash(config, *, out=None) -> None:
+def _maybe_self_heal_slash(config, *, out=None, guild_id: str = "") -> None:
     """Version-aware slash re-register when interactions are exposed. Fail soft."""
 
     out = out or sys.stdout
@@ -2520,6 +2554,9 @@ def _maybe_self_heal_slash(config, *, out=None) -> None:
         from agent_discord.discord.interactions import maybe_self_heal_slash_registration
     except Exception:
         return
+    guild = str(guild_id or "").strip()
+    if not guild:
+        guild = str(os.environ.get("DISCORD_GUILD_ID") or "").strip()
     try:
         result = maybe_self_heal_slash_registration(
             workspace=config.workspace,
@@ -2527,6 +2564,7 @@ def _maybe_self_heal_slash(config, *, out=None) -> None:
             application_id=getattr(config, "discord_application_id", "") or "",
             public_key=getattr(config, "discord_public_key", "") or "",
             interactions=getattr(config, "interactions", "") or "",
+            guild_id=guild,
         )
     except Exception as exc:  # noqa: BLE001 — never crash listen
         print(f"WARN slash self-heal error: {exc}", file=sys.stderr, flush=True)

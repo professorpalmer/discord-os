@@ -63,12 +63,15 @@ _STATUS_NAME_ALIASES: dict[str, str] = {
     "queue": "pending",
     "open": "pending",
     "new": "pending",
+    "todo": "pending",
     "running": "running",
     "working": "running",
     "inprogress": "running",
     "in-progress": "running",
+    "in_progress": "running",
     "progress": "running",
     "live": "running",
+    "active": "running",
     "completed": "completed",
     "complete": "completed",
     "done": "completed",
@@ -77,8 +80,11 @@ _STATUS_NAME_ALIASES: dict[str, str] = {
     "fail": "failed",
     "error": "failed",
     "need": "failed",
+    "blocked": "failed",
     "cancelled": "cancelled",
     "canceled": "cancelled",
+    "cancel": "cancelled",
+    "stopped": "cancelled",
 }
 
 

@@ -83,6 +83,9 @@ def note_gateway_expected(*, now: Optional[float] = None) -> None:
 
     Cold start without this stays quiet (low FP). After expected, never-READY
     past grace → Need on phone/status.
+
+    Does **not** set connected/ready — only ``note_connected`` / ``note_ready``
+    after a real WS session. Expecting a gateway is not fake READY.
     """
 
     ts = float(now if now is not None else time.time())
@@ -90,7 +93,6 @@ def note_gateway_expected(*, now: Optional[float] = None) -> None:
         if not _state["expected"]:
             _state["expected"] = True
             _state["expected_at"] = ts
-        _state["connected"] = True
 
 
 def note_ready(*, now: Optional[float] = None) -> None:

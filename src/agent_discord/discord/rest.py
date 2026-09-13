@@ -7,6 +7,7 @@ Token is sent as Authorization and never returned.
 
 from __future__ import annotations
 
+import errno
 import json
 import time
 import uuid
@@ -30,10 +31,76 @@ VOICE_FETCH_MAX_BYTES = 25 * 1024 * 1024
 UrlOpener = Callable[..., Any]
 _TRANSIENT_HTTP = frozenset({502, 503, 504})
 _TRANSIENT_RETRY_SLEEPS = (0.25, 0.75)
+# macOS EADDRNOTAVAIL=49 ("Can't assign requested address") and cousins —
+# listen drain should retry honestly, not paint fake READY.
+_TRANSIENT_ERRNOS = frozenset(
+    {
+        errno.EADDRNOTAVAIL,  # 49 on Darwin
+        errno.ETIMEDOUT,
+        errno.ECONNRESET,
+        errno.ECONNREFUSED,
+        errno.EHOSTUNREACH,
+        errno.ENETUNREACH,
+        errno.EPIPE,
+        getattr(errno, "ECONNABORTED", 53),
+    }
+)
 
 
 def _retry_sleep(seconds: float) -> None:
     time.sleep(float(seconds))
+
+
+def is_transient_discord_network_error(exc: BaseException) -> bool:
+    """True for TimeoutError / Errno 49 / URLError wraps — honest REST retry.
+
+    Does **not** mean Gateway READY. Listen may quiet-log these without
+    escalating Need / fake liveness.
+    """
+
+    if isinstance(exc, TimeoutError):
+        return True
+    if isinstance(exc, URLError):
+        reason = getattr(exc, "reason", None)
+        if reason is not None and reason is not exc:
+            if is_transient_discord_network_error(reason):
+                return True
+        # Unclassified URLError (DNS / route flap) — still retry once/twice.
+        return True
+    if isinstance(exc, OSError):
+        code = getattr(exc, "errno", None)
+        if code in _TRANSIENT_ERRNOS:
+            return True
+        if code == getattr(errno, "ETIME", -1):
+            return True
+    msg = str(exc or "").lower()
+    if "discord rest unreachable" in msg or "timed out" in msg:
+        if "http 401" in msg or "http 403" in msg or "http 4" in msg:
+            return False
+        return True
+    return False
+
+
+def transient_network_label(exc: BaseException) -> str:
+    """Short quiet-log label (no secrets)."""
+
+    if isinstance(exc, TimeoutError):
+        return "timeout"
+    if isinstance(exc, OSError):
+        code = getattr(exc, "errno", None)
+        if code == errno.EADDRNOTAVAIL:
+            return "errno 49 EADDRNOTAVAIL"
+        if code is not None:
+            return f"errno {code}"
+    if isinstance(exc, URLError):
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, BaseException):
+            return transient_network_label(reason)
+        return "URLError"
+    text_s = str(exc or "").strip()
+    if "unreachable" in text_s.lower():
+        return "unreachable"
+    return (text_s[:60] or "network").strip()
 
 
 def call_discord_json(
@@ -899,6 +966,13 @@ def _discord_request_bytes(
             last_error = ToolInvocationError(f"Discord REST HTTP {code}")
             if code not in _TRANSIENT_HTTP:
                 raise last_error from None
-        except URLError:
-            last_error = ToolInvocationError("Discord REST unreachable")
+        except Exception as exc:
+            # TimeoutError is OSError but not URLError on 3.11+; Errno 49
+            # (EADDRNOTAVAIL) often arrives as URLError(reason=OSError(49)).
+            if not is_transient_discord_network_error(exc):
+                raise
+            label = transient_network_label(exc)
+            last_error = ToolInvocationError(
+                f"Discord REST unreachable ({label})"
+            )
     raise last_error or ToolInvocationError("Discord REST unreachable")

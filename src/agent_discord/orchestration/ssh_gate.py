@@ -8,7 +8,7 @@ Default (``DISCORD_OS_SSH_GATES`` unset):
   write/edit/shell tools (honest; never silent ungated writes).
 * When write-gate is off → SSH cook unchanged.
 
-``DISCORD_OS_SSH_GATES=bridge`` (live reverse hold):
+``DISCORD_OS_SSH_GATES=bridge`` (**OPT-IN** live reverse hold):
 * Remote inject emits ``DISCORD_OS_GATE_PENDING=`` markers, holds on a remote
   temp queue, and waits for Allow / Always / Deny results.
 * Mac Path A progress pipe mirrors pending into the local gate queue so
