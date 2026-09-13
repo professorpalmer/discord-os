@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.5.55
+
+Next-wave ship: SSH live gate bridge, forum tags-as-tickets, Path A edge races, voice DAVE fail-closed + local TTS/memo, CI drain flake (tip `9751530`).
+
 ### Voice (next-wave #4) — DAVE-honest join surface
 
 - Re-checked Discord guild voice join for the phone-remote model: lasting join
@@ -61,6 +65,13 @@ Docs: [compute](docs/compute/README.md), [ask-gate](docs/cards/ask-gate.md).
 - Default unset unchanged: write-gate on → spoken Need + remote Deny inject
   (honest gap). Docs: [ask-gate](docs/cards/ask-gate.md), host README.
 - Tests: `tests/test_remote_cook.py` bridge wrap / pending / fail-closed.
+
+### CI drain flake
+
+- Loosen JobPool drain timing assert for CI jitter:
+  `test_drain_with_pool_returns_while_jobs_run` lost a strict <hold wall
+  check by ~0.2ms on Actions 3.11. Soften to hold+0.1s and assert backends
+  have not all finished when drain returns.
 
 ## 0.5.54
 
