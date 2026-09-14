@@ -321,6 +321,55 @@ def test_gateway_lookup_failure_is_reconnectable(monkeypatch):
         raise AssertionError("expected GatewayClosed")
 
 
+def test_gateway_ack_stale_forces_reconnectable_close() -> None:
+    """Zombie WS (TCP up, no op-11 ACK) must raise GatewayClosed so panel reconnects."""
+
+    import time
+
+    from agent_discord.discord.gateway_health import reset_gateway_health_for_tests
+
+    reset_gateway_health_for_tests()
+
+    class _ZombieSocket:
+        def __init__(self) -> None:
+            self._n = 0
+            self.sent: list[dict] = []
+
+        def send_text(self, text: str) -> None:
+            self.sent.append(json.loads(text))
+
+        def recv_text(self, timeout: float = 1.0):
+            self._n += 1
+            if self._n == 1:
+                return json.dumps({"op": 10, "d": {"heartbeat_interval": 50}})
+            if self._n == 2:
+                return json.dumps({"op": 0, "t": "READY", "s": 1, "d": {}})
+            if self._n == 3:
+                # Age past ack_stale_s / ready_grace (injected below).
+                time.sleep(0.08)
+                return None
+            return None
+
+        def close(self) -> None:
+            return None
+
+    try:
+        run_discord_gateway(
+            "tok",
+            lambda event, payload: None,
+            connect=lambda url: _ZombieSocket(),
+            gateway_url="wss://example.test/?v=10&encoding=json",
+            heartbeat_scale=100.0,
+            ack_stale_s=0.05,
+            ready_grace_s=0.0,
+        )
+    except GatewayClosed as exc:
+        assert not exc.fatal
+        assert "ACK stale" in str(exc)
+    else:
+        raise AssertionError("expected GatewayClosed for ACK stale zombie WS")
+
+
 def test_ask_modal_extracts_task_text():
     payload = ask_modal_payload()
     assert payload["type"] == 9

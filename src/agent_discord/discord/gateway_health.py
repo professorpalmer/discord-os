@@ -72,10 +72,20 @@ def gateway_health_path(workspace: Path) -> Path:
 
 
 def note_connected() -> None:
+    """Mark TCP/WS up for a *new* session.
+
+    Clears prior READY/ACK so a reconnect cannot look ACK-stale between
+    connect and the next READY (zombie thrash). Doctor stays quiet via the
+    never-READY grace while ``expected`` remains set.
+    """
+
     with _lock:
         _state["connected"] = True
         _state["closed_at"] = 0.0
         _state["close_reason"] = ""
+        _state["ready"] = False
+        _state["last_ack_at"] = 0.0
+        _state["ready_at"] = 0.0
 
 
 def note_gateway_expected(*, now: Optional[float] = None) -> None:

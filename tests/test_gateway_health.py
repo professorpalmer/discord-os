@@ -8,6 +8,7 @@ from agent_discord.discord.gateway_health import (
     gateway_need_fragment,
     load_gateway_health,
     note_closed,
+    note_connected,
     note_gateway_expected,
     note_heartbeat_ack,
     note_ready,
@@ -98,3 +99,19 @@ def test_cold_start_without_expected_stays_quiet() -> None:
     health = snapshot_gateway_health(now=10_000.0, never_ready_grace_s=1.0)
     assert health.ok is True
     assert gateway_need_fragment(health) is None
+
+def test_note_connected_clears_prior_ready_session() -> None:
+    """Fresh socket must not inherit stale READY/ACK (reconnect thrash)."""
+
+    note_gateway_expected(now=1000.0)
+    note_ready(now=1000.0)
+    note_heartbeat_ack(now=1000.0)
+    stale = snapshot_gateway_health(now=1000.0 + 300.0, ack_stale_s=120.0)
+    assert stale.ok is False
+    note_connected()
+    # Prior READY cleared; expected still set — within never-READY grace → quiet.
+    health = snapshot_gateway_health(now=1000.0 + 5.0, never_ready_grace_s=90.0)
+    assert health.ready is False
+    assert health.connected is True
+    assert health.ok is True
+

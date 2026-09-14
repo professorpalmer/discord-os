@@ -60,6 +60,8 @@ def run_discord_gateway(
     on_connected: Optional[Callable[[PresenceSender], None]] = None,
     presence_status: str = "idle",
     presence_name: str = "Discord OS",
+    ack_stale_s: Optional[float] = None,
+    ready_grace_s: Optional[float] = None,
 ) -> None:
     """Identify, heartbeat, and forward DISPATCH events until stop or fatal close.
 
@@ -93,6 +95,45 @@ def run_discord_gateway(
         while not halt.is_set():
             raw = sock.recv_text(timeout=1.0)
             if raw is None:
+                # Zombie WS: TCP still up but Discord stopped ACKing. Force
+                # reconnect so the outer panel loop opens a fresh socket
+                # (REST-up ≠ receiving; On/Off buttons need ACK live).
+                try:
+                    from agent_discord.discord.gateway_health import (
+                        DEFAULT_ACK_STALE_S,
+                        DEFAULT_READY_GRACE_S,
+                        note_closed,
+                        snapshot_gateway_health,
+                    )
+
+                    health = snapshot_gateway_health(
+                        ack_stale_s=(
+                            DEFAULT_ACK_STALE_S
+                            if ack_stale_s is None
+                            else float(ack_stale_s)
+                        ),
+                        ready_grace_s=(
+                            DEFAULT_READY_GRACE_S
+                            if ready_grace_s is None
+                            else float(ready_grace_s)
+                        ),
+                    )
+                    if (
+                        health.ready
+                        and health.connected
+                        and not health.ok
+                        and "ACK stale" in (health.reason or "")
+                    ):
+                        reason = health.reason or "heartbeat ACK stale"
+                        try:
+                            note_closed(reason)
+                        except Exception:
+                            pass
+                        raise GatewayClosed(reason, fatal=False)
+                except GatewayClosed:
+                    raise
+                except Exception:
+                    pass
                 continue
             try:
                 message = json.loads(raw)
