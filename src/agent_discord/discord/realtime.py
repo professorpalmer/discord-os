@@ -125,6 +125,7 @@ def run_discord_gateway(
                         and "ACK stale" in (health.reason or "")
                     ):
                         reason = health.reason or "heartbeat ACK stale"
+                        print(f"panel gateway ACK stale — reconnecting: {reason}", flush=True)
                         try:
                             note_closed(reason)
                         except Exception:
