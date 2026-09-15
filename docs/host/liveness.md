@@ -24,6 +24,8 @@ No bot tokens, SSH targets, or credentials in posts or Need lines.
 
 Listen-loop checks are rate-limited (default 60s) and post **only on signature
 change**. Healthy first-boot stays quiet. Recovery after FAIL posts once.
+Gateway-only BAD needs two consecutive ticks before Discord hears it;
+recovery from an unposted flap stays quiet (0.5.60).
 
 ## Code
 

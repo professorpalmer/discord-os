@@ -243,13 +243,38 @@ def digest_spoken_message(digest: HostDigest) -> str:
     return redact_text_markers(_scrub_secrets(body))
 
 
+def _gateway_only_bad(digest: HostDigest) -> bool:
+    """True when the only unhealthy bit is gateway (transient flap candidate)."""
+
+    return (
+        digest.gateway == GATEWAY_BAD
+        and digest.doctor == DOCTOR_OK
+        and digest.pid != PID_DEAD
+    )
+
+
+def _prev_gateway_only_bad(previous_signature: str) -> bool:
+    prev = (previous_signature or "").strip()
+    return (
+        "gateway=BAD" in prev
+        and "doctor=FAIL" not in prev
+        and "pid=DEAD" not in prev
+    )
+
+
 def should_announce(
     digest: HostDigest,
     previous_signature: str = "",
     *,
     force: bool = False,
+    gateway_bad_streak: int = 0,
+    gateway_bad_posted: bool = False,
 ) -> bool:
-    """Post only on signature change (or force). Skip repeated OK spam."""
+    """Post only on signature change (or force). Skip repeated OK spam.
+
+    Gateway-only BAD needs a sustained streak (default 2 ticks) before Discord
+    hears about it; recovery from an unposted flap stays quiet.
+    """
 
     if force:
         return True
@@ -267,6 +292,12 @@ def should_announce(
         and "gateway=BAD" not in prev
     ):
         # Healthy → healthy (field shuffle only) — quiet.
+        return False
+    # Recovery from gateway-only BAD that never posted — quiet (transient flap).
+    if digest.ok and _prev_gateway_only_bad(prev) and not gateway_bad_posted:
+        return False
+    # First gateway-only BAD observation(s) — hold until streak sustained.
+    if _gateway_only_bad(digest) and int(gateway_bad_streak) < 2:
         return False
     return True
 
@@ -318,13 +349,22 @@ def load_liveness_state(workspace: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def save_liveness_state(workspace: Path, digest: HostDigest, *, posted: bool = False) -> None:
+def save_liveness_state(
+    workspace: Path,
+    digest: HostDigest,
+    *,
+    posted: bool = False,
+    gateway_bad_streak: int = 0,
+    gateway_bad_posted: bool = False,
+) -> None:
     ws = Path(workspace)
     ws.mkdir(parents=True, exist_ok=True)
     payload = digest.to_public_dict()
     payload["posted"] = bool(posted)
+    payload["gateway_bad_streak"] = int(gateway_bad_streak)
+    payload["gateway_bad_posted"] = bool(gateway_bad_posted)
     liveness_state_path(ws).write_text(
-        json.dumps(payload, indent=2) + "\n",
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
 
@@ -440,9 +480,32 @@ def _tick_host_liveness(
         config=config,
     )
     prev_sig = recalled_signature(store, workspace_id) or str(prior.get("signature") or "")
-    announce = should_announce(digest, prev_sig, force=force and not digest.ok)
-    # Always persist latest digest so HOST Need ranking stays current.
-    save_liveness_state(ws, digest, posted=False)
+    prior_streak = int(prior.get("gateway_bad_streak") or 0)
+    if _gateway_only_bad(digest):
+        gateway_bad_streak = prior_streak + 1
+    elif digest.gateway == GATEWAY_BAD:
+        # doctor/pid also unhappy — count as sustained immediately
+        gateway_bad_streak = max(prior_streak + 1, 2)
+    else:
+        gateway_bad_streak = 0
+    gateway_bad_posted = bool(prior.get("gateway_bad_posted"))
+    announce = should_announce(
+        digest,
+        prev_sig,
+        force=force and not digest.ok,
+        gateway_bad_streak=gateway_bad_streak,
+        gateway_bad_posted=gateway_bad_posted,
+    )
+    # Persist streak; clear posted latch only after a healthy tick so recovery
+    # announce can still see that the prior BAD was spoken.
+    persist_posted_latch = False if digest.ok else gateway_bad_posted
+    save_liveness_state(
+        ws,
+        digest,
+        posted=False,
+        gateway_bad_streak=gateway_bad_streak,
+        gateway_bad_posted=persist_posted_latch,
+    )
     remember_signature(store, workspace_id, digest.signature)
 
     if not announce:
@@ -453,7 +516,15 @@ def _tick_host_liveness(
     body = digest_spoken_message(digest)
     posted = _post_status(discord, channel_id, body)
     if posted:
-        save_liveness_state(ws, digest, posted=True)
+        if _gateway_only_bad(digest) or digest.gateway == GATEWAY_BAD:
+            gateway_bad_posted = True
+        save_liveness_state(
+            ws,
+            digest,
+            posted=True,
+            gateway_bad_streak=gateway_bad_streak,
+            gateway_bad_posted=gateway_bad_posted,
+        )
         return body
     return None
 

@@ -23,7 +23,9 @@ No bot tokens, SSH targets, workdirs, or credentials in posts.
 ## Debounce
 
 Signature over `power` / running / spend / job code:status / allowlist **ids**.
-Posts only on signature change (or force from On / `/status`). Same posture as
+Posts only on signature change (or force from On / `/status`). Terminal job
+statuses (cancelled/succeeded/completed/…) are omitted from the signature so
+settled-job churn does not spam the channel (0.5.60). Same posture as
 [liveness](liveness.md).
 
 Optional:
