@@ -238,3 +238,106 @@ def test_doctor_slash_self_heal_warns_when_pending(tmp_path: Path, monkeypatch) 
     assert any("WARN" in line and "APPLICATION_ID" in line for line in lines), lines
     assert any("slash self-heal" in line for line in lines), lines
 
+
+def test_doctor_auto_clears_dead_cli_gateway_without_fix(tmp_path: Path, monkeypatch) -> None:
+    """Liveness runs doctor with fix=False; dead cli owners must not stick FAIL."""
+
+    home = tmp_path / "home"
+    ws = home / "discord-os" / ".agent-discord"
+    ws.mkdir(parents=True)
+    py = tmp_path / "python"
+    py.write_text("x", encoding="utf-8")
+    plist = home / "Library" / "LaunchAgents" / f"{SERVICE_LABEL}.plist"
+    _write_plist(plist, workspace=ws, cwd=home / "discord-os", python=py)
+    store = SQLiteStore(ws / "agent_discord.sqlite3")
+    store.initialize()
+    conn = store._connection()
+    conn.execute(
+        "INSERT INTO gateway_owners (bot_token_fingerprint, owner_id, claimed_at) VALUES (?,?,datetime('now'))",
+        ("fp", "discord-os-cli-99999999-deadbeef"),
+    )
+    conn.commit()
+    store.close()
+    from agent_discord import config as cfgmod
+
+    token_path = ws / "bot.token"
+    monkeypatch.setattr(cfgmod, "DEFAULT_HOST_BOT_TOKEN_PATH", token_path)
+    token_path.write_text("dummy\n", encoding="utf-8")
+    code, lines = run_doctor(workspace=ws, plist_path=plist, home=home, fix=False)
+    assert any("cleared" in line.lower() and "dead cli" in line.lower() for line in lines), lines
+    assert not any(line.startswith("FAIL gateway_owners") for line in lines), lines
+    store = SQLiteStore(ws / "agent_discord.sqlite3")
+    store.initialize()
+    rows = list(store._connection().execute("SELECT * FROM gateway_owners"))
+    store.close()
+    assert rows == []
+    assert code in (0, 1)  # other checks may still fail; gateway_owners must not
+
+
+def test_doctor_preserves_live_cli_gateway_owner(tmp_path: Path, monkeypatch) -> None:
+    """Live cli owners must not be auto-cleared (policy #9 single gateway)."""
+
+    home = tmp_path / "home"
+    ws = home / "discord-os" / ".agent-discord"
+    ws.mkdir(parents=True)
+    py = tmp_path / "python"
+    py.write_text("x", encoding="utf-8")
+    plist = home / "Library" / "LaunchAgents" / f"{SERVICE_LABEL}.plist"
+    _write_plist(plist, workspace=ws, cwd=home / "discord-os", python=py)
+    live_owner = f"discord-os-cli-{os.getpid()}-livebeef"
+    store = SQLiteStore(ws / "agent_discord.sqlite3")
+    store.initialize()
+    conn = store._connection()
+    conn.execute(
+        "INSERT INTO gateway_owners (bot_token_fingerprint, owner_id, claimed_at) VALUES (?,?,datetime('now'))",
+        ("fp", live_owner),
+    )
+    conn.commit()
+    store.close()
+    from agent_discord import config as cfgmod
+
+    token_path = ws / "bot.token"
+    monkeypatch.setattr(cfgmod, "DEFAULT_HOST_BOT_TOKEN_PATH", token_path)
+    token_path.write_text("dummy\n", encoding="utf-8")
+    _code, lines = run_doctor(workspace=ws, plist_path=plist, home=home, fix=False)
+    assert any("OK gateway_owners live" in line for line in lines), lines
+    assert not any("cleared" in line.lower() for line in lines), lines
+    store = SQLiteStore(ws / "agent_discord.sqlite3")
+    store.initialize()
+    rows = list(store._connection().execute("SELECT owner_id FROM gateway_owners"))
+    store.close()
+    assert [str(r["owner_id"]) for r in rows] == [live_owner]
+
+
+def test_doctor_still_fails_non_cli_stale_without_fix(tmp_path: Path, monkeypatch) -> None:
+    """Non-cli dead owners still require --fix (do not silently wipe unknowns)."""
+
+    home = tmp_path / "home"
+    ws = home / "discord-os" / ".agent-discord"
+    ws.mkdir(parents=True)
+    py = tmp_path / "python"
+    py.write_text("x", encoding="utf-8")
+    plist = home / "Library" / "LaunchAgents" / f"{SERVICE_LABEL}.plist"
+    _write_plist(plist, workspace=ws, cwd=home / "discord-os", python=py)
+    store = SQLiteStore(ws / "agent_discord.sqlite3")
+    store.initialize()
+    conn = store._connection()
+    conn.execute(
+        "INSERT INTO gateway_owners (bot_token_fingerprint, owner_id, claimed_at) VALUES (?,?,datetime('now'))",
+        ("fp", "custom-owner-99999999"),
+    )
+    conn.commit()
+    store.close()
+    from agent_discord import config as cfgmod
+
+    token_path = ws / "bot.token"
+    monkeypatch.setattr(cfgmod, "DEFAULT_HOST_BOT_TOKEN_PATH", token_path)
+    token_path.write_text("dummy\n", encoding="utf-8")
+    code, lines = run_doctor(workspace=ws, plist_path=plist, home=home, fix=False)
+    assert code == 1
+    assert any(line.startswith("FAIL gateway_owners stale") for line in lines), lines
+    store = SQLiteStore(ws / "agent_discord.sqlite3")
+    store.initialize()
+    rows = list(store._connection().execute("SELECT owner_id FROM gateway_owners"))
+    store.close()
+    assert [str(r["owner_id"]) for r in rows] == ["custom-owner-99999999"]

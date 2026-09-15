@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.5.59
+
+Gateway ACK stale zombie reconnect (PR #47) + doctor auto-clear of dead cli
+`gateway_owners` so liveness (`fix=False`) recovers after unclean LaunchAgent
+restart without manual `--fix`. Live owners still untouched (policy #9).
+
 ## 0.5.58
 
 Live soak after 0.5.57: widen quiet-drain transient classifier for ssl/urllib
