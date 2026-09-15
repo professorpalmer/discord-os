@@ -10,6 +10,8 @@ from agent_discord.discord.facade import DiscordFacade
 from agent_discord.host.liveness import (
     DOCTOR_FAIL,
     DOCTOR_OK,
+    GATEWAY_BAD,
+    GATEWAY_OK,
     PID_DEAD,
     PID_OK,
     POWER_OFF,
@@ -77,6 +79,21 @@ def test_should_announce_debounces_ok() -> None:
     assert should_announce(fail, fail.signature) is False
     assert should_announce(ok, fail.signature) is True  # recovery
     assert should_announce(ok, ok.signature) is False
+
+
+def test_should_announce_quiets_transient_gateway_flap() -> None:
+    ok = HostDigest(power=POWER_OK, pid=PID_OK, doctor=DOCTOR_OK, gateway=GATEWAY_OK)
+    gbad = HostDigest(
+        power=POWER_OK,
+        pid=PID_OK,
+        doctor=DOCTOR_OK,
+        gateway=GATEWAY_BAD,
+        fail_summary="heartbeat ACK stale",
+    )
+    assert should_announce(gbad, ok.signature, gateway_bad_streak=1) is False
+    assert should_announce(gbad, ok.signature, gateway_bad_streak=2) is True
+    assert should_announce(ok, gbad.signature, gateway_bad_posted=False) is False
+    assert should_announce(ok, gbad.signature, gateway_bad_posted=True) is True
 
 
 def test_merge_host_need_ranks_first() -> None:

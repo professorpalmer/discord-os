@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.5.60
+
+Quiet-unless-real Discord noise: status digest signature ignores terminal jobs
+(cancelled/succeeded/completed/…); liveness holds gateway-only BAD for two ticks
+and stays quiet on recovery when the flap never posted.
+
+
 ## 0.5.59
 
 Gateway ACK stale zombie reconnect (PR #47) + doctor auto-clear of dead cli

@@ -22,6 +22,37 @@ from agent_discord.redaction import redact_text_markers
 
 PREF_SIG_KEY = "host_status_digest_sig"
 STATE_NAME = "host_status_digest.json"
+
+
+# Terminal / settled jobs churn Discord posts if included in the announce
+# signature. Keep them out of digest_signature; live/attention jobs stay.
+TERMINAL_JOB_STATUSES = frozenset(
+    {
+        "cancelled",
+        "canceled",
+        "succeeded",
+        "completed",
+        "done",
+    }
+)
+
+
+def _active_job_bits(jobs: list, *, limit: int = 8) -> list[str]:
+    """job_code:status for non-terminal jobs only (quiet-unless-real)."""
+
+    bits: list[str] = []
+    for job in jobs:
+        if not isinstance(job, Mapping):
+            continue
+        status = str(job.get("status") or "").strip().lower()
+        if status in TERMINAL_JOB_STATUSES:
+            continue
+        code = str(job.get("job_code") or "").strip() or "?"
+        st = str(job.get("status") or "").strip() or "?"
+        bits.append(f"{code}:{st}")
+        if len(bits) >= limit:
+            break
+    return bits
 MIN_CHECK_INTERVAL_S = 60.0
 ENV_STATUS_THREAD = "DISCORD_OS_STATUS_THREAD_ID"
 ENV_DIGEST_INTERVAL = "DISCORD_OS_STATUS_DIGEST_INTERVAL_S"
@@ -124,13 +155,7 @@ def digest_signature(snapshot: Mapping[str, Any]) -> str:
     except (TypeError, ValueError):
         cap_s = "none"
     halted = "1" if spend.get("halted") else "0"
-    job_bits: list[str] = []
-    for job in jobs[:8]:
-        if not isinstance(job, Mapping):
-            continue
-        code = str(job.get("job_code") or "").strip() or "?"
-        status = str(job.get("status") or "").strip() or "?"
-        job_bits.append(f"{code}:{status}")
+    job_bits = _active_job_bits(list(jobs), limit=8)
     host_ids = [
         str(item.get("id") or "").strip()
         for item in hosts
@@ -176,18 +201,7 @@ def format_status_digest(snapshot: Mapping[str, Any]) -> str:
         cap_s = "none"
     halted = " halted" if spend.get("halted") else ""
 
-    job_bits: list[str] = []
-    for job in jobs[:5]:
-        if not isinstance(job, Mapping):
-            continue
-        code = str(job.get("job_code") or "").strip()
-        status = str(job.get("status") or "").strip()
-        if code and status:
-            job_bits.append(f"{code}:{status}")
-        elif code:
-            job_bits.append(code)
-        elif status:
-            job_bits.append(status)
+    job_bits = _active_job_bits(list(jobs), limit=5)
     jobs_s = ", ".join(job_bits) if job_bits else "none"
 
     host_ids = [
