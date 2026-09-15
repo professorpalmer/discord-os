@@ -380,6 +380,17 @@ def _check_gateway(
     lines: list[str],
     channel_id: str,
 ) -> int:
+    """Gateway ownership coherence (policy #9 — single gateway forever).
+
+    Dead ``discord-os-cli-<pid>-*`` / legacy cli rows are always cleared here
+    (liveness calls doctor with ``fix=False``; unclean LaunchAgent restart
+    must not leave doctor FAIL until a manual ``--fix``). Live owners are
+    never auto-cleared; ``claim_gateway`` still refuses live steal.
+    Non-cli dead rows still FAIL unless ``fix=True``.
+    """
+
+    from agent_discord.persistence.sqlite import _cli_owner_is_dead
+
     fails = 0
     store = SQLiteStore(db)
     store.initialize()
@@ -387,11 +398,27 @@ def _check_gateway(
         conn = store._connection()
         rows = list(conn.execute("SELECT bot_token_fingerprint, owner_id, claimed_at FROM gateway_owners"))
         stale: list[tuple[str, str]] = []
+        dead_cli: list[tuple[str, str]] = []
         for row in rows:
             owner = str(row["owner_id"] or "")
+            fingerprint = str(row["bot_token_fingerprint"])
+            # Prefer the same dead-cli predicate claim_gateway uses for steal.
+            if _cli_owner_is_dead(owner):
+                dead_cli.append((fingerprint, owner))
+                continue
             pid = _owner_pid(owner)
             if pid is not None and not _pid_alive(pid):
-                stale.append((str(row["bot_token_fingerprint"]), owner))
+                stale.append((fingerprint, owner))
+        # Always clear dead cli owners — safe, covers crash/restart without --fix.
+        if dead_cli:
+            for fingerprint, owner in dead_cli:
+                conn.execute(
+                    "DELETE FROM gateway_owners WHERE bot_token_fingerprint=? AND owner_id=?",
+                    (fingerprint, owner),
+                )
+            conn.commit()
+            lines.append(f"OK cleared {len(dead_cli)} dead cli gateway owner(s)")
+            rows = [r for r in rows if (str(r["bot_token_fingerprint"]), str(r["owner_id"] or "")) not in set(dead_cli)]
         if not rows:
             lines.append("OK gateway_owners empty")
         elif not stale:

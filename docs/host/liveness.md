@@ -84,7 +84,13 @@ doctor **FAIL**. Cold start / intentional REST-only stays quiet (low FP).
 Once the panel gateway is **expected** (`note_gateway_expected` on listen
 start), never-READY past grace → spoken Need (quiet forever is a fault).
 
-Code: `src/agent_discord/discord/gateway_health.py` + listen digest / doctor.
+When READY + connected but heartbeat ACK is stale (zombie WS: TCP up, Discord
+not ACKing), `run_discord_gateway` raises reconnectable `GatewayClosed` so the
+panel loop opens a fresh socket. `note_connected` clears prior READY/ACK so
+reconnect does not thrash as ACK-stale before the next READY.
+
+Code: `src/agent_discord/discord/gateway_health.py` + `realtime.py` + listen
+digest / doctor.
 
 ## Not this
 
