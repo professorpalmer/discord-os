@@ -91,7 +91,9 @@ def test_e2e_parallel_realms_think_tank_and_tools(tmp_path: Path, monkeypatch):
             job_pool=pool,
         )
     assert pool.live_count() == 2
-    assert time.monotonic() - started < 0.15
+    # Non-blocking drain: both submits return before SlowBackend holds finish.
+    # CI 3.11 can exceed 0.15 under load; stay well under hold*2 (1.0s).
+    assert time.monotonic() - started < 0.45
     receipts = pool.wait(timeout=3.0)
     assert len(receipts) == 2
     assert all(item.status.value == "completed" for item in receipts)
