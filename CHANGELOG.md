@@ -4,6 +4,10 @@
 
 ## 0.5.67
 
+## 0.5.68
+
+- README / PyPI: all three phone screenshots (Done card first), resized for mobile (~720px wide).
+
 Wave 3 shareability polish (docs-first): overnight brief recipe (schedule +
 Catch-up honesty), versioned [recipes](docs/recipes/README.md) cadence index,
 shared-desk demo &lt;15 min (handoff + overnight brief), COMPARISON Wave 2 bump
