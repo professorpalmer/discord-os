@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.78
+
+Wave 6 P1 (board + brain lakes):
+
+- **P1a** Dual-operator steer attribution (`by:<op> · <clip>`) + one quiet conflict NOTE without claim.
+- **P1b** Quiet doctor/status: material digest (failed/error terminal exclusion; 120s default); `doctor --notify` FAIL-only (WARN with `--verbose`).
+- **P1c** Overnight brief structured pack inject (Needs/Live/parks/spend/Catch-up skipped) → one JobPool ask.
+- **P1d** Need→Done narrative ≤3 lineage beats under progress ledger (Story).
+- **P1e** ARC-lite cites (`DOS-*` / sha8 / journal) on brain show + Done.
+
+Still parked: phone companion Tailscale/ttyd/filebrowser, CU/docker, mailbox, multi-host DO, second JobPool, auto forum tags, multi-gateway, silent ssh.
+
 ## 0.5.77
 
 Wave 6 P0 (board + brain lakes):

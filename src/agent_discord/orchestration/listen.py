@@ -899,6 +899,7 @@ def _handle_live_thread_followup(
         channel_id=channel_id,
         thread_id=thread_id,
         notify_miss=False,
+        operator_id=str(message.author_id or ""),
     )
     if steered:
         if queue_id:
@@ -1198,6 +1199,7 @@ def _steer_running_job(
     channel_id: str,
     thread_id: str,
     notify_miss: bool = True,
+    operator_id: str = "",
 ) -> bool:
     """Join the live worker. Never submit a sibling job."""
 
@@ -1206,12 +1208,59 @@ def _steer_running_job(
     ok = False
     if callable(steerer) and run_id:
         try:
-            ok = bool(steerer(run_id, text))
+            ok = bool(steerer(run_id, text, operator_id=operator_id))
+        except TypeError:
+            # Older backends without operator_id kwarg.
+            try:
+                ok = bool(steerer(run_id, text))
+            except Exception:
+                ok = False
         except Exception:
             ok = False
+    if ok and run_id:
+        _maybe_post_dual_steer_note(
+            orchestrator, discord, channel_id=channel_id, thread_id=thread_id, run_id=run_id
+        )
     if not ok and notify_miss:
         _post_steer_miss(discord, channel_id, thread_id)
     return ok
+
+
+def _maybe_post_dual_steer_note(
+    orchestrator: Any,
+    discord: Any,
+    *,
+    channel_id: str,
+    thread_id: str,
+    run_id: str,
+) -> None:
+    """One quiet dual-op conflict NOTE (Wave 6 P1a). No storm."""
+
+    noter = getattr(orchestrator, "dual_steer_note_if_needed", None)
+    if not callable(noter):
+        return
+    try:
+        body = (noter(run_id) or "").strip()
+    except Exception:
+        body = ""
+    if not body:
+        return
+    try:
+        from agent_discord.orchestration.cards import note_card, send_card
+
+        send_card(
+            discord,
+            channel_id,
+            note_card(body),
+            thread_id=thread_id or None,
+        )
+    except Exception:
+        try:
+            send = getattr(discord, "send_message", None)
+            if callable(send):
+                send(channel_id, body, thread_id=thread_id or None)
+        except Exception:
+            pass
 
 def _workspace_from(orchestrator: Any) -> Optional[Path]:
     raw = getattr(orchestrator, "workspace", None)
@@ -1882,16 +1931,39 @@ def _fire_due_schedules(
                     pass
             continue
         try:
+            ask_text = prompt
+            overnight = False
+            try:
+                from agent_discord.orchestration.overnight_pack import (
+                    compose_overnight_brief_ask,
+                    is_overnight_brief_prompt,
+                )
+
+                overnight = is_overnight_brief_prompt(prompt)
+                if overnight:
+                    ask_text = compose_overnight_brief_ask(
+                        prompt,
+                        store=store,
+                        channel_id=channel_id,
+                        workspace_id=str(row.get("workspace_id") or workspace_id),
+                    )
+            except Exception:
+                ask_text = prompt
+                overnight = False
             receipts.append(
                 orchestrator.run_task(
                     TaskIntake(
-                        text=prompt,
+                        text=ask_text,
                         channel_id=channel_id,
                         workspace_id=str(row.get("workspace_id") or workspace_id),
                         guild_id=guild_id,
                         thread_id=thread_id,
                         requester_id=created_by or None,
-                        metadata={"scheduled": True, "schedule_id": schedule_id},
+                        metadata={
+                            "scheduled": True,
+                            "schedule_id": schedule_id,
+                            "overnight_brief": overnight,
+                        },
                     )
                 )
             )

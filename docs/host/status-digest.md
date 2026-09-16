@@ -10,7 +10,7 @@ allowlist ids — as a Discord post (mobile already pushes on channel posts).
 |---|---|
 | HOST **On** (panel or `/on`) | Force-post a spoken RO digest to the host channel (or status thread). |
 | `/status` / `!status` | Force-post the same digest (does **not** change power). |
-| Listen interval | Debounced on-change only (default 60s check). First baseline stays quiet. |
+| Listen interval | Debounced on-change only (default 120s check). First baseline stays quiet. |
 
 Example post:
 
@@ -24,7 +24,7 @@ No bot tokens, SSH targets, workdirs, or credentials in posts.
 
 Signature over `power` / running / spend / job code:status / allowlist **ids**.
 Posts only on signature change (or force from On / `/status`). Terminal job
-statuses (cancelled/succeeded/completed/…) are omitted from the signature so
+statuses (cancelled/succeeded/completed/failed/error/…) are omitted from the signature so
 settled-job churn does not spam the channel (0.5.60). Same posture as
 [liveness](liveness.md).
 
@@ -34,8 +34,8 @@ Optional:
 # Post into a Discord thread instead of the channel root
 DISCORD_OS_STATUS_THREAD_ID=THREAD_SNOWFLAKE
 
-# Interval between checks (seconds). Default 60.
-DISCORD_OS_STATUS_DIGEST_INTERVAL_S=60
+# Interval between checks (seconds). Default 120.
+DISCORD_OS_STATUS_DIGEST_INTERVAL_S=120
 ```
 
 ## Fail closed

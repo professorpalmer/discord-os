@@ -274,6 +274,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="On FAIL, post a thin host-status digest to the host channel (phone-visible)",
     )
     p_host_doctor.add_argument(
+        "--verbose",
+        action="store_true",
+        help="With --notify, include WARN lines (default: FAIL-only; WARN collapsed)",
+    )
+    p_host_doctor.add_argument(
         "--install-watchdog",
         action="store_true",
         help="Install listen-dead doctor --notify LaunchAgent for real (not example-only)",
@@ -2478,7 +2483,9 @@ def cmd_host_doctor(args: argparse.Namespace, *, out: TextIO | None = None) -> i
     code, lines = run_doctor(fix=bool(getattr(args, "fix", False)))
     notify_body = None
     if getattr(args, "notify", False):
-        notify_body = _doctor_notify(code, lines)
+        notify_body = _doctor_notify(
+            code, lines, verbose=bool(getattr(args, "verbose", False))
+        )
     if getattr(args, "json", False):
         payload: dict[str, Any] = {"ok": code == 0, "lines": lines}
         if notify_body is not None:
@@ -2492,15 +2499,29 @@ def cmd_host_doctor(args: argparse.Namespace, *, out: TextIO | None = None) -> i
     return code
 
 
-def _doctor_notify(code: int, lines: list[str]) -> Optional[str]:
-    """Post phone-visible FAIL digest to the host channel. Best-effort."""
+def _doctor_notify(
+    code: int, lines: list[str], *, verbose: bool = False
+) -> Optional[str]:
+    """Post phone-visible FAIL digest to the host channel. Best-effort.
+
+    Wave 6 P1b: FAIL-only by default; WARN collapsed unless ``verbose``.
+    """
 
     from agent_discord.config import apply_runtime_secrets, load_config
     from agent_discord.discord.facade import DiscordFacade
     from agent_discord.discord.providers import select_provider
+    from agent_discord.host.doctor import (
+        doctor_notify_should_post,
+        filter_doctor_notify_lines,
+    )
     from agent_discord.host.liveness import notify_doctor_failure
     from agent_discord.host.service import read_host_meta
     from agent_discord.persistence.sqlite import SQLiteStore
+
+    filtered = filter_doctor_notify_lines(lines, verbose=verbose)
+    if not doctor_notify_should_post(code, lines, verbose=verbose):
+        # Quiet: WARN-only or OK — never channel-post spam.
+        return None
 
     config = apply_runtime_secrets(load_config())
     meta = read_host_meta(config.workspace)
@@ -2516,7 +2537,7 @@ def _doctor_notify(code: int, lines: list[str]) -> Optional[str]:
                 workspace=config.workspace,
                 channel_id=channel_id,
                 store=store,
-                doctor_lines=lines,
+                doctor_lines=filtered,
                 doctor_code=code,
             )
         provider = select_provider(config)
@@ -2527,7 +2548,7 @@ def _doctor_notify(code: int, lines: list[str]) -> Optional[str]:
                 workspace=config.workspace,
                 channel_id=channel_id,
                 store=store,
-                doctor_lines=lines,
+                doctor_lines=filtered,
                 doctor_code=code,
             )
         finally:

@@ -675,3 +675,37 @@ def _warn_voice_join(lines: list[str]) -> None:
             f"close {VOICE_CLOSE_DAVE_REQUIRED}; no libdave / voice UDP; "
             "unset to silence this WARN)"
         )
+
+
+def filter_doctor_notify_lines(
+    lines: list[str],
+    *,
+    verbose: bool = False,
+) -> list[str]:
+    """``doctor --notify`` default: FAIL-only. WARN collapsed unless verbose.
+
+    Slash/voice WARN stay stderr — never channel-posted via this filter.
+    """
+
+    rows = [str(line) for line in (lines or [])]
+    fails = [line for line in rows if line.startswith("FAIL ")]
+    if verbose:
+        # Keep FAIL + WARN; drop OK noise from channel posts.
+        return [line for line in rows if line.startswith(("FAIL ", "WARN "))] or fails
+    return fails
+
+
+def doctor_notify_should_post(
+    code: int,
+    lines: list[str],
+    *,
+    verbose: bool = False,
+) -> bool:
+    """Whether --notify should post to the host channel."""
+
+    filtered = filter_doctor_notify_lines(lines, verbose=verbose)
+    if filtered:
+        return True
+    # Exit code alone without FAIL lines: still quiet unless verbose+WARN.
+    return False
+

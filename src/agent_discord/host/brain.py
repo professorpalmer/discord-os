@@ -200,6 +200,59 @@ def clip_pack_text(text: str, *, max_bytes: int = 1800) -> str:
     return trimmed.rstrip() + "..."
 
 
+
+
+def list_brain_cites(
+    binding: Mapping[str, Any] | None,
+    *,
+    store: Any = None,
+    workspace_id: str = "default",
+    channel_id: str = "",
+    dri: str = "",
+    limit: int = 6,
+) -> list[str]:
+    """Compact ARC-lite citation ids for brain show / recall pack."""
+
+    cites: list[str] = []
+    if store is not None:
+        # Recent Done job codes (DOS-*).
+        for item in list_done_summaries(store, channel_id=channel_id, limit=limit):
+            code = str(item).split(":", 1)[0].strip()
+            if code.upper().startswith("DOS-") and code not in cites:
+                cites.append(code)
+            if len(cites) >= limit:
+                return cites[:limit]
+        # Journal preference keys / ids.
+        for note in list_journal_notes(
+            store, workspace_id=workspace_id, dri=dri, limit=limit
+        ):
+            key = str(note).split(":", 1)[0].strip()
+            if key.startswith("journal"):
+                tip = key if len(key) <= 40 else key[:37] + "..."
+                if tip not in cites:
+                    cites.append(tip)
+            if len(cites) >= limit:
+                return cites[:limit]
+        # Artifact sha8 from recent jobs when available.
+        lister = getattr(store, "list_recent_jobs", None)
+        if callable(lister):
+            try:
+                rows = list(lister(channel_id or "", limit=8) or [])
+            except Exception:
+                rows = []
+            for row in rows:
+                if not isinstance(row, Mapping):
+                    continue
+                sha = str(row.get("artifact_sha") or row.get("sha256") or "").strip()
+                if len(sha) >= 8:
+                    tip = f"sha:{sha[:8]}"
+                    if tip not in cites:
+                        cites.append(tip)
+                if len(cites) >= limit:
+                    break
+    return cites[:limit]
+
+
 def build_compact_recall_pack(
     binding: Mapping[str, Any] | None,
     *,
@@ -261,6 +314,17 @@ def build_compact_recall_pack(
             lines.append("[plan-gallery]")
             for item in plans:
                 lines.append(f"- {item}")
+    # ARC-lite citations (Wave 6 P1e) — DOS-* / sha8 / journal ids; no _recall loop.
+    cites = list_brain_cites(
+        binding,
+        store=store,
+        workspace_id=workspace_id,
+        channel_id=channel_id,
+        dri=dri,
+        limit=6,
+    )
+    if cites:
+        lines.append("Cites: " + " · ".join(cites))
     lines.append(
         "Honest limit: single-host SQLite brain lake — not multi-host Durable Objects."
     )

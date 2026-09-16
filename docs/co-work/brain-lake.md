@@ -37,3 +37,9 @@ optional `[plan-gallery]` hits. Hard byte clip (~1800).
 
 Optional `--role implementer|reviewer|planner` on `add brain`. Stored as `brain_role` and injected into the compact recall pack only (MetaGPT-lite). Not a multi-agent runtime.
 
+## ARC-lite citations (Wave 6 P1e)
+
+Compact recall pack + `discord-os brain show` list **Cites:** `DOS-*` / artifact
+`sha8` / journal ids. Done cards may echo the same under **Cites**. No agent
+`_recall` tool loop — SQLite ObsStore only.
+

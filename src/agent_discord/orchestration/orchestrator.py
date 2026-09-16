@@ -343,10 +343,18 @@ def _posted_message_id(posted: Any) -> str:
 
 
 
-def _receipt_card_for_intake(receipt, intake=None, **kwargs):
+def _receipt_card_for_intake(receipt, intake=None, store=None, **kwargs):
     """Settle card with operator/lane attribution when intake is known."""
 
     from agent_discord.orchestration.handoff_envelope import envelope_from_metadata
+    from agent_discord.orchestration.lineage import (
+        format_citation_refs,
+        format_narrative_beats,
+        format_progress_ledger,
+        citation_refs,
+        narrative_beats,
+        progress_ledger_facts,
+    )
     from agent_discord.orchestration.reactive import reactive_receipt_card
 
     operator = ""
@@ -360,6 +368,25 @@ def _receipt_card_for_intake(receipt, intake=None, **kwargs):
             if meta.get("handoff_from") and meta.get("handoff_to"):
                 operator = f"{meta.get('handoff_to')} (from {meta.get('handoff_from')})"
             handoff_envelope = envelope_from_metadata(meta)
+    # Wave 6 P1d/P1e: narrative beats + ARC-lite cites under ledger.
+    if store is not None and "narrative" not in kwargs:
+        rid = str(getattr(receipt, "run_id", "") or "")
+        code = str(kwargs.get("job_code") or getattr(receipt, "job_code", "") or "")
+        try:
+            if "ledger" not in kwargs:
+                led = format_progress_ledger(progress_ledger_facts(store, rid, limit=5))
+                if led:
+                    kwargs["ledger"] = led
+            story = format_narrative_beats(narrative_beats(store, rid, limit=3))
+            if story:
+                kwargs["narrative"] = story
+            cites = format_citation_refs(
+                citation_refs(store, rid, job_code=code, limit=5)
+            )
+            if cites:
+                kwargs["cites"] = cites
+        except Exception:
+            pass
     return reactive_receipt_card(
         receipt,
         operator=operator,
@@ -410,6 +437,10 @@ class AgentOrchestrator:
         self._steer_lock = threading.Lock()
         self._live_threads: dict[str, str] = {}
         self._steer_inbox: dict[str, list[str]] = {}
+        # Wave 6 P1a: last steer attribution + dual-op conflict window.
+        self._last_steer: dict[str, dict[str, Any]] = {}
+        self._steer_ops: dict[str, list[dict[str, Any]]] = {}
+        self._steer_conflict_noted: set[str] = set()
         # Path A Cancel must interrupt the SSH cook backend, not only local agentic.
         self._cook_backends: dict[str, Any] = {}
         self.steer_count = 0
@@ -556,7 +587,7 @@ class AgentOrchestrator:
                         send_card(
                             self.discord,
                             intake.channel_id,
-                            _receipt_card_for_intake(receipt, has_thread=False),
+                            _receipt_card_for_intake(receipt, intake=intake, store=self.store, has_thread=False),
                         )
                     except Exception:
                         try:
@@ -1016,6 +1047,11 @@ class AgentOrchestrator:
                 else:
                     think_zone = thinking_hold
                     spoken = shown
+                steer_bit = ""
+                try:
+                    steer_bit = self.last_steer_footer(run_id)
+                except Exception:
+                    steer_bit = ""
                 live.paint(
                     reactive_progress_card(
                         stage=stream_stage,
@@ -1023,6 +1059,7 @@ class AgentOrchestrator:
                         thinking=think_zone,
                         percent=last_percent,
                         run_id=run_id,
+                        steer_footer=steer_bit,
                     ),
                     stage=stream_stage,
                     keep=spoken,
@@ -1430,6 +1467,7 @@ class AgentOrchestrator:
         card = _receipt_card_for_intake(
             receipt,
             intake=intake,
+            store=self.store,
             has_thread=bool(live.thread_id or job_thread_id),
             thinking=think,
         )
@@ -1548,7 +1586,7 @@ class AgentOrchestrator:
             error=handoff_error,
         )
         if self.post_progress_to_discord and self.discord is not None:
-            live.finish(_receipt_card_for_intake(receipt, intake=intake, has_thread=bool(live.thread_id or job_thread_id)), summary=redact_text_markers(stitched))
+            live.finish(_receipt_card_for_intake(receipt, intake=intake, store=self.store, has_thread=bool(live.thread_id or job_thread_id)), summary=redact_text_markers(stitched))
         self._event(
             task_id,
             run_id,
@@ -1775,6 +1813,7 @@ class AgentOrchestrator:
                     summary=spoken,
                     error=spoken,
                 ),
+                store=self.store,
                 has_thread=bool(thread_id),
             )
             try:
@@ -1858,7 +1897,8 @@ class AgentOrchestrator:
                         summary="dismissed",
                         error="dismissed" if status == "failed" else None,
                     ),
-                    has_thread=bool(thread_id),
+                    store=self.store,
+                has_thread=bool(thread_id),
                 )
                 meta = {}
                 if callable(reader) and task_id:
@@ -2861,6 +2901,7 @@ class AgentOrchestrator:
                     summary=spoken,
                     error=spoken if failed else "",
                 ),
+                store=self.store,
                 has_thread=bool(thread_id),
             )
             try:
@@ -3410,7 +3451,7 @@ class AgentOrchestrator:
             summary=spoken,
         )
         if self.post_progress_to_discord and self.discord is not None:
-            live.finish(_receipt_card_for_intake(receipt, intake=intake, has_thread=bool(live.thread_id)), summary=spoken)
+            live.finish(_receipt_card_for_intake(receipt, intake=intake, store=self.store, has_thread=bool(live.thread_id)), summary=spoken)
         self._react_terminal(
             intake, TaskStatus.COMPLETED, thread_id=live.thread_id
         )
@@ -3593,11 +3634,23 @@ class AgentOrchestrator:
         with self._steer_lock:
             return tuple(self._live_threads.keys())
 
-    def steer(self, run_id: str, text: str) -> bool:
-        """Append user text to a running worker. No sibling job, no second card."""
+    def steer(self, run_id: str, text: str, *, operator_id: str = "") -> bool:
+        """Append user text to a running worker. No sibling job, no second card.
+
+        Wave 6 P1a: record last-steer attribution for Live footer and dual-op
+        conflict NOTE (quiet, once).
+        """
+
+        import time
+
+        from agent_discord.orchestration.steer_attrib import (
+            clip_steer_text,
+            format_steer_footer,
+        )
 
         rid = (run_id or "").strip()
         body = (text or "").strip()
+        op = (operator_id or "").strip()
         if not rid or not body:
             return False
         with self._steer_lock:
@@ -3607,8 +3660,21 @@ class AgentOrchestrator:
             return False
         if status not in (None, TaskStatus.RUNNING, TaskStatus.PROGRESS, TaskStatus.PENDING):
             return False
+        clip = clip_steer_text(body)
+        now = time.time()
         with self._steer_lock:
             self._steer_inbox.setdefault(rid, []).append(body)
+            self._last_steer[rid] = {
+                "operator_id": op,
+                "clip": clip,
+                "ts": now,
+                "footer": format_steer_footer(op, clip),
+            }
+            self._steer_ops.setdefault(rid, []).append(
+                {"operator_id": op, "ts": now, "clip": clip}
+            )
+            # Keep a short window of ops only.
+            self._steer_ops[rid] = self._steer_ops[rid][-12:]
             self.steer_count += 1
         hook = getattr(self.backend, "steer", None)
         if callable(hook):
@@ -3617,8 +3683,66 @@ class AgentOrchestrator:
             except Exception:
                 pass
         run = self.store.get_run(rid) or {}
-        self._record_lineage(str(run.get("task_id") or ""), rid, "steer", body)
+        lineage_body = f"{format_steer_footer(op, clip)} | {body}" if op else body
+        self._record_lineage(str(run.get("task_id") or ""), rid, "steer", lineage_body)
         return True
+
+    def last_steer_footer(self, run_id: str) -> str:
+        """Live card footer bit for the most recent steer (may be empty)."""
+
+        rid = (run_id or "").strip()
+        if not rid:
+            return ""
+        with self._steer_lock:
+            row = self._last_steer.get(rid) or {}
+        return str(row.get("footer") or "").strip()
+
+    def dual_steer_note_if_needed(self, run_id: str) -> str:
+        """Return one quiet conflict NOTE body, or empty if none / already noted."""
+
+        from agent_discord.orchestration.steer_attrib import (
+            claimed_owner,
+            dual_steer_conflict_note,
+            dual_steer_ops_in_window,
+            should_note_dual_steer,
+        )
+
+        rid = (run_id or "").strip()
+        if not rid:
+            return ""
+        with self._steer_lock:
+            steers = list(self._steer_ops.get(rid) or [])
+            already = rid in self._steer_conflict_noted
+        if already:
+            return ""
+        task_id = ""
+        job_code = ""
+        try:
+            run = self.store.get_run(rid) or {}
+            task_id = str(run.get("task_id") or "")
+        except Exception:
+            run = {}
+        task_row = None
+        if task_id:
+            getter = getattr(self.store, "get_task", None)
+            if callable(getter):
+                try:
+                    task_row = getter(task_id)
+                except Exception:
+                    task_row = None
+            reader = getattr(self.store, "task_job_code", None)
+            if callable(reader):
+                try:
+                    job_code = str(reader(task_id) or "")
+                except Exception:
+                    job_code = ""
+        owner = claimed_owner(task_row)
+        if not should_note_dual_steer(steers, claimed_by=owner, already_noted=already):
+            return ""
+        ops = dual_steer_ops_in_window(steers)
+        with self._steer_lock:
+            self._steer_conflict_noted.add(rid)
+        return dual_steer_conflict_note(ops, job_code=job_code)
 
     def _mark_thread_live(self, thread_id: Optional[str], run_id: str) -> None:
         tid = (thread_id or "").strip()
@@ -3639,6 +3763,9 @@ class AgentOrchestrator:
                     if value == rid:
                         self._live_threads.pop(key, None)
             self._steer_inbox.pop(rid, None)
+            self._last_steer.pop(rid, None)
+            self._steer_ops.pop(rid, None)
+            self._steer_conflict_noted.discard(rid)
         if tid:
             from agent_discord.orchestration.jobs import drop_origin_thread
 
@@ -3765,7 +3892,8 @@ class AgentOrchestrator:
                         summary=spoken or "cancelled",
                         error="cancelled",
                     ),
-                    has_thread=bool(thread_id),
+                    store=self.store,
+                has_thread=bool(thread_id),
                 )
                 dest = thread_id or channel_id
                 if card_mid and dest:

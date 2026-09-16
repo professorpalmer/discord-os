@@ -27,3 +27,7 @@ Screenshots: real drops under [../screenshots](../screenshots/) only — do not 
 - [DRI role SOP](wave5-dri-role.md) — `add brain --role implementer|reviewer|planner`
 - [Wave 6 spend meter](wave6-spend-meter.md) — HOST phone ASCII meter + Halt honesty
 - [Wave 6 board + brain demo](wave6-board-brain-demo.md) — <15m Discord-native phone loop
+
+| [wave6-dual-steer](wave6-dual-steer.md) | Dual-op steer footer + quiet conflict NOTE |
+| [wave6-overnight-pack](wave6-overnight-pack.md) | Overnight brief structured pack inject |
+
