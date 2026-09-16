@@ -24,9 +24,9 @@ The `agent-discord` command still works. Full setup, Discord verbs, and docs liv
 - [AGENTS.md](https://github.com/professorpalmer/discord-os/blob/master/AGENTS.md)
 - [Changelog](https://github.com/professorpalmer/discord-os/blob/master/CHANGELOG.md)
 
-![HOST card and a finished job thread](https://raw.githubusercontent.com/professorpalmer/discord-os/master/docs/screenshots/discord-host.png)
+![HOST More menu from phone](https://raw.githubusercontent.com/professorpalmer/discord-os/master/docs/screenshots/discord-host.png)
 
-![Parallel asks, live thinking card](https://raw.githubusercontent.com/professorpalmer/discord-os/master/docs/screenshots/discord-jobs.png)
+![Parallel asks as job threads from phone](https://raw.githubusercontent.com/professorpalmer/discord-os/master/docs/screenshots/discord-jobs.png)
 
 ## First run
 
