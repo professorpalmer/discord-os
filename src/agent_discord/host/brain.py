@@ -13,6 +13,17 @@ from typing import Any, Mapping, Optional, Sequence
 
 from agent_discord.host.realms import binding_metadata
 
+BRAIN_ROLES = frozenset({"implementer", "reviewer", "planner"})
+
+
+def normalize_brain_role(role: str) -> str:
+    """MetaGPT-lite SOP label for a DRI brain. Empty if unset/unknown."""
+
+    raw = (role or "").strip().lower()
+    if raw in BRAIN_ROLES:
+        return raw
+    return ""
+
 
 def bind_brain(
     store: Any,
@@ -23,6 +34,7 @@ def bind_brain(
     strategy_docs: str = "",
     transcripts_channel: str = "",
     journal: bool = True,
+    role: str = "",
 ) -> dict[str, Any]:
     """Mark channel binding as a DRI brain workspace."""
 
@@ -32,6 +44,10 @@ def bind_brain(
         raise ValueError("add brain needs --channel-id")
     if not dri_s:
         raise ValueError("add brain needs --dri")
+    role_s = normalize_brain_role(role)
+    if (role or "").strip() and not role_s:
+        allowed = ", ".join(sorted(BRAIN_ROLES))
+        raise ValueError(f"brain role must be one of {allowed}; got {role!r}")
     docs = (strategy_docs or "").strip()
     if docs:
         path = Path(docs).expanduser()
@@ -49,12 +65,15 @@ def bind_brain(
         "transcripts_channel": transcripts,
         "journal": bool(journal),
     }
+    if role_s:
+        updates["brain_role"] = role_s
     writer(workspace_id, cid, updates)
     return {
         "kind": "brain",
         "channel_id": cid,
         "workspace_id": workspace_id,
         "dri": dri_s,
+        "brain_role": role_s,
         "strategy_docs": docs,
         "transcripts_channel": transcripts,
         "journal": bool(journal),
@@ -68,6 +87,7 @@ def brain_from_binding(binding: Mapping[str, Any] | None) -> dict[str, Any]:
         return {}
     return {
         "dri": str(meta.get("dri") or "").strip(),
+        "brain_role": normalize_brain_role(str(meta.get("brain_role") or "")),
         "strategy_docs": str(meta.get("strategy_docs") or "").strip(),
         "transcripts_channel": str(meta.get("transcripts_channel") or "").strip(),
         "journal": bool(meta.get("journal")),
@@ -200,6 +220,9 @@ def build_compact_recall_pack(
     dri = brain.get("dri") or ""
     if dri:
         lines.append(f"DRI: {dri}")
+    role = brain.get("brain_role") or ""
+    if role:
+        lines.append(f"Role SOP: {role}")
     docs = brain.get("strategy_docs") or ""
     if docs:
         lines.append(f"Strategy docs: {docs}")

@@ -103,10 +103,16 @@ def is_idle_job(job: Mapping[str, Any]) -> bool:
     return status in {"completed", "failed", "cancelled"}
 
 
-def lane_relationships(jobs: list[Mapping[str, Any]], *, limit: int = 6) -> list[str]:
+def lane_relationships(
+    jobs: list[Mapping[str, Any]],
+    *,
+    limit: int = 6,
+    dri_by_code: Mapping[str, str] | None = None,
+) -> list[str]:
     """Technical relationship lines for swim lanes (shared ADR/PR/cwd).
 
     Soft-empty when fewer than two active jobs. Used by HOST Jobs briefing.
+    When dri_by_code maps job codes to DRI labels, lines annotate cross-DRI.
     """
 
     from agent_discord.orchestration.board_catchup import (
@@ -114,6 +120,14 @@ def lane_relationships(jobs: list[Mapping[str, Any]], *, limit: int = 6) -> list
         scan_job_conflicts,
     )
 
+    dri_map = dict(dri_by_code or {})
+    for job in jobs or []:
+        code = str(job.get("job_code") or "").strip()
+        if not code or code in dri_map:
+            continue
+        dri = str(job.get("brain_dri") or job.get("dri") or "").strip()
+        if dri:
+            dri_map[code] = dri
     hits = scan_job_conflicts(jobs)
-    return format_conflict_lines(hits, limit=limit)
+    return format_conflict_lines(hits, limit=limit, dri_by_code=dri_map)
 

@@ -1681,6 +1681,49 @@ def _panel_jobs(store: Any, channel_id: str) -> list[dict[str, Any]]:
             jobs = list(reader(channel_id, limit=5))
         except Exception:
             jobs = []
+    # Wave 5 P2c: tag home DRI + pull sibling brain-channel jobs for cross-DRI lanes.
+    try:
+        from agent_discord.host.brain import brain_from_binding
+
+        home_cid = (channel_id or "").strip()
+        home_brain: dict[str, Any] = {}
+        getter = getattr(store, "get_binding", None)
+        if callable(getter) and home_cid:
+            home_brain = brain_from_binding(getter("default", home_cid) or {})
+        if home_brain.get("dri"):
+            for item in jobs:
+                item.setdefault("brain_dri", home_brain["dri"])
+                if home_brain.get("brain_role"):
+                    item.setdefault("brain_role", home_brain["brain_role"])
+                item.setdefault("channel_id", home_cid)
+        lister = getattr(store, "list_bindings", None)
+        seen_codes = {str(j.get("job_code") or "") for j in jobs if j.get("job_code")}
+        if callable(lister) and callable(reader):
+            for binding in list(lister() or []):
+                cid = str(binding.get("channel_id") or "").strip()
+                if not cid or cid == home_cid:
+                    continue
+                brain = brain_from_binding(binding)
+                if not brain.get("dri"):
+                    continue
+                try:
+                    extra = list(reader(cid, limit=3))
+                except Exception:
+                    extra = []
+                for item in extra:
+                    code = str(item.get("job_code") or "")
+                    if code and code in seen_codes:
+                        continue
+                    tagged = dict(item)
+                    tagged["brain_dri"] = brain["dri"]
+                    if brain.get("brain_role"):
+                        tagged["brain_role"] = brain["brain_role"]
+                    tagged["channel_id"] = cid
+                    jobs.append(tagged)
+                    if code:
+                        seen_codes.add(code)
+    except Exception:
+        pass
     try:
         from pathlib import Path as _Path
 
@@ -1704,6 +1747,7 @@ def _panel_jobs(store: Any, channel_id: str) -> list[dict[str, Any]]:
         return merge_host_need_jobs(jobs, digest)
     except Exception:
         return jobs
+
 
 
 def _paint_after_ack(
