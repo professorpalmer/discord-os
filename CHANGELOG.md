@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.84
+
+Band C (Discord-native):
+
+- Optional ops alert **side-channel** via `discord-webhook` (`discord-os[webhook]`). HTTP only. Not JobPool / HOST cards.
+- Env URL(s): `DISCORD_OS_WEBHOOK_URL` (comma-separated) or `DISCORD_OS_WEBHOOK_URLS`.
+- Disable: `DISCORD_OS_WEBHOOK=0` **or** empty URL = off.
+- Events: host start / version kick (once), Job fail, Halt-style failures, rate-limit storm hook (debounced; existing 429 retry path).
+- Fail soft — webhook errors never block gateway, cards, JobPool, or the host loop.
+- Docs: `docs/co-work/band-c-webhook.md`.
+
+HARD parks unchanged. Band D (jishaku) not opened. Presence left alone.
+
 ## 0.5.83
 
 ### Band B hotfix — Rich Presence application id from config

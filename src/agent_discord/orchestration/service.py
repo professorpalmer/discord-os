@@ -207,7 +207,22 @@ def set_spend_halted(store: Any, halted: bool) -> None:
     writer = getattr(store, "set_preference", None)
     if not callable(writer):
         return
+    was = _truthy(_host_pref(store, SPEND_HALT_KEY))
     writer(HOST_PREFS_WORKSPACE, SPEND_HALT_KEY, "1" if halted else "0")
+    if halted and not was:
+        try:
+            from agent_discord.host.webhook import notify_halt
+
+            notify_halt()
+        except Exception:
+            pass
+    elif not halted:
+        try:
+            from agent_discord.host.webhook import clear_halt_alert
+
+            clear_halt_alert()
+        except Exception:
+            pass
 
 
 def toggle_spend_halted(store: Any) -> bool:

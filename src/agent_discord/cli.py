@@ -1742,6 +1742,12 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     )
     job_pool = JobPool(max_live=resolve_max_live())
     try:
+        try:
+            from agent_discord.host.webhook import notify_host_start
+
+            notify_host_start(channel_id=str(args.channel_id or ""))
+        except Exception:
+            pass
         # Local process lock. Message intake stays REST. Host run opens a
         # Discord Gateway only so On/Off buttons work (no public URL).
         if not args.fake and config.discord_bot_token:

@@ -150,10 +150,15 @@ Opt-in local spoken Done on this Mac. Discord guild voice join re-checked:
 
 Desktop Discord on this Mac can show HOST as an activity. Independent of bot gateway presence. Install `discord-os[presence]`. Default ON when `pypresence` and `DISCORD_APPLICATION_ID` are present. Set `DISCORD_OS_PRESENCE=0` to disable. Fail soft if Discord desktop is not running. See [band-b-pypresence](../co-work/band-b-pypresence.md).
 
+## Ops webhook (optional side-channel)
+
+HTTP-only alerts to a Discord webhook. **Not** JobPool / HOST cards. Install `discord-os[webhook]`. Set `DISCORD_OS_WEBHOOK_URL` (comma-separated URLs ok). `DISCORD_OS_WEBHOOK=0` **or** empty URL = off. Fires host start / version kick (once), Job fail, Halt, and a debounced rate-limit storm hook. Fail soft — never blocks gateway, cards, or JobPool. See [band-c-webhook](../co-work/band-c-webhook.md).
+
 ## Code
 
 - `src/agent_discord/host/panel.py` — HOST card, Ask channel; `refresh_host_jobs_panel` after ranking flips
 - `src/agent_discord/host/presence.py` — optional pypresence (Job title + On/Off/Halt)
+- `src/agent_discord/host/webhook.py` — optional discord-webhook ops side-channel
 - `src/agent_discord/host/power.py` — armed / pid
 - `src/agent_discord/host/runners.py` — multi-host allowlist (fail-closed)
 - `src/agent_discord/orchestration/service.py` — operators / REQUIRE_OPERATORS
