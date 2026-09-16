@@ -45,6 +45,12 @@ Discord OS keeps the supervisor thin:
 
 Use a supervisor OS when you want fleet orchestration as the core. Use Discord OS when the **phone Discord channel** is the desk and the Mac is the computer.
 
+## Wave 2 shareability (still no fleet)
+
+- **Cross-host RO** — `discord-os host hosts` (+ dashboard/digest reach bits). Allowlist fail-closed; probes never cook; `kind=ssh` unreachable is spoken honestly (no silent local fallback).
+- **Forum-tags lock** — tags-as-tickets only maps **existing** `available_tags`; `modify_channel` refuses creating guild tags. Soft-skip when status tags are missing.
+- **Mailbox** — external agent inbox stays **parked** (job threads + handoff only).
+
 ## Shareability bar (Puppetmaster-tier)
 
 Someone else can:
@@ -54,5 +60,6 @@ Someone else can:
 3. Bind realm + memory on a channel
 4. Dual-operator ask/steer without sharing the bot token casually
 5. Park gates instead of Always-allow footguns
+6. Optional: schedule an overnight brief with Catch-up honesty; handoff via JobPool-only peer
 
-See [co-work/shared-desk-demo](co-work/shared-desk-demo.md) for a &lt;10 minute recipe.
+See [co-work/shared-desk-demo](co-work/shared-desk-demo.md) for a &lt;15 minute filmable recipe (handoff + overnight brief). Playbooks index: [recipes](recipes/README.md).

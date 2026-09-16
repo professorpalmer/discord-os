@@ -4,13 +4,16 @@ Shared-desk materials for Discord OS (Puppetmaster-tier shareability).
 
 | Doc | Purpose |
 |---|---|
-| [shared-desk-demo](shared-desk-demo.md) | &lt;10 minute dual-operator recipe |
+| [shared-desk-demo](shared-desk-demo.md) | &lt;15 minute dual-operator filmable recipe |
+| [overnight-brief](overnight-brief.md) | schedule + Catch-up honesty playbook |
 | [desk-pack](desk-pack.md) | realm+memory(+wiki/github) inject story |
 | [handoff](handoff.md) | JobPool-only peer-task handoff |
-| [../COMPARISON.md](../COMPARISON.md) | Positioning vs Cowork / bridges / supervisors |
-
-Screenshots: use real drops under [../screenshots](../screenshots/) only — do not invent images.
-| [mailbox-park](mailbox-park.md) | External mailbox stays parked |
 | [schedule](schedule.md) | `--list` + next_ms / created_by |
 | [forum-lane](forum-lane.md) | Forum deepen; never auto-create tags |
-| [crhq-audit](crhq-audit.md) | Ranked lift notes from crhq.ai |
+| [cross-host-ro](cross-host-ro.md) | Allowlist RO status; no silent cook |
+| [mailbox-park](mailbox-park.md) | External mailbox stays parked |
+| [crhq-audit](crhq-audit.md) | Ranked lift notes (no CRHQ clone) |
+| [../recipes/README.md](../recipes/README.md) | Versioned recipes / skills cadence index |
+| [../COMPARISON.md](../COMPARISON.md) | Positioning vs Cowork / bridges / supervisors |
+
+Screenshots: real drops under [../screenshots](../screenshots/) only — do not invent images.

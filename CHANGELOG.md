@@ -17,6 +17,14 @@ crhq.ai ranked notes under `docs/co-work/`.
 
 ## Unreleased
 
+## 0.5.67
+
+Wave 3 shareability polish (docs-first): overnight brief recipe (schedule +
+Catch-up honesty), versioned [recipes](docs/recipes/README.md) cadence index,
+shared-desk demo &lt;15 min (handoff + overnight brief), COMPARISON Wave 2 bump
+(cross-host RO + forum-tags lock). Mailbox/CU/auto-tags stay parked.
+
+
 ## 0.5.62
 
 ## 0.5.63

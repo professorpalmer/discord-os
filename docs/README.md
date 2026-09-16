@@ -8,7 +8,9 @@ Surface README is first run plus this map. Feature pages live in their own folde
 |---|---|
 | [setup](setup/README.md) | First run, `add`, why there is no wizard |
 | [COMPARISON](COMPARISON.md) | Vs Cowork / CLI bridges / supervisor OS |
-| [co-work/shared-desk-demo](co-work/shared-desk-demo.md) | Shared desk &lt;10min recipe |
+| [co-work/shared-desk-demo](co-work/shared-desk-demo.md) | Shared desk &lt;15min filmable recipe |
+| [recipes](recipes/README.md) | Versioned playbooks / skills cadence |
+| [co-work/overnight-brief](co-work/overnight-brief.md) | Schedule + Catch-up overnight brief |
 | [host](host/README.md) | On/Off/Ask, watchdogs, status digest, TTS, REQUIRE_OPERATORS, LaunchAgent |
 | [host/policy](host/policy.md) | **HARD locks** (SSH OPT-IN, forum tags, Path A, gateway, Update, voice, spend, desk, slash, CU PARKED) |
 | [realms](realms/README.md) | Channel = checkout |
