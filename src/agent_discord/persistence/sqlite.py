@@ -220,7 +220,7 @@ CREATE TABLE IF NOT EXISTS inbound_queue (
 CREATE INDEX IF NOT EXISTS idx_inbound_queue_open ON inbound_queue(thread_id, status);
 """
 
-PREFERENCE_KINDS = frozenset({"preference", "style", "failure", "journal"})
+PREFERENCE_KINDS = frozenset({"preference", "style", "failure", "journal", "plan"})
 _PROMPT_MEMORY_PER_KIND = 8
 _PROMPT_MEMORY_VALUE_CHARS = 160
 _PROMPT_MEMORY_BLOCK_CHARS = 1500

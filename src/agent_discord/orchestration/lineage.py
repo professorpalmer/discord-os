@@ -272,3 +272,66 @@ def resolve_run_id(store: Any, token: str) -> str:
             if task:
                 return str(latest(str(task.get("task_id") or "")) or "")
     return raw
+
+
+def progress_ledger_facts(
+    store: Any,
+    run_id: str,
+    *,
+    limit: int = 5,
+) -> list[str]:
+    """≤5 lineage/event facts for Live/Done card footer (Wave 5 P1b)."""
+
+    rid = (run_id or "").strip()
+    if not rid or store is None:
+        return []
+    facts: list[str] = []
+    for node in list_nodes(store, rid):
+        step = (node.step or "").strip().lower()
+        if not step:
+            continue
+        label = step
+        if node.artifact_id:
+            label = f"{step} art={(node.artifact_id or '')[:10]}"
+        elif node.input_sha256:
+            label = f"{step} sha={(node.input_sha256 or '')[:8]}"
+        facts.append(label)
+        if len(facts) >= limit:
+            return facts[:limit]
+    lister = getattr(store, "list_events", None)
+    if callable(lister):
+        try:
+            rows = list(lister(rid) or [])
+        except Exception:
+            rows = []
+        interesting = (
+            "plan_approved",
+            "gate_allowed",
+            "gate_allow",
+            "handoff_claimed",
+            "claim",
+            "artifact",
+            "approved",
+            "parked",
+        )
+        for row in rows:
+            kind = str(row.get("kind") or "").strip().lower()
+            summary = str(row.get("summary") or "").strip()
+            key = f"{kind} {summary}".lower()
+            if not any(tok in key for tok in interesting):
+                continue
+            tip = summary or kind
+            tip = tip if len(tip) <= 48 else tip[:45] + "..."
+            label = f"{kind}:{tip}" if kind and summary else (kind or tip)
+            if label and label not in facts:
+                facts.append(label)
+            if len(facts) >= limit:
+                break
+    return facts[:limit]
+
+
+def format_progress_ledger(facts, *, limit: int = 5) -> str:
+    rows = [str(f).strip() for f in (facts or []) if str(f).strip()][:limit]
+    if not rows:
+        return ""
+    return "Ledger: " + " · ".join(rows)

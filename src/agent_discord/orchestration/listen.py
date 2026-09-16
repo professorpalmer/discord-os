@@ -34,6 +34,7 @@ from agent_discord.orchestration.service import (
     inbound_queue_enabled,
     is_spend_halted,
     operators_configured,
+    parse_claim_command,
     parse_handoff_command,
     parse_schedule_command,
     seed_spend_cap_from_env,
@@ -460,6 +461,88 @@ def drain_inbound(
                 store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
+        claimed_code = parse_claim_command(intake_text or (message.content or ""))
+        if claimed_code is not None:
+            author = str(message.author_id or "")
+            if author and not author_may_dispatch(store, author):
+                watermark = _advance_listen_watermark(
+                    store, watermark_key, created_ms, message.message_id, watermark
+                )
+                continue
+            if job_pool is None:
+                _post_host_deny(
+                    discord,
+                    channel_id,
+                    follow_thread,
+                    "Need: claim requires JobPool (live host) — refused.",
+                )
+                watermark = _advance_listen_watermark(
+                    store, watermark_key, created_ms, message.message_id, watermark
+                )
+                continue
+            row = store.get_task_by_job_code(claimed_code)
+            if row is None:
+                _post_host_deny(
+                    discord,
+                    channel_id,
+                    follow_thread,
+                    f"Need: claim {claimed_code} — unknown job_code.",
+                )
+                watermark = _advance_listen_watermark(
+                    store, watermark_key, created_ms, message.message_id, watermark
+                )
+                continue
+            import json
+            meta_raw = row.get("metadata_json") or "{}"
+            try:
+                meta = json.loads(meta_raw) if isinstance(meta_raw, str) else dict(meta_raw or {})
+            except Exception:
+                meta = {}
+            status = str(row.get("status") or "").strip().lower()
+            prior = str(meta.get("claimed_by") or "").strip()
+            live = status in {
+                "pending",
+                "queued",
+                "running",
+                "waiting",
+                "waiting_approval",
+                "parked",
+                "failed",
+            }
+            if prior and prior != author and live:
+                _post_host_deny(
+                    discord,
+                    channel_id,
+                    follow_thread,
+                    f"Need: claim already_claimed {claimed_code} by <@{prior}>.",
+                )
+                watermark = _advance_listen_watermark(
+                    store, watermark_key, created_ms, message.message_id, watermark
+                )
+                continue
+            store.merge_task_metadata(
+                str(row.get("task_id") or ""),
+                {
+                    "claimed_by": author,
+                    "lane": str(meta.get("lane") or "board"),
+                    "board_claim": True,
+                },
+            )
+            try:
+                send = getattr(discord, "send_message", None)
+                if callable(send):
+                    send(
+                        channel_id,
+                        f"Claimed {claimed_code} → <@{author}> (board lane).",
+                        thread_id=follow_thread,
+                    )
+            except Exception:
+                pass
+            watermark = _advance_listen_watermark(
+                store, watermark_key, created_ms, message.message_id, watermark
+            )
+            continue
+
         handed = parse_handoff_command(intake_text or (message.content or ""))
         if handed is not None:
             peer_id, peer_prompt = handed

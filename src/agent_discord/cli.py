@@ -450,6 +450,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_sched.add_argument("--workspace-id", default="default")
     p_sched.add_argument("prompt", nargs="*", help="Job text to dispatch when due")
 
+    p_brain = sub.add_parser("brain", help="Brain lake recall pack (read-only)")
+    brain_sub = p_brain.add_subparsers(dest="brain_command")
+    p_brain_show = brain_sub.add_parser("show", help="Print compact recall pack for a channel")
+    p_brain_show.add_argument("--channel-id", required=True)
+    p_brain_show.add_argument("--workspace-id", default="default")
+    p_brain_show.add_argument("--max-bytes", type=int, default=1800)
+
     p_dashboard = sub.add_parser(
         "dashboard",
         help="Alias for host dashboard (read-only companion web UI)",
@@ -880,6 +887,36 @@ def cmd_pair(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     finally:
         store.close()
     return 0
+
+
+def cmd_brain(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
+    out = out or sys.stdout
+    from agent_discord.host.brain import build_compact_recall_pack
+
+    config = apply_runtime_secrets(load_config())
+    store = SQLiteStore(config.database_path)
+    store.initialize()
+    try:
+        cmd = getattr(args, "brain_command", None) or "show"
+        if cmd != "show":
+            print("brain: show", file=sys.stderr)
+            return 2
+        row = store.get_binding(
+            str(getattr(args, "workspace_id", None) or "default"),
+            str(args.channel_id),
+        )
+        pack = build_compact_recall_pack(
+            row,
+            store=store,
+            workspace_id=str(getattr(args, "workspace_id", None) or "default"),
+            channel_id=str(args.channel_id),
+            max_bytes=int(getattr(args, "max_bytes", 1800) or 1800),
+        )
+        print(pack or "(no brain lake bound on this channel)", file=out)
+        return 0
+    finally:
+        store.close()
+
 
 
 def cmd_schedule(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
@@ -3052,6 +3089,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return cmd_interactions(args)
     if args.command == "pair":
         return cmd_pair(args)
+    if args.command == "brain":
+        return cmd_brain(args)
     if args.command == "schedule":
         return cmd_schedule(args)
     if args.command == "spend":
