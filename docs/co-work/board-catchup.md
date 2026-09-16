@@ -27,3 +27,8 @@ when two active jobs share an ADR/PR/checkout. Forum tags stay manual.
 
 Conflicts also group jobs sharing `realm_write_key` / `write_key` / path-like
 tokens (`src/...`). Still one Catch-up / digest briefing — no storm.
+
+## Cross-DRI lane lines (Wave 5 P2c)
+
+HOST Jobs relationship footer annotates `↔` lines with DRI labels when sibling brain-channel jobs share ADR/PR/cwd. Tag: `· cross-DRI`. Single-host SQLite only.
+

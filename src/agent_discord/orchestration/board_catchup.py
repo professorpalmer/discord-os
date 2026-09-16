@@ -226,35 +226,52 @@ def scan_job_conflicts(
     return hits
 
 
-def format_conflict_lines(hits: Sequence[ConflictHit], *, limit: int = 8) -> list[str]:
+def format_conflict_lines(
+    hits: Sequence[ConflictHit],
+    *,
+    limit: int = 8,
+    dri_by_code: Mapping[str, str] | None = None,
+) -> list[str]:
+    """Format conflict/relationship lines; annotate when DRIs differ (P2c)."""
+
+    dri_map = {str(k): str(v) for k, v in dict(dri_by_code or {}).items() if str(v).strip()}
+
+    def _label(code: str) -> str:
+        dri = dri_map.get(code, "").strip()
+        if dri:
+            return f"{code} ({dri})"
+        return code
+
     lines: list[str] = []
     for hit in list(hits)[: max(0, int(limit))]:
+        left = _label(hit.left_code)
+        right = _label(hit.right_code)
+        left_dri = dri_map.get(hit.left_code, "").strip()
+        right_dri = dri_map.get(hit.right_code, "").strip()
+        cross = bool(left_dri and right_dri and left_dri.lower() != right_dri.lower())
+        cross_tag = " · cross-DRI" if cross else ""
         if hit.kind == "adr":
             lines.append(
-                f"{hit.left_code} ↔ {hit.right_code} via {hit.shared} (ADR coordination tax)"
+                f"{left} ↔ {right} via {hit.shared} (ADR coordination tax{cross_tag})"
             )
         elif hit.kind == "pr":
             lines.append(
-                f"{hit.left_code} ↔ {hit.right_code} via {hit.shared} (PR overlap)"
+                f"{left} ↔ {right} via {hit.shared} (PR overlap{cross_tag})"
             )
         elif hit.kind == "write_key":
-            short = hit.shared if len(hit.shared) <= 60 else hit.shared[:57] + "..."
             lines.append(
-                f"{hit.left_code} ↔ {hit.right_code} share write-key {short}"
+                f"{left} ↔ {right} via write-key {hit.shared}{cross_tag}"
             )
         elif hit.kind == "path":
-            short = hit.shared if len(hit.shared) <= 60 else hit.shared[:57] + "..."
             lines.append(
-                f"{hit.left_code} ↔ {hit.right_code} share path {short}"
+                f"{left} ↔ {right} via path {hit.shared}{cross_tag}"
             )
         else:
-            short = hit.shared if len(hit.shared) <= 60 else hit.shared[:57] + "..."
             lines.append(
-                f"{hit.left_code} ↔ {hit.right_code} share checkout {short}"
+                f"{left} ↔ {right} via cwd {hit.shared}{cross_tag}"
             )
-    if len(hits) > limit:
-        lines.append(f"(+{len(hits) - limit} more)")
     return lines
+
 
 
 def format_board_catchup(

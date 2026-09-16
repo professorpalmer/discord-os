@@ -23,4 +23,5 @@ Screenshots: real drops under [../screenshots](../screenshots/) only — do not 
 | [wave5-board-brain-demo](wave5-board-brain-demo.md) | &lt;15m board + brain lakes loop |
 | [wave5-plan-gallery](wave5-plan-gallery.md) | Plan Allow → kind=plan journal |
 | [wave5-claim](wave5-claim.md) | Blackboard `claim <job_code>` |
-
+- [Handoff compensation NOTE](wave5-compensation.md) — Saga-lite parent NOTE on failed peer
+- [DRI role SOP](wave5-dri-role.md) — `add brain --role implementer|reviewer|planner`

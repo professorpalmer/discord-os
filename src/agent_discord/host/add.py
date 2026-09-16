@@ -423,6 +423,7 @@ def add_brain(
     strategy_docs: str = "",
     transcripts_channel: str = "",
     journal: bool = True,
+    role: str = "",
     workspace_id: str = "default",
     realm: str = "",
     env_file: Optional[Path] = None,
@@ -454,6 +455,7 @@ def add_brain(
         strategy_docs=strategy_docs,
         transcripts_channel=transcripts_channel,
         journal=journal,
+        role=role,
     )
     steps.append(brain)
     return {

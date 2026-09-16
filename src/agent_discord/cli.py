@@ -528,6 +528,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_add_brain.add_argument("--channel-id", required=True)
     p_add_brain.add_argument("--dri", required=True, help="DRI / operator label for this brain")
+    p_add_brain.add_argument(
+        "--role",
+        default="",
+        help="Optional SOP role: implementer | reviewer | planner",
+    )
     p_add_brain.add_argument("--strategy-docs", default="", help="Path to strategy docs dir/file")
     p_add_brain.add_argument("--transcripts-channel", default="", help="Discord channel id for meeting transcripts")
     p_add_brain.add_argument("--no-journal", action="store_true", help="Skip journal inject")
@@ -1056,6 +1061,7 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                     store,
                     channel_id=args.channel_id,
                     dri=args.dri,
+                    role=str(getattr(args, "role", "") or ""),
                     strategy_docs=getattr(args, "strategy_docs", "") or "",
                     transcripts_channel=getattr(args, "transcripts_channel", "") or "",
                     journal=not bool(getattr(args, "no_journal", False)),
@@ -1216,7 +1222,9 @@ def cmd_run(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         backend = FakePuppetmasterBackend()
     elif kind == "brain":
         print(
-            f"brain dri={payload.get('dri')} #{payload.get('channel_id')} "
+            f"brain dri={payload.get('dri')}"
+            f"{(' role=' + str(payload.get('brain_role'))) if payload.get('brain_role') else ''}"
+            f" #{payload.get('channel_id')} "
             f"(single-host lake; not multi-host DO)",
             file=out,
         )

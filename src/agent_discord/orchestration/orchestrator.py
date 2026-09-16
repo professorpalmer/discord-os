@@ -1352,6 +1352,30 @@ class AgentOrchestrator:
         )
         self._run_status[run_id] = result.status
 
+        # Wave 5 P2a: Saga-lite compensation NOTE for failed/cancelled handoff peers.
+        try:
+            from agent_discord.orchestration.handoff_compensation import (
+                maybe_post_handoff_compensation,
+            )
+
+            _job_code = ""
+            try:
+                _job_code = self.store.task_job_code(task_id)
+            except Exception:
+                _job_code = ""
+            maybe_post_handoff_compensation(
+                store=self.store,
+                discord=self.discord,
+                intake=intake,
+                task_id=task_id,
+                run_id=run_id,
+                status=result.status,
+                summary=safe_final_summary,
+                job_code=_job_code,
+            )
+        except Exception:
+            pass
+
         from agent_discord.puppetmaster.backend import is_prompt_echo
 
         if spoken and not is_prompt_echo(safe_final_summary):

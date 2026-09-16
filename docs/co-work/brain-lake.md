@@ -32,3 +32,8 @@ and external mailbox stay parked.
 `format_brain_prompt_block` / `discord-os brain show --channel-id ID` emit a
 budgeted pack: DRI, top strategy filenames, ≤5 journal notes, ≤3 Done summaries,
 optional `[plan-gallery]` hits. Hard byte clip (~1800).
+
+## DRI role SOP (Wave 5 P2b)
+
+Optional `--role implementer|reviewer|planner` on `add brain`. Stored as `brain_role` and injected into the compact recall pack only (MetaGPT-lite). Not a multi-agent runtime.
+

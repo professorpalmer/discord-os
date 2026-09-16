@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.76
+
+Wave 5 P2 stretch (board + brain lakes):
+
+- **P2a** Saga-lite compensation NOTE on failed/cancelled handoff peer (parent thread + lineage; JobPool-only).
+- **P2b** Optional `add brain --role implementer|reviewer|planner` → recall pack Role SOP.
+- **P2c** Cross-DRI `↔` lane lines on HOST Jobs when sibling brains share ADR/PR/cwd.
+
+Still parked: mailbox/IRC, multi-host DO lakes, CU/docker, phone companion, auto forum tags, second JobPool, multi-gateway, silent ssh.
+
 ## Unreleased
 
 ## 0.5.75

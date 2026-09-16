@@ -629,6 +629,12 @@ def drain_inbound(
             except Exception:
                 enriched_prompt = cleaned_prompt
             handoff_meta = envelope.as_metadata()
+            # Parent context for Saga-lite compensation NOTE on unclean peer settle.
+            if follow_thread:
+                handoff_meta["parent_thread_id"] = follow_thread
+            if message.message_id:
+                handoff_meta["parent_message_id"] = message.message_id
+            handoff_meta["parent_channel_id"] = channel_id
             handoff_intake = TaskIntake(
                 text=enriched_prompt,
                 channel_id=channel_id,
