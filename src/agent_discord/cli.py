@@ -1985,6 +1985,12 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                     clear_host_meta(config.workspace)
             discord.close()
             store.close()
+            try:
+                from agent_discord.host.presence import close_rich_presence
+
+                close_rich_presence()
+            except Exception:
+                pass
     return exit_code
 
 

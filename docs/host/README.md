@@ -146,9 +146,14 @@ Opt-in local spoken Done on this Mac. Discord guild voice join re-checked:
 | Guild speak/listen | Parked Deny — use local TTS + voice memos. |
 | Activities | Never. |
 
+## Mac Rich Presence (optional)
+
+Desktop Discord on this Mac can show HOST as an activity. Independent of bot gateway presence. Install `discord-os[presence]`. Default ON when `pypresence` and `DISCORD_APPLICATION_ID` are present. Set `DISCORD_OS_PRESENCE=0` to disable. Fail soft if Discord desktop is not running. See [band-b-pypresence](../co-work/band-b-pypresence.md).
+
 ## Code
 
 - `src/agent_discord/host/panel.py` — HOST card, Ask channel; `refresh_host_jobs_panel` after ranking flips
+- `src/agent_discord/host/presence.py` — optional pypresence (Job title + On/Off/Halt)
 - `src/agent_discord/host/power.py` — armed / pid
 - `src/agent_discord/host/runners.py` — multi-host allowlist (fail-closed)
 - `src/agent_discord/orchestration/service.py` — operators / REQUIRE_OPERATORS

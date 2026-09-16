@@ -1108,6 +1108,7 @@ def handle_gateway_interaction(
         return "denied"
     if action == "halt":
         toggle_spend_halted(store)
+        _tick_rich_presence_best_effort(store, channel_id)
     if intent is not None:
         if _channel_armed(store, channel_id):
             _dispatch_open_intent(
@@ -1241,6 +1242,7 @@ def handle_gateway_interaction(
                 pass
         if action == "on":
             _post_status_digest_on_arm(store, channel_id, token=token, opener=opener)
+        _tick_rich_presence_best_effort(store, channel_id)
     armed = _channel_armed(store, channel_id)
     if confirm_off:
         armed = True
@@ -1263,6 +1265,17 @@ def handle_gateway_interaction(
         print(f"panel paint failed: {exc}", flush=True)
     return action
 
+
+
+def _tick_rich_presence_best_effort(store: Any, channel_id: str) -> None:
+    """Mac Rich Presence after HOST On / Off / Halt. Fail soft."""
+
+    try:
+        from agent_discord.host.presence import tick_rich_presence
+
+        tick_rich_presence(store, channel_id=channel_id)
+    except Exception:
+        return
 
 
 def _post_status_digest_on_arm(
