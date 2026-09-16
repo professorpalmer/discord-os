@@ -196,19 +196,27 @@ def format_status_digest(snapshot: Mapping[str, Any]) -> str:
         # Prefer honesty: zero with no recorded provider cost → unknown.
         known = bool(spend.get("spend_usd"))
     spent = spend.get("spend_usd")
-    if not known:
-        spend_s = "unknown"
-    else:
+    spent_val = None
+    if known:
         try:
-            spend_s = f"{float(spent):.4f}"
+            spent_val = float(spent)
         except (TypeError, ValueError):
-            spend_s = "unknown"
+            known = False
+            spent_val = None
     cap = spend.get("cap_usd")
     try:
-        cap_s = f"{float(cap):.4f}" if cap is not None else "none"
+        cap_val = float(cap) if cap is not None else None
     except (TypeError, ValueError):
-        cap_s = "none"
-    halted = " halted" if spend.get("halted") else ""
+        cap_val = None
+    from agent_discord.orchestration.service import format_spend_meter
+
+    spend_strip = format_spend_meter(
+        spent_val,
+        known=bool(known),
+        cap_usd=cap_val,
+        halted=bool(spend.get("halted")),
+        width=10,
+    )
 
     job_bits = _active_job_bits(list(jobs), limit=5)
     jobs_s = ", ".join(job_bits) if job_bits else "none"
@@ -233,7 +241,7 @@ def format_status_digest(snapshot: Mapping[str, Any]) -> str:
         "Discord OS status",
         f"power {power}",
         running,
-        f"spend {spend_s}/{cap_s}{halted}",
+        f"spend {spend_strip}",
         f"jobs {jobs_s}",
         f"hosts {hosts_s}",
     ]

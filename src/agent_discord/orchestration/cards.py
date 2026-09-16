@@ -695,7 +695,7 @@ def _host_status_fields(
     github: str = "",
     spend_known: bool = True,
 ) -> tuple[tuple[str, str, bool], ...]:
-    from agent_discord.orchestration.service import format_spend, format_usd
+    from agent_discord.orchestration.service import format_spend_meter
 
     acl = "open"
     if paired:
@@ -708,14 +708,12 @@ def _host_status_fields(
         ("acl", acl, True),
         ("writes", "gate" if write_gate else "auto", True),
     ]
-    spend = format_spend(
+    spend = format_spend_meter(
         float(spend_usd) if spend_known else None,
         known=bool(spend_known),
+        cap_usd=cap_usd,
+        halted=bool(halted),
     )
-    if cap_usd is not None:
-        spend = f"{spend} / {format_usd(cap_usd)}"
-    if halted:
-        spend = f"{spend} halt"
     rows.append(("spend", spend, True))
     name = (realm or "").strip()
     if name:
