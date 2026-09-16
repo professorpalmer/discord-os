@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "discord-os"
-version = "0.5.80"
+version = "0.5.81"
 description = "Discord is the screen. This Mac is the computer: SQLite lineage, up to eight live jobs (DISCORD_OS_MAX_LIVE), OpenRouter/agentic Puppetmaster workers. Artifacts are Discord snowflakes plus sha256."
 readme = "README.pypi.md"
 license = { text = "MIT" }
@@ -24,6 +24,8 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
+kagekit = ["discord-kagekit>=0.1"]
+
 dev = ["pytest>=8.0"]
 interactions = ["PyNaCl>=1.5"]
 

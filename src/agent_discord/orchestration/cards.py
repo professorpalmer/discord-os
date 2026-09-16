@@ -124,7 +124,27 @@ class CardMessage:
         *,
         rows: Optional[list[dict[str, Any]]] = None,
     ) -> list[dict[str, Any]]:
-        """One Container: Section-by-state heading, thinking, body, file, buttons."""
+        """CV2 components. HOST uses Page-shaped layout (actions outside Container)."""
+
+        if self.kind == "HOST":
+            try:
+                from agent_discord.discord.host_page import (
+                    host_page_enabled,
+                    split_host_v2_components,
+                )
+
+                if host_page_enabled():
+                    extra = list(self.rows)
+                    extra.extend(rows or [])
+                    return split_host_v2_components(
+                        title=self.title,
+                        description=self.description or "",
+                        fields=self.fields,
+                        color=self.color,
+                        action_rows=extra,
+                    )
+            except Exception:
+                pass
 
         heading = f"### {self.title}"
         chrome = (self.chrome or "").strip()

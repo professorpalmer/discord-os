@@ -32,3 +32,4 @@ Screenshots: real drops under [../screenshots](../screenshots/) only — do not 
 | [wave6-overnight-pack](wave6-overnight-pack.md) | Overnight brief structured pack inject |
 - [Wave 7 TTFP demo](wave7-ttfp-demo.md) — cold-start stopwatch; Pair → Ask → Done
 - [Wave 7 haul](wave7-haul.md) / [audit](wave7-audit.md)
+- [Band A kagekit spike](band-a-kagekit-spike.md) — FAIL adopt; thin HOST Page fallback

@@ -1,0 +1,731 @@
+From b64e5337fb1da54739dad0406e987ca8ae8d0965 Mon Sep 17 00:00:00 2001
+From: Cary Palmer <professorpalmer9@gmail.com>
+Date: Wed, 16 Sep 2026 02:50:46 -0500
+Subject: [PATCH 1/2] Ship Discord OS 0.5.80 Wave 7 P0 TTFP + COMPARISON foils
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+HOST empty-state tip Pair → Ask → Done. TTFP demo + setup stopwatch.
+COMPARISON: BAGEN/TokenOps, AgentTrails, Harness-MU, Agent-Harness, Goose.
+---
+ CHANGELOG.md                             |   9 +
+ docs/COMPARISON.md                       |  14 ++
+ docs/co-work/README.md                   |   3 +-
+ docs/co-work/wave7-audit.md              | 216 +++++++++++++++++++++++
+ docs/co-work/wave7-haul.md               | 173 ++++++++++++++++++
+ docs/co-work/wave7-ttfp-demo.md          |  31 ++++
+ docs/recipes/README.md                   |   1 +
+ docs/setup/README.md                     |  11 ++
+ pyproject.toml                           |   2 +-
+ src/agent_discord/__init__.py            |   2 +-
+ src/agent_discord/host/panel.py          |   3 +
+ src/agent_discord/orchestration/cards.py |  31 +++-
+ tests/test_public_copy.py                |  31 ++++
+ 13 files changed, 518 insertions(+), 9 deletions(-)
+ create mode 100644 docs/co-work/wave7-audit.md
+ create mode 100644 docs/co-work/wave7-haul.md
+ create mode 100644 docs/co-work/wave7-ttfp-demo.md
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 2fcd956..2658941 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,14 @@
+ # Changelog
+ 
++## 0.5.80
++
++Wave 7 P0 (board + brain lakes):
++
++- **P0a** Cold-start TTFP demo + HOST empty-state tip (`Pair → Ask → Done`); setup stopwatch subsection.
++- **P0b** COMPARISON foils: BAGEN/TokenOps, AgentTrails, Harness-MU, Agent-Harness, Goose skills catalog.
++
++Still parked: phone companion Tailscale/ttyd/filebrowser, CU/docker, mailbox, multi-host DO, second JobPool, auto forum tags, multi-gateway, silent ssh.
++
+ ## 0.5.79
+ 
+ Wave 6 P2 stretch (board + brain lakes):
+diff --git a/docs/COMPARISON.md b/docs/COMPARISON.md
+index 0b2d001..e86ce3a 100644
+--- a/docs/COMPARISON.md
++++ b/docs/COMPARISON.md
+@@ -77,6 +77,20 @@ Use a supervisor OS when you want fleet orchestration as the core. Use Discord O
+ **Shareability bar:** filmable HOST spend glance + Wave 6 board+brain phone demo (`docs/co-work/wave6-board-brain-demo.md`) — Discord-native only, no companion terminal/files strip.
+ 
+ 
++
++## Wave 7 (TTFP + harness foils)
++
++| Foil | Discord OS stance |
++|---|---|
++| **BAGEN / TokenOps** | HOST spend meter + Halt honesty — soft-warn / Halt, not a sold spend firewall. |
++| **AgentTrails** | SQLite lineage search + Done Story/cites — not a provenance GUI product. |
++| **Harness-MU** | Pair / operator allowlist hooks — not a multi-tenant gatekeeper SaaS. |
++| **Agent-Harness** | Local desk goldens + recipes — not a hosted eval platform. |
++| **Goose skills catalog** | Markdown recipes under `docs/recipes/` discoverable in Discord tip — not a Goose YAML runtime. |
++
++**Shareability bar:** cold-start **TTFP** film (`docs/co-work/wave7-ttfp-demo.md`) + board + brain lakes + Discord phone-native honesty (no companion strip).
++
++
+ ## Shareability bar (Puppetmaster-tier)
+ 
+ Someone else can:
+diff --git a/docs/co-work/README.md b/docs/co-work/README.md
+index cb9a569..f5f998a 100644
+--- a/docs/co-work/README.md
++++ b/docs/co-work/README.md
+@@ -30,4 +30,5 @@ Screenshots: real drops under [../screenshots](../screenshots/) only — do not
+ 
+ | [wave6-dual-steer](wave6-dual-steer.md) | Dual-op steer footer + quiet conflict NOTE |
+ | [wave6-overnight-pack](wave6-overnight-pack.md) | Overnight brief structured pack inject |
+-
++- [Wave 7 TTFP demo](wave7-ttfp-demo.md) — cold-start stopwatch; Pair → Ask → Done
++- [Wave 7 haul](wave7-haul.md) / [audit](wave7-audit.md)
+diff --git a/docs/co-work/wave7-audit.md b/docs/co-work/wave7-audit.md
+new file mode 100644
+index 0000000..8524c1b
+--- /dev/null
++++ b/docs/co-work/wave7-audit.md
+@@ -0,0 +1,216 @@
++# Discord OS — Wave 7 arXiv + OSS audit (board + brain lakes)
++
++**Audience:** Cary Palmer  
++**Date:** 2026-09-16 (America/Chicago)  
++**Status:** Research audit only — **no implementation, no commit, no PyPI, no GitHub push, no Mac machineId touch.**  
++**Baseline:** tip **0.5.79** Wave 6 fully closed + EoW validated (product brief). Box tree: `/workspace/discord-os-w6p2` @ `09e37c1` / `0.5.79`. (`/workspace/discord-os-tip` still **0.5.72** — use **w6p2** as tip for Wave 7.)  
++**Brand:** **board + brain lakes** only — never Graham / Marionette-era share claims.  
++**Sister:** Puppetmaster = worker kernel. Discord = free shared board/IRC/IAM; one Mac host = computer.  
++**Phone posture:** Discord-native mobile is enough — **NO** Tailscale / ttyd / filebrowser companion strip.
++
++**HARD parks (never reverse):** CU/docker; mailbox/IRC peer plane; multi-host DO brain lakes; second JobPool; multi-gateway; auto forum tags; silent local ssh cook; phone companion terminal/files.
++
++---
++
++## Already shipped (Waves 1–6) — do NOT re-propose as P0
++
++| Band | Shipped surface |
++|---|---|
++| Waves 1–3 | Share kit, recipes index, overnight brief, screenshots, cross-host RO, forum-tags lock |
++| Wave 4 | Board catch-up ADR/PR digest; swim-lane `↔`; `add brain --dri`; meat-proxy handoff |
++| Wave 5 | Typed handoff envelope/`already_claimed`; share strip; compact recall; progress ledger; plan gallery; write-key conflicts; `claim`; compensation NOTE; DRI `--role`; cross-DRI HOST lanes |
++| Wave 6 P0 | HOST phone spend meter + Halt honesty; COMPARISON Goose/Cloud Agents/Spec Kit/Ledger + `wave6-board-brain-demo` |
++| Wave 6 P1 | Dual-steer attribution + conflict NOTE; quiet doctor/status; overnight structured pack; Need→Done Story beats; ARC-lite cites |
++| Wave 6 P2 | Recovery beat; parameterized recipe docs; Spec Kit manual tags map; ROE escalate copy; stall one-liner |
++| Validation | EoW = tip + pytest + live Discord — **mandatory after every Wave 7 ship** |
++
++---
++
++## Lens (Wave 7 — past W5–W6)
++
++Shareability + **operator delight** on tip: onboarding **TTFP**, demo **filmability**, spend **Halt UX polish**, Need board **density on phone**, gate **ROE clarity**, recipe **discoverability**, **COMPARISON freshness**, Discord-desk **eval/regression harness**, operator **Pair friction**, **lineage search**.
++
++Intentionally **not** rehashing W6: INTENT/Green SARC meter productization, dual-steer attribution, quiet doctor, overnight pack, Done Story, ARC cites, recovery beat, Spec Kit tags, ROE escalate *existence*, stall signal.
++
++---
++
++## A) Academic / arXiv findings (≥8 **new** vs Wave 5–6)
++
++Wave 5–6 already mined Magentic/LbMAS/ACP/CodeCRDT/Saga/MemGPT/MetaGPT, OrchVis, AMBIPOM, BoardroomAI, Decoupled HITL, OCL, INTENT, Green SARC, Irreversibility Budget, ParaRecover, ReflexGrad, ARC, AgentRoom, AgentBoard. Wave 7 mines **TTFP/onboarding collaboration metrics**, **budget-aware early alert (post-meter)**, **multi-user Pair governance**, **provenance search**, **terminal/ACI design for filmable desks**, **task-scoped auth**.
++
++For each: **title · id · finding · Discord OS lift (or no-lift)**. Note **overlap** when adjacent to W6.
++
++### 1. LLM-Based Human-Agent Collaboration and Interaction Systems (survey) — `2505.00753`
++- **URL:** https://arxiv.org/abs/2505.00753 · https://arxiv.org/html/2505.00753v5  
++- **Finding:** LLM-HAS survey; calls out **inadequate eval** that ignores human workload — time spent giving feedback, mental effort across **initial setup → post-execution review**. Success-rate-only benches hide coordination cost.  
++- **Lift:** Define Discord-desk **TTFP** = cold bootstrap → first Done (or first Allow→Done) under a stopwatch; add a tiny **desk scenario harness** measuring human taps + wall-clock, not just agent accuracy.  
++- **No-lift:** Full academic HAS taxonomy product.  
++- **Overlap:** Complements AgentBoard (`2401.13178`, W6 supporting) — new angle is **human-phase metrics / onboarding**, not Need→Done narrative (already shipped).
++
++### 2. Terminal Is All You Need — design properties for Human–AI–UI — `2603.10664`
++- **URL:** https://arxiv.org/abs/2603.10664 · https://arxiv.org/html/2603.10664v1  
++- **Finding:** Effective agent tools converge on three properties: representational compatibility, **transparency of actions in the medium**, low barrier for humans to enter. Terminal is exemplar; any modality (incl. Discord cards) must engineer the same.  
++- **Lift:** Demo filmability = make the **phone Discord medium** the transparent log (HOST strip + gate Allow/Deny + lineage ids visible without leaving Discord). Tighten Wave 7 demo script to camera beats that prove those three properties.  
++- **No-lift:** Companion terminal/ttyd product (**HARD park**). Reinforces Discord-native-only.
++
++### 3. BAGEN — Are LLM Agents Budget-Aware? — `2606.00198`
++- **URL:** https://arxiv.org/abs/2606.00198 · https://arxiv.org/html/2606.00198 · https://ragen-ai.github.io/bagen/  
++- **Finding:** Budget as **active control**: progressive remaining-budget intervals + **alert when completion unlikely**. Agents over-optimistic; early-stop saves 28–64% tokens on failed trajectories.  
++- **Lift:** Beyond W6 meter — **Halt UX polish**: soft-warn before cliff (e.g. ≥80% of cap), Halt spoken banner that **next JobPool admit was not run**, clear Resume/clear-Halt path on phone HOST. Honesty-only; unknown ≠ $0.  
++- **No-lift:** SFT/RL budget estimators inside Puppetmaster; fleet FinOps.  
++- **Overlap:** INTENT (`2602.11541`) + Green SARC (`2606.15954`) mined in W6 for **meter existence**; BAGEN is the **alert / soft-warn / early-stop UX** delta.
++
++### 4. Harness-MU — multi-user LLM agent harness — `2606.21856`
++- **URL:** https://arxiv.org/abs/2606.21856 · https://arxiv.org/html/2606.21856v1 · https://github.com/YuanJrShiuan/Harness-MulUser  
++- **Finding:** Multi-principal governance must be **deterministic runtime hooks** (Gatekeeper/Mediator), not prompt hope. Who is authorized / whose instructions win — infrastructure, not model.  
++- **Lift:** Operator **Pair friction**: today Pair seeds **owner** only; second operator is CLI `discord-os pair` or Roles **role** modal (snowflake). Wave 7: phone path to Pair **operator** (user snowflake) with same ephemeral Confirm chrome — still single allowlist, no multi-tenant Harness-MU clone.  
++- **No-lift:** Muses-Bench adversarial multi-tenant fabric; second gateway.
++
++### 5. PAuth — task-scoped authorization via NL slices — `2603.17170`
++- **URL:** https://arxiv.org/html/2603.17170v1 · https://arxiv.org/html/2603.17170v2  
++- **Finding:** Broad OAuth/operator grants → high residual risk + HITL fatigue; **task-scoped** signed slices cut friction while keeping consent.  
++- **Lift:** Gate **ROE clarity** polish — gate card states **who can Allow** (paired operators) + **why parked** (tool class / write / spend Halt) in one glance line; complements W6 ROE escalate copy.  
++- **No-lift:** Cryptographic task envelopes / AgenticPay.
++
++### 6. AgentTrails — trust and reuse for agentic trajectories — `2607.18816`
++- **URL:** https://arxiv.org/abs/2607.18816 · https://arxiv.org/html/2607.18816  
++- **Finding:** Chronological logs hide dataflow; convert trajectories → provenance graphs; **search/align** across runs for debug + reuse.  
++- **Lift:** `discord-os lineage` today dumps **one** run by id/job code. Wave 7: **lineage search** — keyword / `DOS-*` / sha8 / event-type filter over SQLite events+artifacts (CLI + optional HOST NOTE), reuse existing store.  
++- **No-lift:** Joined multi-run canvas GUI / AgentTrails product dependency.  
++- **Overlap:** ARC (`2607.25066`, W6) = cite stubs in cards; AgentTrails = **search/query** across the DAG.
++
++### 7. PROV-AGENT — unified provenance for agent workflows — `2508.02866`
++- **URL:** https://arxiv.org/abs/2508.02866 · https://arxiv.org/html/2508.02866v1 · Flowcept: https://github.com/ORNL/flowcept  
++- **Finding:** W3C-PROV + MCP-shaped records; queryable Q1–Q5 (decision→input lineage, prompt/response on surprise, forward impact).  
++- **Lift:** Shape lineage-search answers as short Q-style lines (`who steered`, `which gate`, `artifact sha`) — docs + CLI `--ask`-ish filters, not Flowcept dependency.  
++- **No-lift:** MCP provenance sidecar service.
++
++### 8. SearchAtlas — evidential query graphs for search agents — `2609.10901`
++- **URL:** https://arxiv.org/abs/2609.10901  
++- **Finding:** Process graphs beat raw trajectories for diagnosing **fragmented support** / unconstrained claims; process failures correlate with wrong answers.  
++- **Lift:** Weak product — COMPARISON foil: Discord OS lineage+cites ≈ process honesty without claiming search-agent graphs. Optional: Done Story already ships beats — don’t rebuild.  
++- **No-lift:** Evidential query-graph runtime.
++
++### 9. ReTree — tree-structured memory for long-horizon search — `2608.10676`
++- **URL:** https://arxiv.org/abs/2608.10676  
++- **Finding:** Bounded per-step context + source-linked evidence + revise/prune on contradiction.  
++- **Lift:** Reinforces brain-lake compact pack + cites; optional quiet contradiction NOTE already floated W6 — stay P2.  
++- **No-lift:** ReTree memory engine inside Discord OS.
++
++### 10. Supporting UX industry (non-arXiv, cited for TTFP bar)
++- **Zylos / agent onboarding first 5 minutes (2026):** activation = first successful task; guided first task > blank canvas; progressive autonomy.  
++  https://zylos.ai/research/2026-03-29-ai-agent-onboarding-ux-first-five-minutes/  
++- **Lift:** Cold-start recipe that reaches **first Done** without a 20-prompt wizard (product already refuses wizards — keep that; add timed checklist + HOST empty-state tip).
++
++**Count:** 9 primary academic + 1 UX supporting (≥8 new satisfied). Explicitly skipped INTENT/Green SARC/OCL/OrchVis/AMBIPOM/ARC rehash except where noted as overlap.
++
++---
++
++## B) Open-source / products (≥8 **new angles** vs Wave 5–6)
++
++Wave 5–6 covered OpenHands, Aider, Continue, Cline/Roo, Goose recipes (shallow→W6 docs), Magentic, AutoGen Studio, CrewAI, LangGraph, Spec Kit, Ledger, SpendGuard, Cursor Cloud Agents, Discord job-board bots. Wave 7 mines **Halt soft UX**, **skills/recipe catalogs**, **eval harnesses**, **token governance polish**, **Pair/multi-user**, **Components V2 density**.
++
++| # | Offering | URL / locus | They do well | Discord OS gap vs tip **0.5.79** | Honest single-host limit |
++|---|---|---|---|---|---|
++| 1 | **TokenOps** run-aware ledger | https://github.com/theagentplane/tokenops | In-path HALT/MUTATE; shared run ledger; dashboard film | Meter+Halt exist; missing soft-threshold warn + explicit “next step not run” Halt banner + phone Resume clarity | Honesty Halt — not TokenOps control plane |
++| 2 | **pi-usage-dashboard** | https://github.com/Jaraxxxx/pi-usage-dashboard | Live footer gauge; amber→red; `/budget` | HOST strip is filmable but no amber soft-warn tier | Keep ASCII `progress_bar`; no HTML footer companion |
++| 3 | **fork-open-agents budget issue UX** | https://github.com/dennisonbertram/fork-open-agents/issues/108 | Soft 80% warn; hard stop; “Raise budget / Continue” | Halt toggles silently; ROE escalate speaks Need but card doesn’t teach Resume | Copy patterns only |
++| 4 | **Goose skills + recursive discovery** | https://goose-docs.ai/docs/guides/context-engineering/using-skills/ · AAIF goose PRs · https://github.com/gooseworks-ai/goose-skills | Nested SKILL.md catalog; searchable install | Recipes = markdown index only; **no Discord-native discover** (`recipes` browse / HOST tip) | Docs + optional ephemeral list — **no** Goose YAML runtime |
++| 5 | **Agent-Harness** (pytest trace asserts) | https://github.com/Suirotciv/Agent-Harness | Trace assertions: tool order, approval gates, cost_under | tip has rich unit tests + `test_e2e_host` — **no** versioned desk golden scenarios / regression pack | pytest-local harness; no SaaS eval platform |
++| 6 | **EvalView / TrustBench pattern** | https://github.com/hidai25/evalview-support-automation-template · https://github.com/Umarfarook1/trustbench | Golden baselines; catch TOOLS_CHANGED / policy slice regressions | No committed Discord-desk scenario baselines (Pair→ask→gate→Done) | Local golden JSON fixtures |
++| 7 | **SupportDesk OpenEnv** | https://github.com/Mayank29903/Damnenv | Deterministic `/reset` `/step` support env | Inspires **FakeDiscord** scenario runner for desk regression | Not a Discord product |
++| 8 | **Harness-MU OSS** | https://github.com/YuanJrShiuan/Harness-MulUser | Runtime Gatekeeper for multi-user | Pair second-op friction (see academic #4) | Single-desk allowlist only |
++| 9 | **OpenClaw-style pairing docs** | e.g. pairing allowlist patterns in agent desk docs | Device/sender Pair as first-class | Dual-op demo still CLI-heavy for operator #2 | Keep REQUIRE_OPERATORS; ease phone Pair |
++| 10 | **Discord Components V2 kits** | https://docs.discord.com/developers/components/reference · SoulDevs/components-v2 · demondevx/discord-container-kit | Section/Container density; ≤40 comps; phone stacks | Jobs select labels long (`Need · DOS-… · prose`); Need chrome can feel sparse/noisy on phone | Compact label mode + denser HOST Jobs chrome — still V2, no Activities |
++| 11 | **BAGEN code/bench** | https://github.com/mll-lab-nu/BAGEN | Early-stop alert eval | Foil for Halt soft-warn acceptance tests | No BAGEN dependency |
++| 12 | **Flowcept / PROV-AGENT** | https://github.com/ORNL/flowcept | Queryable agent provenance | Lineage search gap (academic #6–7) | SQLite only |
++
++---
++
++## C) Product gaps vs tip (Wave 7 lens)
++
++| Gap | Today (0.5.79 Wave 6 close) | Wave 7 opportunity | Park |
++|---|---|---|---|
++| **Onboarding TTFP** | `setup` + Developer Portal; demos assume warm desk; no stopwatch to first Done | Cold-start checklist + HOST empty-state tip + timed `<N min` first-Done path in Wave 7 demo | 20-prompt wizard; companion onboarding app |
++| **Demo filmability** | `wave6-board-brain-demo.md` ~20 lines; spend meter glance | Camera-beat script (timestamps, what to point at: Pair, HOST meter/Halt soft-warn, gate Allow who, lineage cite, recipe tip) | Tailscale/ttyd filming companion |
++| **Halt UX polish** | Meter + `· halted` badge + ROE escalate Need; CLI `--halt`/`--resume` | Soft-warn ≥80% cap; Halt banner “next admit **not run**”; phone clear-Halt / Resume affordance visible | Fleet hard-cap / SpendGuard product |
++| **Need board density (phone)** | Jobs select `bucket · code · label` ≤80 chars; Section Need/Live/Done | Compact density: shorter select labels; denser HOST Jobs Need line (counts by bucket); optional clip prose | Second Kanban board / Activities |
++| **Gate ROE clarity** | Allow/Deny/Always + W6 ROE escalate wording | One-glance `who: operators · why: <klass|write|halt>` on gate/park card | Multi-tenant OCL |
++| **Recipe discoverability** | `docs/recipes/README.md` + parameterized.md | Discord-native `recipes` / HOST More tip listing playbook titles → jump or spoken index | Goose runtime / CRHQ skills clone |
++| **COMPARISON freshness** | Wave 6 foils (Goose/Cloud Agents/Spec Kit/Ledger) | Wave 7 rows: BAGEN/TokenOps Halt UX, AgentTrails lineage search, Harness-MU Pair, Agent-Harness desk eval, Goose **skills catalog** | Claiming fleet / CU |
++| **Desk eval harness** | Unit + e2e_host; no golden desk scenarios | `tests/desk_scenarios/` golden: Pair→ask→gate→Done; spend Halt soft-warn; already_claimed — pytest, FakeDiscord | SaaS eval platform; live Discord in CI |
++| **Operator Pair friction** | Pair = seed owner; op #2 = CLI `pair` or Roles **role** snowflake | Ephemeral **Pair operator** (user id) Confirm path on HOST | Multi-gateway ACL; hostile multi-tenant |
++| **Lineage search** | `discord-os lineage [run\|DOS-*]` dump | `--search` / keyword over events+artifacts+cites; print ≤N hits with job codes | AgentTrails GUI; multi-host PROV fabric |
++
++---
++
++## Findings matrix (concept → today → Wave 7 → park)
++
++| Concept | Today (≤0.5.79) | Wave 7 candidate | Park / why |
++|---|---|---|---|
++| TTFP / cold start | Setup docs; warm demos | Timed first-Done checklist + empty-state | Wizard / companion app |
++| Filmable demo | W6 short loop | Camera-beat Wave 7 demo + COMPARISON | ttyd companion film |
++| Budget alert UX | Meter + Halt badge | Soft-warn + next-step-not-run + Resume | Fleet FinOps |
++| Phone Need density | Long select labels | Compact Jobs chrome | Second board |
++| Gate ROE glance | Escalate copy | who/why one-liner | OCL fleet |
++| Recipe findability | Markdown index | Discord browse tip | Goose YAML engine |
++| Desk regression | Unit/e2e | Golden scenario harness | Cloud eval SaaS |
++| Pair #2 | CLI / Roles role | Phone Pair operator | Multi-tenant harness |
++| Lineage query | Dump one run | Search across DAG | PROV GUI fabric |
++
++---
++
++## Parked vs ship (explicit)
++
++### Ship-shaped (single-host depth)
++- Cold-start **TTFP** checklist + HOST empty-state + Wave 7 filmable demo
++- Halt **soft-warn** + next-admit-not-run + Resume clarity (reuse meter/Halt)
++- Need/Jobs **compact density** on phone (V2 labels/counts)
++- Gate card **who/why** ROE glance line
++- Discord-native **recipe index** tip (docs compose)
++- Wave 7 **COMPARISON** foils (BAGEN/TokenOps, AgentTrails, Harness-MU, Agent-Harness, Goose skills)
++- **Desk scenario** pytest harness (FakeDiscord goldens)
++- Phone **Pair operator** friction cut
++- **Lineage search** CLI (+ optional NOTE)
++
++### Parked (HARD / overclaim)
++- CU / docker / Magentic ComputerTerminal  
++- Mailbox / IRC always-on peer plane  
++- Multi-host DO brain lakes  
++- Second JobPool / multi-gateway  
++- Auto-create forum `available_tags`  
++- Silent local ssh cook for `kind=ssh`  
++- **Phone companion terminal / files** (Tailscale, ttyd, filebrowser)  
++- CRDT multi-writer same cwd  
++- Spend hard-cap **fleet** / SpendGuard / TokenOps control-plane clone  
++- Goose YAML recipe runtime  
++- AgentTrails / Flowcept product dependency  
++
++---
++
++## Sources index (top links)
++
++1. https://arxiv.org/abs/2505.00753 — LLM-HAS survey (human-phase / TTFP metrics)  
++2. https://arxiv.org/abs/2603.10664 — Terminal Is All You Need (medium transparency)  
++3. https://arxiv.org/abs/2606.00198 — BAGEN budget-aware agents  
++4. https://arxiv.org/abs/2606.21856 — Harness-MU multi-user harness  
++5. https://arxiv.org/html/2603.17170v1 — PAuth task-scoped authorization  
++6. https://arxiv.org/abs/2607.18816 — AgentTrails provenance / reuse  
++7. https://arxiv.org/abs/2508.02866 — PROV-AGENT  
++8. https://arxiv.org/abs/2609.10901 — SearchAtlas  
++9. https://github.com/theagentplane/tokenops — TokenOps Halt/ledger  
++10. https://github.com/Suirotciv/Agent-Harness — pytest agent harness  
++11. https://goose-docs.ai/docs/guides/context-engineering/using-skills/ — Goose skills discoverability  
++12. https://docs.discord.com/developers/components/reference — Components V2 density  
++
++**Overlap callouts:** INTENT + Green SARC + Ledger (W6) → meter shipped; BAGEN/TokenOps/pi-dashboard → **Halt soft UX**. ARC cites (W6) → AgentTrails/PROV-AGENT → **search**. OCL escalate copy (W6) → PAuth → **who/why glance**.
++
++---
++
++## Method notes / blockers
++
++- Tip for this audit: `/workspace/discord-os-w6p2` **0.5.79** (`09e37c1`). `/workspace/discord-os-tip` lagging at **0.5.72** — sync/ignore for Wave 7 implement.  
++- Did **not** clone new GitHub repos; OSS from public docs/search.  
++- No Mac / machineId / PyPI / push performed.  
++- **EoW validation (tip + pytest + live Discord) is mandatory after every Wave 7 ship band** — do not skip.
++
+diff --git a/docs/co-work/wave7-haul.md b/docs/co-work/wave7-haul.md
+new file mode 100644
+index 0000000..b670dd8
+--- /dev/null
++++ b/docs/co-work/wave7-haul.md
+@@ -0,0 +1,173 @@
++# Discord OS — Wave 7 ranked implement haul (board + brain lakes)
++
++**Audience:** Cary Palmer — approve without a meeting  
++**Date:** 2026-09-16 (America/Chicago)  
++**Baseline:** tip **0.5.79** Wave 6 fully closed + EoW validated (`discord-os-w6p2` @ `09e37c1`)  
++**Companion audit:** `/workspace/discord-os-wave7-audit.md`  
++**Brand:** **board + brain lakes** — never Graham  
++**Phone:** Discord-native only — **NO** Tailscale / ttyd / filebrowser companion strip  
++**Policy:** HARD locks unchanged (CU/docker, mailbox/IRC, multi-host DO lakes, second JobPool, multi-gateway, auto tags, silent ssh cook, phone companion terminal/files — **parked**)
++
++**EoW validation (mandatory after ship):** tip version bump green + `pytest` green + **live Discord** poke (Pair / ask / gate or Halt path as touched). Do not call a band closed without all three.
++
++---
++
++## Gap TLDR
++
++| Thread / need | Today (≤0.5.79 Wave 6) | Wave 7 close | Honest limit |
++|---|---|---|---|
++| Cold-start TTFP | Setup + Portal dance; demos assume warm desk | Timed first-Done checklist + HOST empty-state tip + Wave 7 filmable demo | No wizard; Discord-native only |
++| Halt delight | Meter + `halted` badge + ROE Need | Soft-warn ≥80% + “next admit **not run**” + Resume clarity | Honesty meter — not fleet firewall |
++| Need density (phone) | Long Jobs select labels; thin Need counts | Compact Jobs chrome + bucket counts | Still one HOST Jobs select — not second board |
++| Gate ROE glance | Escalate copy on Halt/Deny | `who` / `why` one-liner on park card | Wording — not OCL fleet |
++| Recipe find | Markdown `docs/recipes/` index | Discord-native recipes tip / spoken index | No Goose YAML runtime |
++| COMPARISON | W6 Goose/Cloud/Spec/Ledger | W7 BAGEN/TokenOps, AgentTrails, Harness-MU, Agent-Harness, Goose skills | Single-Mac desk |
++| Desk regression | Unit + e2e_host | Golden desk scenarios (FakeDiscord) | Local pytest — no SaaS eval |
++| Pair #2 friction | Pair=owner; op via CLI/Roles role | Phone **Pair operator** Confirm | Single allowlist |
++| Lineage find | Dump one run | `--search` across events/artifacts/DOS-*/sha | SQLite — not AgentTrails GUI |
++
++**Do not re-propose as P0:** spend meter existence, dual-steer attribution, quiet doctor, overnight pack, Done Story, ARC cites, recovery beat, parameterized recipe *docs*, Spec Kit manual tags, ROE escalate *existence*, stall signal, handoff envelope, claim, plan gallery, progress ledger, compensation NOTE, DRI role, cross-DRI lanes.
++
++---
++
++## Ranking rules applied
++
++- Prefer **shareable** README/COMPARISON demos (Puppetmaster-grade).  
++- Prefer **reuse** JobPool, HOST, spend meter/Halt, gates, lineage, recipes docs, FakeDiscord — no new planes.  
++- Cap **P0 to one PR band**.  
++- Prefer single-host depth over fleet fantasy.  
++- Explicit HARD parks.  
++- **EoW (tip+pytest+live Discord) mandatory** after ship.
++
++---
++
++## P0 — one PR band (approve → ship)
++
++### P0a — Cold-start TTFP + Wave 7 filmable demo *(shareability)*
++
++**Why:** LLM-HAS survey + Terminal-Is-All-You-Need + onboarding UX bar all say the aha is **first successful task in the medium**, not “bot is installed.” Tip demos assume a warm desk; Wave 7 makes cold→first-Done **filmable under a stopwatch** without a wizard.
++
++**Acceptance criteria**
++1. `docs/co-work/wave7-ttfp-demo.md` — camera-beat script (&lt;15 min warm **or** &lt;25 min cold): Portal→bootstrap→setup→`REQUIRE_OPERATORS`→Pair×2→desk-pack→first Ask→Done; timestamps; what to point camera at (HOST empty-state tip → first Need → Done Story/cites). Explicit: Discord phone only — no Tailscale/ttyd/filebrowser.  
++2. HOST empty-state / unpaired tip line when no jobs + not paired: one spoken/Section tip (“Pair → Ask → Done”) — no wizard.  
++3. `docs/setup/README.md` gains a **TTFP stopwatch** subsection linking the demo (first Done = success metric).  
++4. `docs/COMPARISON.md` Wave 7 shareability bar updated: TTFP + Halt soft-warn (if P0b lands same PR) + desk harness mention.  
++5. Tests: `tests/test_public_copy.py` (or new) asserts brand + no companion-strip / Graham / fleet overclaim; optional assert demo doc exists.  
++6. **No** new JobPool; **no** companion HTML.
++
++**Files likely touched**
++- `docs/co-work/wave7-ttfp-demo.md` (new)
++- `docs/setup/README.md`, `docs/co-work/README.md`, `docs/recipes/README.md`
++- `docs/COMPARISON.md`
++- `src/agent_discord/host/panel.py` / `orchestration/cards.py` (empty-state tip only)
++- `tests/test_public_copy.py`
++
++**Test ideas**
++- Unpaired empty HOST payload includes tip substring.  
++- Public copy grep parks.
++
++---
++
++### P0b — Wave 7 COMPARISON freshness *(shareability; same PR if small)*
++
++**Why:** W6 foils are already mined; share kit needs **new** foils from this audit.
++
++**Acceptance criteria**
++1. `docs/COMPARISON.md` gains short Wave 7 rows: **BAGEN/TokenOps Halt UX** (we soft-warn + Halt honesty, don’t sell firewall), **AgentTrails** (we search SQLite lineage, not a provenance GUI), **Harness-MU** (Pair allowlist hooks, not multi-tenant gatekeeper product), **Agent-Harness** (local desk goldens, not SaaS eval), **Goose skills catalog** (markdown recipes discoverable in Discord tip — not YAML runtime).  
++2. Brand **board + brain lakes**; phone-native honesty callout retained.  
++3. Optional: `docs/co-work/wave7-audit.md` pointer or leave audit on box only.
++
++**Files:** `docs/COMPARISON.md`, maybe `docs/co-work/README.md`, `tests/test_public_copy.py`
++
++**P0 cut recommendation:** Land **P0a + P0b** together (docs-heavy; empty-state tip is M-small). If tip code swells, ship P0b docs-first same day — still **one approval band**.
++
++---
++
++## P1 — next product band
++
++### P1a — Halt soft-warn + next-admit-not-run + Resume clarity (BAGEN / TokenOps)
++
++**Acceptance:** When cap known and spend ≥ soft threshold (default 80%, env `DISCORD_OS_SPEND_SOFT_PCT`), meter/digest shows amber-ish marker (ASCII e.g. `!` / `warn`) before Halt; on Halt (manual or cap), spoken/NOTE/ROE line includes **“next JobPool admit was not run”**; HOST Halt control / strip makes **clear Halt / Resume** obvious (reuse toggle; document in `wave6-spend-meter.md` → `wave7-halt-ux.md`). unknown ≠ $0 unchanged.  
++**Files:** `orchestration/service.py` (`format_spend_meter`), `host/panel.py`, `host/status_digest.py`, `orchestration/roe_escalate.py`, docs, `tests/test_wave7_halt_ux.py`.  
++**Limit:** Honesty-only; no fleet SpendGuard.
++
++### P1b — Phone Pair operator (Harness-MU-lite friction cut)
++
++**Acceptance:** After owner paired, HOST offers **Pair operator** (ephemeral Confirm) that `add_operator(user_id, role=operator)` for the tapping user (or modal user snowflake if required by Discord constraints); refuses non-owner; CLI `discord-os pair` remains. Dual-op demo no longer requires Mac CLI for op #2.  
++**Files:** `host/panel.py`, `orchestration/service.py` / sqlite operators, `docs/co-work/wave7-pair-operator.md`, tests.  
++**Limit:** Single allowlist; no multi-tenant Harness-MU.
++
++### P1c — Need / Jobs compact density (phone)
++
++**Acceptance:** Jobs select labels prefer `Need|Live|Done · DOS-xxxxx` (prose in description only); HOST Jobs Need line shows bucket counts `N:n L:n D:n` when dense; no second board.  
++**Files:** `host/panel.py` (`_job_select_options`), cards/panel chrome, docs/cards, tests.  
++**Limit:** Discord select 25-option ceiling unchanged.
++
++### P1d — Gate ROE who/why glance (PAuth-lite)
++
++**Acceptance:** Parked gate / write / Halt cards append one clipped line `ROE · who: operators · why: <klass|write|spend Halt>`; complements W6 escalate Need (don’t duplicate storms).  
++**Files:** `ask_gate.py`, `roe_escalate.py`, cards, `docs/co-work/wave6-roe-escalate.md` or `wave7-roe-glance.md`, tests.  
++**Limit:** Wording only.
++
++### P1e — Recipe Discord discoverability
++
++**Acceptance:** Spoken `recipes` / HOST More tip lists ≤10 playbook titles from a static index (mirrors `docs/recipes/README.md`); points to docs paths — **no** YAML engine.  
++**Files:** small `host/recipes_index.py` or listen verb, `docs/recipes/README.md`, tests.  
++**Limit:** Docs compose; Goose runtime parked.
++
++### P1f — Lineage search CLI (AgentTrails-lite)
++
++**Acceptance:** `discord-os lineage --search <needle>` queries events/artifacts/job codes/sha8/DOS-* ; prints ≤20 hits with run/job; existing dump path unchanged.  
++**Files:** `orchestration/lineage.py`, `cli.py`, `persistence/sqlite.py` (query helper), docs, tests.  
++**Limit:** Single-host SQLite; no provenance GUI.
++
++---
++
++## P2 — stretch / park-adjacent
++
++| ID | Item | Notes |
++|---|---|---|
++| P2a | Desk scenario golden harness (`tests/desk_scenarios/`) | FakeDiscord: Pair→ask→gate→Done; Halt soft-warn; already_claimed; pytest markers |
++| P2b | Wave 7 overnight / Catch-up film beat in demo only | Docs — no new pack format |
++| P2c | Soft contradiction NOTE when two DRI journals oppose (ReTree-lite) | Quiet; opt-in |
++| P2d | External mailbox / IRC peer | **PARKED** |
++| P2e | Multi-host DO brain lakes | **PARKED** |
++| P2f | CU/docker / companion terminal-files | **PARKED** |
++| P2g | Goose YAML recipe runtime / second JobPool | **PARKED** |
++
++---
++
++## Intended `docs/co-work/wave7-*.md` sketches
++
++### `wave7-ttfp-demo.md` (P0a)
++1. Cold: Portal token + app id + channel (clock start).  
++2. `pip install` → `bootstrap` → edit `.env` → `setup --channel-id`.  
++3. Open invite → On → Pair owner → Pair operator (P1b when shipped; else CLI).  
++4. Desk-pack bind → Ask “say hello in one sentence” → Done. **Stop clock = TTFP.**  
++5. Optional share beats: spend meter / soft-warn, gate who/why, `lineage --search`, recipes tip.  
++6. Callout: Discord phone only; board + brain lakes; single-host.
++
++### `wave7-halt-ux.md` (P1a)
++Soft threshold; meter markers; next-admit-not-run copy; Resume; vs TokenOps/BAGEN/Ledger; park fleet firewall.
++
++### `wave7-pair-operator.md` (P1b)
++Owner-only; Confirm chrome; CLI parity; REQUIRE_OPERATORS; park multi-tenant.
++
++### `wave7-lineage-search.md` (P1f)
++Needles; hit format; Q-style examples (PROV-AGENT-inspired); park AgentTrails GUI.
++
++---
++
++## Recommended approval (no meeting)
++
++**Approve Wave 7 P0 band = P0a cold-start TTFP + filmable demo + empty-state tip + P0b Wave 7 COMPARISON freshness.**
++
++Defer P1a–P1f until P0 green on tip (≥0.5.79 + Wave 7 bump).  
++Do not open P2d–P2g.  
++**After ship: EoW = tip + pytest + live Discord — mandatory.**
++
++---
++
++## Out of scope reminder
++
++No GitHub push from this research; no Mac `machineId`; no PyPI; research + `/workspace` docs only.
+diff --git a/docs/co-work/wave7-ttfp-demo.md b/docs/co-work/wave7-ttfp-demo.md
+new file mode 100644
+index 0000000..90e7b04
+--- /dev/null
++++ b/docs/co-work/wave7-ttfp-demo.md
+@@ -0,0 +1,31 @@
++# Wave 7 — Cold-start TTFP demo (Discord phone only)
++
++Time-to-first-Done under a stopwatch. Brand: **board + brain lakes**. Phone = Discord — **no** Tailscale / ttyd / filebrowser companion strip.
++
++## Targets
++
++| Mode | Budget |
++|---|---|
++| Warm desk (already bootstrapped) | &lt;15 min |
++| Cold (Portal → first Done) | &lt;25 min |
++
++Success metric: **first Done card**, not “bot is online.”
++
++## Camera beats
++
++1. **T+0** Portal / invite → bot in guild.
++2. **Bootstrap** `discord-os setup` / host LaunchAgent; On HOST panel.
++3. Point at HOST **empty-state tip**: `Tip: Pair → Ask → Done` (unpaired, no jobs).
++4. `REQUIRE_OPERATORS=1` → **Pair×2**.
++5. Desk-pack (+ optional `add brain --dri`).
++6. First **Ask** (short analyze / one-liner).
++7. Camera on first **Need → Live → Done** (Story/cites if Wave 6 tip).
++8. Optional: HOST spend meter glance (Wave 6).
++
++## Callouts
++
++- Single-host JobPool — not a vendor Cloud Agent VM.
++- Spend honesty: unknown ≠ $0.
++- HARD parks stay parked (CU/docker, companion terminal/files, mailbox, multi-host DO).
++
++Film under the stopwatch; cut when Done lands.
+diff --git a/docs/recipes/README.md b/docs/recipes/README.md
+index a854e8e..bfa1ab3 100644
+--- a/docs/recipes/README.md
++++ b/docs/recipes/README.md
+@@ -12,6 +12,7 @@ over new planes.
+ | Recipe | Where | Cadence note |
+ |---|---|---|
+ | Parameterized recipe inputs (Goose-shaped) | [parameterized.md](parameterized.md) | Docs only — no YAML runtime |
++| Wave 7 TTFP / cold-start | [wave7-ttfp-demo.md](../co-work/wave7-ttfp-demo.md) | Stopwatch to first Done; Discord phone |
+ | Wave 6 board + brain demo | [wave6-board-brain-demo.md](../co-work/wave6-board-brain-demo.md) | Discord phone; spend meter glance |
+ | Wave 5 board + brain demo | [co-work/wave5-board-brain-demo](../co-work/wave5-board-brain-demo.md) | desk-pack → brain → handoff envelope → board catch-up |
+ | Shared-desk demo (&lt;15 min) | [co-work/shared-desk-demo](../co-work/shared-desk-demo.md) | Pair×2, desk-pack, dual ask, handoff, overnight brief, gate park |
+diff --git a/docs/setup/README.md b/docs/setup/README.md
+index 425fe2f..491d437 100644
+--- a/docs/setup/README.md
++++ b/docs/setup/README.md
+@@ -66,3 +66,14 @@ Registered aliases (same verbs as text; no `/add`): `/bind`, `/status`, `/on`, `
+ - `src/agent_discord/host/add.py` — dotenv upsert + binds
+ - `src/agent_discord/bootstrap.py` — workspace + `.env` template
+ - `src/agent_discord/host/install.py` — login helper
++
++## TTFP stopwatch (Wave 7)
++
++**Time-to-first-Done** is the cold-start success metric — not “the bot joined.”
++
++1. Start a stopwatch when you open Portal / run setup.
++2. Follow [`docs/co-work/wave7-ttfp-demo.md`](../co-work/wave7-ttfp-demo.md) (Discord phone only).
++3. Stop when the first **Done** card lands.
++
++Warm desk target &lt;15 min; cold &lt;25 min. HOST shows `Tip: Pair → Ask → Done` when unpaired with no jobs.
++
+diff --git a/pyproject.toml b/pyproject.toml
+index eff085f..96cdb63 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
+ 
+ [project]
+ name = "discord-os"
+-version = "0.5.79"
++version = "0.5.80"
+ description = "Discord is the screen. This Mac is the computer: SQLite lineage, up to eight live jobs (DISCORD_OS_MAX_LIVE), OpenRouter/agentic Puppetmaster workers. Artifacts are Discord snowflakes plus sha256."
+ readme = "README.pypi.md"
+ license = { text = "MIT" }
+diff --git a/src/agent_discord/__init__.py b/src/agent_discord/__init__.py
+index e8ae209..9929f6e 100644
+--- a/src/agent_discord/__init__.py
++++ b/src/agent_discord/__init__.py
+@@ -9,4 +9,4 @@ REPO_URL = "https://github.com/professorpalmer/discord-os"
+ CLI_OWNER_PREFIX = "discord-os-cli-"
+ LEGACY_CLI_OWNER_PREFIX = "agent-discord-cli-"
+ 
+-__version__ = "0.5.79"
++__version__ = "0.5.80"
+diff --git a/src/agent_discord/host/panel.py b/src/agent_discord/host/panel.py
+index 230adbb..8347c8e 100644
+--- a/src/agent_discord/host/panel.py
++++ b/src/agent_discord/host/panel.py
+@@ -598,6 +598,8 @@ def host_panel_payload(
+         update_pill = update_available_pill()
+     except Exception:
+         update_pill = ""
++    job_rows = [j for j in (jobs or []) if str(j.get("task_id") or "") != "host-need"]
++    empty_jobs = not bool(job_rows) and not bool((last_job or "").strip())
+     card = host_card(
+         armed=armed,
+         channel_id=channel_id,
+@@ -617,6 +619,7 @@ def host_panel_payload(
+         bank=bank,
+         github=_panel_github(),
+         update_pill=update_pill,
++        empty_jobs=empty_jobs,
+     )
+     # Discord-half P1: HOST Jobs chrome accent follows top Need/Live/Done bucket.
+     if (
+diff --git a/src/agent_discord/orchestration/cards.py b/src/agent_discord/orchestration/cards.py
+index 2fd64ca..42b9916 100644
+--- a/src/agent_discord/orchestration/cards.py
++++ b/src/agent_discord/orchestration/cards.py
+@@ -623,14 +623,27 @@ def render_host_card(
+     return host_card(armed=armed, channel_id=channel_id).text
+ 
+ 
+-def _host_description(*, last_job: str = "", update_pill: str = "") -> str:
+-    """HOST card body: optional Update-available pill above the Jobs briefing line."""
++def _host_description(
++    *,
++    last_job: str = "",
++    update_pill: str = "",
++    paired: bool = True,
++    empty_jobs: bool = False,
++) -> str:
++    """HOST card body: optional Update-available pill above the Jobs briefing line.
++
++    Wave 7 P0a: unpaired + no jobs → one spoken tip (Pair → Ask → Done). No wizard.
++    """
+ 
+     pill = (update_pill or "").strip()
+     job = (last_job or "").strip()
+-    if pill and job:
+-        return f"{pill}\n{job}"
+-    return pill or job
++    tip = ""
++    if empty_jobs and not paired:
++        tip = "Tip: Pair → Ask → Done"
++    body = job or tip
++    if pill and body:
++        return f"{pill}\n{body}"
++    return pill or body
+ 
+ 
+ def host_card(
+@@ -653,6 +666,7 @@ def host_card(
+     github: str = "",
+     spend_known: bool = True,
+     update_pill: str = "",
++    empty_jobs: bool = False,
+ ) -> CardMessage:
+     _ = channel_id
+     fields = _host_status_fields(
+@@ -693,7 +707,12 @@ def host_card(
+     return CardMessage(
+         kind="HOST",
+         title="Halted" if halted and armed else ("Running" if armed else "Stopped"),
+-        description=_host_description(last_job=last_job, update_pill=update_pill),
++        description=_host_description(
++            last_job=last_job,
++            update_pill=update_pill,
++            paired=paired,
++            empty_jobs=empty_jobs,
++        ),
+         color=COLOR_FAIL if halted and armed else (COLOR_LIVE if armed else COLOR_IDLE),
+         avatar_url=avatar_url,
+         fields=fields,
+diff --git a/tests/test_public_copy.py b/tests/test_public_copy.py
+index 08f2193..bdac373 100644
+--- a/tests/test_public_copy.py
++++ b/tests/test_public_copy.py
+@@ -17,6 +17,10 @@ WAVE6_SHARE = [
+     ROOT / "docs" / "co-work" / "wave6-spend-meter.md",
+ ]
+ 
++WAVE7_SHARE = [
++    ROOT / "docs" / "co-work" / "wave7-ttfp-demo.md",
++]
++
+ FORBIDDEN_OVERCLAIM = (
+     "graham",
+     "companion-strip",
+@@ -59,3 +63,30 @@ def test_wave6_share_brand_and_no_overclaim():
+     assert "goose" in comparison
+     assert "ledger" in comparison or "spendguard" in comparison
+     assert "cloud agent" in comparison
++
++
++def test_wave7_ttfp_brand_and_parks():
++    for path in WAVE7_SHARE:
++        assert path.is_file(), path
++        text = path.read_text().lower()
++        if "graham" in text:
++            assert "never graham" in text or "not graham" in text
++        if "tailscale" in text or "ttyd" in text or "filebrowser" in text:
++            assert "no " in text or "park" in text or "not " in text
++    demo = (ROOT / "docs" / "co-work" / "wave7-ttfp-demo.md").read_text().lower()
++    assert "pair" in demo and "ask" in demo and "done" in demo
++    assert "board + brain lakes" in demo
++    comparison = (ROOT / "docs" / "COMPARISON.md").read_text().lower()
++    assert "wave 7" in comparison
++    assert "ttfp" in comparison or "bagen" in comparison or "agenttrails" in comparison
++    setup = (ROOT / "docs" / "setup" / "README.md").read_text().lower()
++    assert "ttfp" in setup or "stopwatch" in setup
++
++
++def test_host_empty_state_tip():
++    from agent_discord.orchestration.cards import host_card
++
++    card = host_card(armed=False, paired=False, empty_jobs=True, last_job="")
++    assert "Pair → Ask → Done" in (card.description or "")
++    warm = host_card(armed=True, paired=True, empty_jobs=False, last_job="DOS-1 · live")
++    assert "Pair → Ask → Done" not in (warm.description or "")
+-- 
+2.47.3
+
+
+From b395ea46be14552fb5e91ab385e6d2213b612c52 Mon Sep 17 00:00:00 2001
+From: Cary Palmer <professorpalmer9@gmail.com>
+Date: Wed, 16 Sep 2026 02:50:52 -0500
+Subject: [PATCH 2/2] Filter host-liveness rows from empty-jobs tip check
+
+---
+ src/agent_discord/host/panel.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/agent_discord/host/panel.py b/src/agent_discord/host/panel.py
+index 8347c8e..c4494cf 100644
+--- a/src/agent_discord/host/panel.py
++++ b/src/agent_discord/host/panel.py
+@@ -598,7 +598,7 @@ def host_panel_payload(
+         update_pill = update_available_pill()
+     except Exception:
+         update_pill = ""
+-    job_rows = [j for j in (jobs or []) if str(j.get("task_id") or "") != "host-need"]
++    job_rows = [j for j in (jobs or []) if str(j.get("task_id") or "") != "host-liveness"]
+     empty_jobs = not bool(job_rows) and not bool((last_job or "").strip())
+     card = host_card(
+         armed=armed,
+-- 
+2.47.3
+
