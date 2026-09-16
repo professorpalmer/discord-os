@@ -8,6 +8,10 @@
 
 ## 0.5.69
 
+## 0.5.70
+
+- README / PyPI: stack the three phone screenshots as separate labeled figures (not a 1–2–3 strip).
+
 - README / PyPI screenshots: shrink to ~400px assets and pin display width=280 (mobile-friendly).
 
 - README / PyPI: all three phone screenshots (Done card first), resized for mobile (~720px wide).
