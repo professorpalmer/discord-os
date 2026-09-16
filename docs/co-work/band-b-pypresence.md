@@ -35,7 +35,7 @@ Code: `src/agent_discord/host/presence.py`. Tests mock IPC — no Discord deskto
 
 ## Parks
 
-Board + brain lakes (never Graham). Band C webhook shipped in 0.5.84. HARD parks unchanged: CU/docker, mailbox, multi-host DO lakes, second JobPool, multi-gateway, auto forum tags, silent ssh cook, phone companion Tailscale/ttyd/filebrowser.
+Board + brain lakes (never Graham). Band C webhook shipped in 0.5.84. Band D jishaku shipped in 0.5.85 (loop closed). HARD parks unchanged: CU/docker, mailbox, multi-host DO lakes, second JobPool, multi-gateway, auto forum tags, silent ssh cook, phone companion Tailscale/ttyd/filebrowser.
 
 
 ## Hotfix 0.5.83

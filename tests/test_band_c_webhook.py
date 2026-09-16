@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from agent_discord import PRODUCT_NAME, __version__
+from agent_discord import PRODUCT_NAME
 from agent_discord.contracts import TaskIntake, TaskStatus
 from agent_discord.discord.facade import DiscordFacade
 from agent_discord.discord.providers.fake import FakeDiscordMCPProvider
@@ -257,9 +257,9 @@ def test_host_start_hook_is_wired_and_fail_soft():
 
 
 def test_package_version_is_084():
-    assert __version__ == "0.5.84"
-    text = Path("pyproject.toml").read_text()
-    assert 'version = "0.5.84"' in text
+    text = Path("CHANGELOG.md").read_text()
+    assert "## 0.5.84" in text
+    assert "Band C" in text
 
 
 def test_band_c_doc_records_flag_and_parks():

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.85
+
+Band D (Discord-native) — **final tack-on; loop (Bands A–D) closed**:
+
+- Optional `jishaku` extra (`discord-os[debug]`) for Cary tip debugging only. Not a product feature.
+- Default **off.** Load only when `DISCORD_OS_JISHAKU=1` **and** invoker is owner / allowlisted operator.
+- Flag alone is insufficient (no silent enable on shared `REQUIRE_OPERATORS` demos).
+- Cog attach parked: host is REST + stdlib Gateway, not `commands.Bot` (single-gateway HARD lock).
+- Docs: `docs/co-work/band-d-jishaku.md`.
+
+HARD parks unchanged. kagekit / presence / webhook left as-is. Wave 7 P1 not opened.
+
 ## 0.5.84
 
 Band C (Discord-native):
