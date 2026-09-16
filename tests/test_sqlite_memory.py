@@ -299,7 +299,7 @@ def test_preference_rejects_unknown_kind(tmp_path: Path):
     store.initialize()
     with pytest.raises(ValueError):
         store.set_preference("ws", "x", "y", kind="unknown")
-    assert PREFERENCE_KINDS == frozenset({"preference", "style", "failure"})
+    assert PREFERENCE_KINDS == frozenset({"preference", "style", "failure", "journal"})
     store.close()
 
 
