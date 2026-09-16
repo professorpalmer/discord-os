@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.64
+
+- Fix `UnboundLocalError` on `resolved_write_key` in listen (handoff branch local import shadowed the module binding) — restores JobPool dispatch / CI greens from 0.5.62+.
+
 ## Unreleased
 
 ## 0.5.62

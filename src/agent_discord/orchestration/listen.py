@@ -491,8 +491,7 @@ def drain_inbound(
                     store, watermark_key, created_ms, message.message_id, watermark
                 )
                 continue
-            from agent_discord.orchestration.routing import resolved_write_key
-
+            
             handoff_intake = TaskIntake(
                 text=peer_prompt,
                 channel_id=channel_id,
