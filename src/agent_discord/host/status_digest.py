@@ -156,15 +156,24 @@ def digest_signature(snapshot: Mapping[str, Any]) -> str:
         cap_s = "none"
     halted = "1" if spend.get("halted") else "0"
     job_bits = _active_job_bits(list(jobs), limit=8)
-    host_ids = [
-        str(item.get("id") or "").strip()
-        for item in hosts
-        if isinstance(item, Mapping) and str(item.get("id") or "").strip()
-    ]
+    host_bits = []
+    for item in hosts:
+        if not isinstance(item, Mapping):
+            continue
+        hid = str(item.get("id") or "").strip()
+        if not hid:
+            continue
+        reach = item.get("reachable")
+        if reach is True:
+            host_bits.append(f"{hid}:ok")
+        elif reach is False:
+            host_bits.append(f"{hid}:down")
+        else:
+            host_bits.append(hid)
     return (
         f"p={power}|r={running}|s={spend_s}/{cap_s}/h={halted}"
         f"|j={','.join(job_bits) or 'none'}"
-        f"|a={','.join(host_ids) or 'single'}"
+        f"|a={','.join(host_bits) or 'single'}"
     )
 
 
@@ -204,12 +213,21 @@ def format_status_digest(snapshot: Mapping[str, Any]) -> str:
     job_bits = _active_job_bits(list(jobs), limit=5)
     jobs_s = ", ".join(job_bits) if job_bits else "none"
 
-    host_ids = [
-        str(item.get("id") or "").strip()
-        for item in hosts
-        if isinstance(item, Mapping) and str(item.get("id") or "").strip()
-    ]
-    hosts_s = ", ".join(host_ids) if host_ids else "(single-host)"
+    host_bits = []
+    for item in hosts:
+        if not isinstance(item, Mapping):
+            continue
+        hid = str(item.get("id") or "").strip()
+        if not hid:
+            continue
+        reach = item.get("reachable")
+        if reach is True:
+            host_bits.append(f"{hid}:ok")
+        elif reach is False:
+            host_bits.append(f"{hid}:down")
+        else:
+            host_bits.append(hid)
+    hosts_s = ", ".join(host_bits) if host_bits else "(single-host)"
 
     bits = [
         "Discord OS status",

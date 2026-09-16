@@ -1,5 +1,7 @@
 # External agent mailbox — PARKED
 
-External agent mailbox does **not** ship unless it maps cleanly onto Discord
-threads / JobPool cards. Until then: use job threads + handoff/peer-task.
-Do not invent a second inbox plane.
+External agent mailbox does **not** ship. Thin map onto existing job threads
+was considered for Wave 2; **park wins** — use JobPool threads +
+`handoff`/`peer` instead of a second inbox plane.
+
+Do not invent CRHQ-style satellite mailboxes here.

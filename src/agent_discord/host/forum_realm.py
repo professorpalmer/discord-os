@@ -955,6 +955,48 @@ def maybe_sync_forum_ticket_tags(
     return result
 
 
+
+def refresh_status_tags_from_discord(
+    store: Any,
+    *,
+    channel_id: str,
+    workspace_id: str = "default",
+    token: str = "",
+    opener: Any = None,
+) -> dict[str, Any]:
+    """GET forum channel and cache status tag map. Never mutates available_tags."""
+
+    from agent_discord.discord.rest import fetch_channel
+
+    cid = (channel_id or "").strip()
+    if not cid:
+        raise ForumRealmError(spoken_forum_need("channel id required for forum-tags refresh"))
+    tok = (token or "").strip()
+    if not tok:
+        raise ForumRealmError(FORUM_NEED_FETCH)
+    try:
+        payload = fetch_channel(token=tok, channel_id=cid, opener=opener)
+    except Exception as exc:  # noqa: BLE001
+        raise ForumRealmError(FORUM_NEED_FETCH) from exc
+    if not isinstance(payload, Mapping):
+        raise ForumRealmError(FORUM_NEED_FETCH)
+    ctype = int(payload.get("type") or 0)
+    if ctype != GUILD_FORUM:
+        raise ForumRealmError(FORUM_NEED_NOT_FORUM)
+    updates = cache_status_tags_from_forum_payload(
+        store,
+        workspace_id=workspace_id,
+        channel_id=cid,
+        payload=payload,
+    )
+    return {
+        "channel_id": cid,
+        "tags_as_tickets": bool(updates.get(TAGS_AS_TICKETS_FLAG)),
+        "status_tag_ids": dict(updates.get(STATUS_TAG_IDS_KEY) or {}),
+        "created_available_tags": False,
+    }
+
+
 __all__ = [
     "APPLIED_TAGS_KEY",
     "FORUM_META_FLAG",
@@ -976,6 +1018,7 @@ __all__ = [
     "binding_is_forum_realm",
     "build_status_tag_id_map",
     "cache_status_tags_from_forum_payload",
+    "refresh_status_tags_from_discord",
     "channel_is_forum",
     "clear_forum_binding_updates",
     "collect_forum_thread_dests",

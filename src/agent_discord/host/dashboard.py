@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 from agent_discord import PRODUCT_NAME, __version__
 from agent_discord.config import AppConfig, apply_runtime_secrets, load_config
 from agent_discord.host.doctor import run_doctor
-from agent_discord.host.runners import load_host_allowlist
+from agent_discord.host.cross_host import cross_host_ro_status
 from agent_discord.host.service import read_host_meta, running_host_pid
 from agent_discord.orchestration.service import (
     is_spend_halted,
@@ -137,6 +137,7 @@ def build_status_snapshot(
     jobs_limit: int = 8,
     include_doctor: bool = True,
     env: Optional[Mapping[str, str]] = None,
+    probe_hosts: bool = False,
 ) -> dict[str, Any]:
     """Assemble a read-only host status payload (no secrets / no SSH targets)."""
 
@@ -157,10 +158,7 @@ def build_status_snapshot(
         cap = spend_cap_usd(db)
         halted = is_spend_halted(db)
         jobs = _safe_jobs(db, channel_id, limit=jobs_limit)
-        allowlist = [
-            {"id": h.id, "label": h.label, "kind": h.kind}
-            for h in load_host_allowlist(env=env)
-        ]
+        allowlist = cross_host_ro_status(env=env, probe=bool(probe_hosts))
         doctor: dict[str, Any]
         if include_doctor:
             code, lines = run_doctor(workspace=ws, config=cfg)
@@ -303,11 +301,21 @@ def render_status_html(snapshot: Mapping[str, Any]) -> str:
     for item in hosts:
         if not isinstance(item, Mapping):
             continue
+        reach = item.get("reachable")
+        if reach is True:
+            reach_s = "ok"
+        elif reach is False:
+            reach_s = "down"
+        else:
+            reach_s = "—"
+        detail = str(item.get("detail") or "")
         host_rows.append(
             "<tr>"
             f"<td>{html.escape(str(item.get('id') or ''))}</td>"
             f"<td>{html.escape(str(item.get('label') or ''))}</td>"
             f"<td>{html.escape(str(item.get('kind') or ''))}</td>"
+            f"<td>{html.escape(reach_s)}</td>"
+            f"<td>{html.escape(detail[:80])}</td>"
             "</tr>"
         )
     doctor_lines = doctor.get("lines") if isinstance(doctor.get("lines"), list) else []

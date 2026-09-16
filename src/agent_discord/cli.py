@@ -249,6 +249,16 @@ def build_parser() -> argparse.ArgumentParser:
     host_sub.add_parser("stop", help="Stop the detached host process")
     p_host_status = host_sub.add_parser("status", help="Show whether the host is running and armed")
     p_host_status.add_argument("--json", action="store_true")
+    p_host_hosts = host_sub.add_parser(
+        "hosts",
+        help="Cross-host read-only status (allowlist glance; optional SSH probe)",
+    )
+    p_host_hosts.add_argument(
+        "--no-probe",
+        action="store_true",
+        help="List allowlist ids only (no SSH/local probe)",
+    )
+    p_host_hosts.add_argument("--json", action="store_true")
     p_host_doctor = host_sub.add_parser(
         "doctor",
         help="Check LaunchAgent / workspace / pid / gateway coherence",
@@ -505,6 +515,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_add_desk.add_argument("--wiki-url", default="")
     p_add_desk.add_argument("--wiki-token", default="")
     p_add_desk.add_argument("--github-token", default="")
+    p_add_forum_tags = add_sub.add_parser(
+        "forum-tags",
+        help="Refresh tags-as-tickets map from existing forum available_tags (never creates tags)",
+    )
+    p_add_forum_tags.add_argument("--channel-id", required=True)
+    p_add_forum_tags.add_argument("--workspace-id", default="default")
     p_add_list = add_sub.add_parser("list", help="Show wired realms, memory, wiki, and tools")
     p_add_list.add_argument("--workspace-id", default="default")
     p_add_list.add_argument("--json", action="store_true")
@@ -981,9 +997,39 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                 )
             finally:
                 store.close()
+        elif command == "forum-tags":
+            from agent_discord.host.forum_realm import (
+                ForumRealmError,
+                refresh_status_tags_from_discord,
+            )
+
+            config = apply_runtime_secrets(load_config())
+            store = SQLiteStore(config.database_path)
+            store.initialize()
+            token = str(getattr(config, "discord_bot_token", "") or "").strip()
+            try:
+                payload = refresh_status_tags_from_discord(
+                    store,
+                    channel_id=str(args.channel_id),
+                    workspace_id=str(getattr(args, "workspace_id", "default") or "default"),
+                    token=token,
+                )
+            except ForumRealmError as exc:
+                print(exc.spoken, file=sys.stderr)
+                return 2
+            finally:
+                store.close()
+            print(
+                f"forum-tags {payload['channel_id']} "
+                f"tags_as_tickets={payload['tags_as_tickets']} "
+                f"map={payload['status_tag_ids']} "
+                f"(created_available_tags=false)",
+                file=out,
+            )
+            return 0
         else:
             print(
-                "add: realm, memory, repo, wiki, tool, github, desk-pack, or list",
+                "add: realm, memory, repo, wiki, tool, github, desk-pack, forum-tags, or list",
                 file=sys.stderr,
             )
             return 2
@@ -2132,6 +2178,8 @@ def cmd_host(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         return cmd_host_stop(args, out=out)
     if command == "status":
         return cmd_host_status(args, out=out)
+    if command == "hosts":
+        return cmd_host_hosts(args, out=out)
     if command == "doctor":
         return cmd_host_doctor(args, out=out)
     if command == "dashboard":
@@ -2245,6 +2293,43 @@ def cmd_host_stop(args: argparse.Namespace, *, out: TextIO | None = None) -> int
         print("host: not running", file=out)
         return 0
     print(f"host stopped pid={pid}", file=out)
+    return 0
+
+
+
+def cmd_host_hosts(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
+    """Cross-host RO status. Never cooks; never prints SSH targets."""
+
+    out = out or sys.stdout
+    from agent_discord.host.cross_host import cross_host_ro_status
+
+    probe = not bool(getattr(args, "no_probe", False))
+    rows = cross_host_ro_status(probe=probe)
+    payload = {"readonly": True, "probe": probe, "hosts": rows}
+    if getattr(args, "json", False):
+        print(json.dumps(payload, indent=2), file=out)
+        return 0
+    if not rows:
+        print("hosts: (single-host — DISCORD_OS_HOSTS empty)", file=out)
+        return 0
+    for row in rows:
+        hid = row.get("id") or "?"
+        kind = row.get("kind") or "?"
+        label = row.get("label") or ""
+        reach = row.get("reachable")
+        if reach is True:
+            reach_s = "ok"
+        elif reach is False:
+            reach_s = "down"
+        else:
+            reach_s = "—"
+        detail = str(row.get("detail") or "").strip()
+        line = f"{hid}\t{kind}\t{reach_s}"
+        if label:
+            line += f"\t{label}"
+        if detail:
+            line += f"\t{detail}"
+        print(line, file=out)
     return 0
 
 
@@ -2385,7 +2470,11 @@ def cmd_host_dashboard(args: argparse.Namespace, *, out: TextIO | None = None) -
     config = apply_runtime_secrets(load_config())
     once = bool(getattr(args, "once", False))
     if once:
-        payload = build_status_snapshot(workspace=config.workspace, config=config)
+        payload = build_status_snapshot(
+            workspace=config.workspace,
+            config=config,
+            probe_hosts=True,
+        )
         print(json.dumps(payload, indent=2, sort_keys=True), file=out)
         return 0
     try:
