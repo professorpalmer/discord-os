@@ -6,6 +6,10 @@
 
 ## 0.5.68
 
+## 0.5.69
+
+- README / PyPI screenshots: shrink to ~400px assets and pin display width=280 (mobile-friendly).
+
 - README / PyPI: all three phone screenshots (Done card first), resized for mobile (~720px wide).
 
 Wave 3 shareability polish (docs-first): overnight brief recipe (schedule +
