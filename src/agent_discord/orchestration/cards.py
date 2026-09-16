@@ -142,6 +142,8 @@ class CardMessage:
                         fields=self.fields,
                         color=self.color,
                         action_rows=extra,
+                        avatar_url=self.avatar_url or "",
+                        updated_ts=self.updated_ts,
                     )
             except Exception:
                 pass

@@ -36,6 +36,13 @@ def test_actions_outside_container():
     assert comps[0]["type"] == TYPE_CONTAINER
     assert comps[1]["type"] == TYPE_ACTION_ROW
     assert comps[1]["components"][0]["custom_id"] == "discord-os:on"
+    joined = "\n".join(
+        c.get("content") or ""
+        for child in comps[0]["components"]
+        for c in ([child] if child.get("type") == 10 else [])
+    )
+    assert "<t:" in joined
+    assert "board + brain lakes" in joined
 
 
 def test_host_card_v2_uses_page_layout(monkeypatch):

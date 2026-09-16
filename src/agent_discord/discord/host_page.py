@@ -14,11 +14,15 @@ from __future__ import annotations
 import os
 from typing import Any, Mapping, Optional, Sequence
 
+from agent_discord import PRODUCT_NAME
 from agent_discord.discord.layout import (
     FLAG_COMPONENTS_V2,
     container,
+    discord_time,
+    section,
     separator,
     text_display,
+    thumbnail,
 )
 
 
@@ -44,6 +48,8 @@ def split_host_v2_components(
     color: Optional[int] = None,
     action_rows: Optional[list[dict[str, Any]]] = None,
     update_pill: str = "",
+    avatar_url: str = "",
+    updated_ts: Optional[int] = None,
 ) -> list[dict[str, Any]]:
     """Build top-level CV2: status Container + outer action rows (kagekit-shaped)."""
 
@@ -54,19 +60,32 @@ def split_host_v2_components(
     ]
     for name, value, _inline in fields:
         table_lines.append(f"`{name}`  {value}")
-    body_bits: list[str] = [f"### {title}"]
+    heading = f"### {title}"
     pill = (update_pill or "").strip()
     desc = (description or "").strip()
+    head_lines = [heading]
     if pill:
-        body_bits.append(pill)
+        head_lines.append(pill)
     if desc:
-        body_bits.append(desc)
-    body_bits.append("\n".join(table_lines))
-    children: list[dict[str, Any]] = [
-        text_display("\n\n".join(body_bits)),
-        separator(divider=True, spacing=1),
-        text_display("-# Discord OS  ·  board + brain lakes"),
-    ]
+        head_lines.append(desc)
+    children: list[dict[str, Any]] = []
+    face = (avatar_url or "").strip()
+    if face:
+        children.append(section(head_lines[:3], thumbnail(face)))
+        leftover = head_lines[3:]
+        if leftover:
+            children.append(text_display("\n\n".join(leftover)))
+    else:
+        children.append(text_display("\n\n".join(head_lines)))
+    children.append(text_display("\n".join(table_lines)))
+    stamp = discord_time(updated_ts)
+    footer = f"-# {PRODUCT_NAME}  ·  board + brain lakes  ·  {stamp}"
+    children.extend(
+        [
+            separator(divider=True, spacing=1),
+            text_display(footer),
+        ]
+    )
     accent = 0x6E6E6E if color is None else int(color)
     top: list[dict[str, Any]] = [container(children, color=accent)]
     for row in action_rows or []:
@@ -83,6 +102,8 @@ def host_v2_payload(
     color: Optional[int] = None,
     action_rows: Optional[list[dict[str, Any]]] = None,
     update_pill: str = "",
+    avatar_url: str = "",
+    updated_ts: Optional[int] = None,
 ) -> dict[str, Any]:
     return {
         "flags": FLAG_COMPONENTS_V2,
@@ -93,5 +114,7 @@ def host_v2_payload(
             color=color,
             action_rows=action_rows,
             update_pill=update_pill,
+            avatar_url=avatar_url,
+            updated_ts=updated_ts,
         ),
     }
