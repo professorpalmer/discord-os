@@ -19,3 +19,6 @@ Shared-desk materials for Discord OS (Puppetmaster-tier shareability).
 | [../COMPARISON.md](../COMPARISON.md) | Positioning vs Cowork / bridges / supervisors |
 
 Screenshots: real drops under [../screenshots](../screenshots/) only — do not invent images.
+| [wave5-handoff-envelope](wave5-handoff-envelope.md) | Typed handoff envelope + already_claimed |
+| [wave5-board-brain-demo](wave5-board-brain-demo.md) | &lt;15m board + brain lakes loop |
+

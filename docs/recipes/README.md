@@ -11,6 +11,7 @@ over new planes.
 
 | Recipe | Where | Cadence note |
 |---|---|---|
+| Wave 5 board + brain demo | [co-work/wave5-board-brain-demo](../co-work/wave5-board-brain-demo.md) | desk-pack → brain → handoff envelope → board catch-up |
 | Shared-desk demo (&lt;15 min) | [co-work/shared-desk-demo](../co-work/shared-desk-demo.md) | Pair×2, desk-pack, dual ask, handoff, overnight brief, gate park |
 | Board catch-up (ADR/PR) | [co-work/board-catchup](../co-work/board-catchup.md) | Catch-up + digest schedules |
 | Brain lake / meat-proxy cut | [co-work/brain-lake](../co-work/brain-lake.md) | `add brain --dri` + handoff lake context |

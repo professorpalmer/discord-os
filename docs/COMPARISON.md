@@ -58,6 +58,12 @@ Use a supervisor OS when you want fleet orchestration as the core. Use Discord O
 - **Forum-tags lock** — tags-as-tickets only maps **existing** `available_tags`; `modify_channel` refuses creating guild tags. Soft-skip when status tags are missing.
 - **Mailbox** — external agent inbox stays **parked** (job threads + handoff only).
 
+## Wave 5 (board + brain lakes)
+
+- **Typed handoff envelope** on JobPool — `already_claimed` idempotent claim; meat-proxy cut stays.
+- Share strip names the product **board + brain lakes** (shared desk — not a fleet).
+- Still single-host SQLite; mailbox / CU / multi-host DO lakes parked.
+
 ## Shareability bar (Puppetmaster-tier)
 
 Someone else can:

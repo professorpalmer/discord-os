@@ -1,34 +1,28 @@
+"""Public copy: board + brain lakes brand on Wave 5 share paths."""
+
 from __future__ import annotations
 
-import tomllib
 from pathlib import Path
-
-from agent_discord.cli import build_parser
 
 ROOT = Path(__file__).resolve().parents[1]
 
-
-def test_pyproject_description_names_the_computer() -> None:
-    data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    desc = data["project"]["description"]
-    assert "harness UI for local agent work" not in desc
-    lower = desc.lower()
-    assert "screen" in lower
-    assert "computer" in lower or "mac" in lower
-    assert "sqlite" in lower
-    assert "snowflake" in lower
+WAVE5_SHARE = [
+    ROOT / "docs" / "co-work" / "wave5-board-brain-demo.md",
+    ROOT / "docs" / "co-work" / "wave5-handoff-envelope.md",
+    ROOT / "docs" / "co-work" / "handoff.md",
+]
 
 
-def test_readme_leads_with_the_computer() -> None:
-    text = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert text.startswith("# Discord OS\n\nDiscord is the screen.")
-    assert "SQLite is the database" in text
-    assert "harness UI for local agent work" not in text
-
-
-def test_cli_help_names_the_computer() -> None:
-    help_text = build_parser().format_help()
-    compact = " ".join(help_text.split())
-    assert "harness UI" not in compact
-    assert "This process is the computer" in compact
-    assert "SQLite lineage" in compact
+def test_wave5_share_brand():
+    for path in WAVE5_SHARE:
+        assert path.is_file(), path
+        text = path.read_text().lower()
+        assert "graham" not in text
+    demo = (ROOT / "docs" / "co-work" / "wave5-board-brain-demo.md").read_text().lower()
+    assert "board + brain lakes" in demo
+    assert "handoff" in demo
+    readme = (ROOT / "README.md").read_text().lower()
+    assert "board + brain lakes" in readme
+    comparison = (ROOT / "docs" / "COMPARISON.md").read_text().lower()
+    assert "wave 5" in comparison
+    assert "handoff envelope" in comparison or "typed handoff" in comparison

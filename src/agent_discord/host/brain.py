@@ -187,11 +187,12 @@ def format_meat_proxy_handoff_preamble(
     from_id: str,
     to_id: str,
     peer_prompt: str,
+    envelope: Any = None,
 ) -> str:
     """Lake→lake handoff context so humans are not the meat proxy.
 
     Escalates to humans only on ROE (gates) — this block travels with the
-    JobPool peer task.
+    JobPool peer task. Optional Wave 5 ``envelope`` adds typed handoff lines.
     """
 
     binding = {}
@@ -211,11 +212,29 @@ def format_meat_proxy_handoff_preamble(
             mem = (reader(workspace_id) or "").strip()
         except Exception:
             mem = ""
+    env_lines: list[str] = []
+    if envelope is not None:
+        hid = str(getattr(envelope, "handoff_id", "") or "").strip()
+        if hid:
+            env_lines.append(f"handoff_id={hid}")
+        for attr, label in (
+            ("constraints", "constraints"),
+            ("expecting", "expecting"),
+            ("freshness", "freshness"),
+            ("supersedes", "supersedes"),
+            ("roe_hint", "roe_hint"),
+            ("brain_dri", "brain_dri"),
+        ):
+            val = str(getattr(envelope, attr, "") or "").strip()
+            if val:
+                env_lines.append(f"{label}={val}")
     parts = [
         f"[meat-proxy-cut] Handoff lake context from <@{from_id}> → <@{to_id}>.",
         "Escalate to humans only on ROE (write/ask/plan gates) — do not meat-proxy via chat paste.",
-        f"Task: {peer_prompt.strip()}",
     ]
+    if env_lines:
+        parts.append("[handoff-envelope]\n" + "\n".join(env_lines))
+    parts.append(f"Task: {peer_prompt.strip()}")
     if brain_block:
         parts.append(brain_block)
     if mem:

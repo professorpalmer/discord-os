@@ -966,6 +966,51 @@ class SQLiteStore:
             return ""
         return str(row.get("job_code") or "").strip()
 
+
+    def find_live_handoff_by_id(
+        self,
+        handoff_id: str,
+        *,
+        channel_id: str = "",
+        live_statuses: Optional[Sequence[str]] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Latest non-terminal task with metadata.handoff_id (Wave 5 claim)."""
+
+        hid = (handoff_id or "").strip()
+        if not hid:
+            return None
+        statuses = tuple(
+            s.strip().lower()
+            for s in (live_statuses or ("pending", "queued", "running", "waiting", "waiting_approval", "parked"))
+            if str(s).strip()
+        )
+        if not statuses:
+            return None
+        channel = (channel_id or "").strip()
+        placeholders = ",".join("?" for _ in statuses)
+        rows = self._connection().execute(
+            f"""
+            SELECT task_id, job_code, status, channel_id, metadata_json, updated_at
+            FROM tasks
+            WHERE json_extract(metadata_json, '$.handoff_id') = ?
+              AND lower(COALESCE(status, '')) IN ({placeholders})
+              AND (? = '' OR channel_id = ?)
+            ORDER BY updated_at DESC
+            LIMIT 8
+            """,
+            (hid, *statuses, channel, channel),
+        ).fetchall()
+        if not rows:
+            return None
+        row = rows[0]
+        return {
+            "task_id": str(row["task_id"] or ""),
+            "job_code": str(row["job_code"] or ""),
+            "status": str(row["status"] or ""),
+            "channel_id": str(row["channel_id"] or ""),
+            "metadata_json": str(row["metadata_json"] or "{}"),
+        }
+
     def get_task_by_job_code(self, job_code: str) -> Optional[dict[str, Any]]:
         code = (job_code or "").strip().upper()
         if not code:

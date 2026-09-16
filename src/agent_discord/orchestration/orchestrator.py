@@ -346,10 +346,12 @@ def _posted_message_id(posted: Any) -> str:
 def _receipt_card_for_intake(receipt, intake=None, **kwargs):
     """Settle card with operator/lane attribution when intake is known."""
 
+    from agent_discord.orchestration.handoff_envelope import envelope_from_metadata
     from agent_discord.orchestration.reactive import reactive_receipt_card
 
     operator = ""
     lane = ""
+    handoff_envelope = None
     if intake is not None:
         operator = str(getattr(intake, "requester_id", None) or "")
         meta = getattr(intake, "metadata", None) or {}
@@ -357,8 +359,13 @@ def _receipt_card_for_intake(receipt, intake=None, **kwargs):
             lane = str(meta.get("lane") or meta.get("realm") or "")
             if meta.get("handoff_from") and meta.get("handoff_to"):
                 operator = f"{meta.get('handoff_to')} (from {meta.get('handoff_from')})"
+            handoff_envelope = envelope_from_metadata(meta)
     return reactive_receipt_card(
-        receipt, operator=operator, lane=lane, **kwargs
+        receipt,
+        operator=operator,
+        lane=lane,
+        handoff_envelope=handoff_envelope,
+        **kwargs,
     )
 
 

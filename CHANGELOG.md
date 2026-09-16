@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.5.74
+
+Wave 5 P0 — typed handoff envelope + idempotent `already_claimed`, board + brain
+lakes share strip (`wave5-board-brain-demo`, COMPARISON/README). Meat-proxy cut
+kept. HARD parks unchanged.
+
+
 ## 0.5.73
 
 - Align package `__version__` with 0.5.72 board + brain lakes cut.
