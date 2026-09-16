@@ -179,6 +179,8 @@ def reactive_progress_card(
     run_id: str = "",
     thinking: str = "",
     job_code: str = "",
+    steer_footer: str = "",
+    ledger: str = "",
 ) -> CardMessage:
     """Live cook flush — Cancel row from the seam."""
 
@@ -192,6 +194,8 @@ def reactive_progress_card(
         thinking=thinking,
         job_code=job_code,
         chrome=paint.chrome,
+        steer_footer=steer_footer,
+        ledger=ledger,
     )
 
 
@@ -205,6 +209,9 @@ def reactive_receipt_card(
     operator: str = "",
     lane: str = "",
     handoff_envelope=None,
+    ledger: str = "",
+    narrative: str = "",
+    cites: str = "",
 ) -> CardMessage:
     """Settle / deny / Done paint — idle Continue when a job thread exists."""
 
@@ -218,6 +225,9 @@ def reactive_receipt_card(
         operator=operator,
         lane=lane,
         handoff_envelope=handoff_envelope,
+        ledger=ledger,
+        narrative=narrative,
+        cites=cites,
     )
     # Align accent + chrome from the seam (Need/Live/Done).
     return CardMessage(

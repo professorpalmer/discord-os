@@ -51,3 +51,10 @@ Do not invent a digest mailbox. Status digest / liveness stay separate seams.
 - [schedule](schedule.md) — CLI deepen
 - [shared-desk-demo](shared-desk-demo.md) — fold this into the &lt;15 min demo
 - [host/README](../host/README.md) — Catch-up / armed behavior
+
+## Structured pack (Wave 6 P1c)
+
+Prompts tagged `overnight brief:` inject Needs / Live / gate parks / spend /
+Catch-up skipped before the single JobPool ask. Details:
+[wave6-overnight-pack](wave6-overnight-pack.md).
+

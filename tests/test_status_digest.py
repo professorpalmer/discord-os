@@ -216,3 +216,21 @@ def test_digest_signature_ignores_terminal_jobs() -> None:
     assert digest_signature(with_cancelled) == digest_signature(empty)
     assert "DOS-9:running" in digest_signature(with_running)
     assert "DOS-1:cancelled" not in digest_signature(with_running)
+
+
+def test_digest_signature_ignores_failed_jobs() -> None:
+    base = {
+        "host": {"armed": False, "running": True, "pid": 1},
+        "spend": {"spend_usd": 0.0, "spend_known": False, "cap_usd": 10.0, "halted": False},
+        "hosts": [],
+    }
+    with_failed = {
+        **base,
+        "jobs": [
+            {"job_code": "DOS-1", "status": "failed"},
+            {"job_code": "DOS-2", "status": "error"},
+        ],
+    }
+    empty = {**base, "jobs": []}
+    assert digest_signature(with_failed) == digest_signature(empty)
+

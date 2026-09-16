@@ -38,7 +38,8 @@ recovery from an unposted flap stays quiet (0.5.60).
 
 ```bash
 discord-os host doctor           # print coherence lines
-discord-os host doctor --notify  # on FAIL, post digest to host channel
+discord-os host doctor --notify  # FAIL-only channel post (WARN collapsed)
+discord-os host doctor --notify --verbose  # include WARN in notify post
 ```
 
 When the listen process is already dead, `--notify` (or a cron that runs it) is

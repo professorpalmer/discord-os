@@ -33,6 +33,12 @@ TERMINAL_JOB_STATUSES = frozenset(
         "succeeded",
         "completed",
         "done",
+        "success",
+        "failed",
+        "error",
+        "expired",
+        "dismissed",
+        "settled",
     }
 )
 
@@ -53,7 +59,7 @@ def _active_job_bits(jobs: list, *, limit: int = 8) -> list[str]:
         if len(bits) >= limit:
             break
     return bits
-MIN_CHECK_INTERVAL_S = 60.0
+MIN_CHECK_INTERVAL_S = 120.0
 ENV_STATUS_THREAD = "DISCORD_OS_STATUS_THREAD_ID"
 ENV_DIGEST_INTERVAL = "DISCORD_OS_STATUS_DIGEST_INTERVAL_S"
 

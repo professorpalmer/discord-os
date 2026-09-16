@@ -335,3 +335,132 @@ def format_progress_ledger(facts, *, limit: int = 5) -> str:
     if not rows:
         return ""
     return "Ledger: " + " · ".join(rows)
+
+
+def narrative_beats(
+    store: Any,
+    run_id: str,
+    *,
+    limit: int = 3,
+) -> list[str]:
+    """≤3 Need→Done story beats (Wave 6 P1d) under the progress ledger.
+
+    Prefers plan_approved → gate_allowed → artifact sha — not a second board.
+    """
+
+    rid = (run_id or "").strip()
+    if not rid or store is None:
+        return []
+    preferred = (
+        "plan_approved",
+        "gate_allowed",
+        "gate_allow",
+        "artifact",
+        "handoff_claimed",
+        "claim",
+        "approved",
+    )
+    beats: list[str] = []
+    seen: set[str] = set()
+    for node in list_nodes(store, rid):
+        step = (node.step or "").strip().lower()
+        if not step or step in seen:
+            continue
+        if step == "steer":
+            continue
+        if node.artifact_id and (step.startswith("artifact") or "artifact" in step):
+            label = f"artifact_sha {(node.artifact_id or '')[:8]}"
+        elif step in preferred:
+            # Keep story verbs (plan_approved / gate_allowed / …).
+            label = step
+            if node.artifact_id and step.startswith("gate"):
+                # Optional sha tip when gate carries an artifact id.
+                label = f"{step} · sha:{(node.artifact_id or '')[:8]}"
+        elif "artifact" in step and (node.artifact_id or node.input_sha256):
+            sha = (node.artifact_id or node.input_sha256 or "")[:8]
+            label = f"artifact_sha {sha}"
+        else:
+            continue
+        seen.add(step)
+        beats.append(label)
+        if len(beats) >= limit:
+            return beats[:limit]
+    # Fall back to event scan for plan/gate/artifact when nodes sparse.
+    if len(beats) < limit:
+        for fact in progress_ledger_facts(store, rid, limit=8):
+            low = fact.lower()
+            if not any(tok in low for tok in preferred) and "sha" not in low and "art=" not in low:
+                continue
+            tip = fact if len(fact) <= 40 else fact[:37] + "..."
+            if tip not in beats:
+                beats.append(tip)
+            if len(beats) >= limit:
+                break
+    return beats[:limit]
+
+
+def format_narrative_beats(beats, *, limit: int = 3) -> str:
+    rows = [str(b).strip() for b in (beats or []) if str(b).strip()][:limit]
+    if not rows:
+        return ""
+    return " → ".join(rows)
+
+
+def citation_refs(
+    store: Any,
+    run_id: str,
+    *,
+    job_code: str = "",
+    limit: int = 5,
+) -> list[str]:
+    """ARC-lite cites: DOS-* / artifact sha8 / journal ids (Wave 6 P1e)."""
+
+    refs: list[str] = []
+    code = (job_code or "").strip()
+    if code:
+        refs.append(code)
+    rid = (run_id or "").strip()
+    if rid and store is not None:
+        for node in list_nodes(store, rid):
+            if node.artifact_id:
+                tip = f"sha:{(node.artifact_id or '')[:8]}"
+                if tip not in refs:
+                    refs.append(tip)
+            elif node.input_sha256:
+                tip = f"sha:{(node.input_sha256 or '')[:8]}"
+                if tip not in refs:
+                    refs.append(tip)
+            if len(refs) >= limit:
+                break
+        if len(refs) < limit:
+            lister = getattr(store, "list_artifacts_for_run", None) or getattr(
+                store, "list_artifacts", None
+            )
+            if callable(lister):
+                try:
+                    arts = list(lister(rid) or [])
+                except TypeError:
+                    try:
+                        arts = list(lister(run_id=rid) or [])
+                    except Exception:
+                        arts = []
+                except Exception:
+                    arts = []
+                for art in arts:
+                    if not isinstance(art, dict):
+                        continue
+                    sha = str(art.get("sha256") or art.get("artifact_id") or "")
+                    if sha:
+                        tip = f"sha:{sha[:8]}"
+                        if tip not in refs:
+                            refs.append(tip)
+                    if len(refs) >= limit:
+                        break
+    return refs[:limit]
+
+
+def format_citation_refs(refs, *, limit: int = 5) -> str:
+    rows = [str(r).strip() for r in (refs or []) if str(r).strip()][:limit]
+    if not rows:
+        return ""
+    return " · ".join(rows)

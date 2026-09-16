@@ -27,3 +27,11 @@ State → button set / accent / stage (write-gate Allow / Always / Deny, plan Ap
 - Tests: `tests/test_cards.py`, `tests/test_reactive_cards.py`, `tests/test_write_gate_buttons.py`, `tests/test_orchestration.py`
 - Spike: [reactive.md](reactive.md), [ask-gate.md](ask-gate.md), [plan-approve.md](plan-approve.md)
 - Tests: also `tests/test_ask_gate.py`, `tests/test_plan_approve.py`
+
+## Need→Done narrative beats (Wave 6 P1d)
+
+Done cards append ≤3 lineage beats (e.g. `plan_approved → gate_allowed → artifact_sha…`)
+as a **Story** field under the Wave 5 progress ledger — not a second board.
+
+Live steers may show `by:<operator_id> · <clip>` on the progress body (Wave 6 P1a).
+

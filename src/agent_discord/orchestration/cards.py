@@ -319,6 +319,7 @@ def progress_card(
     operator: str = "",
     lane: str = "",
     ledger: str = "",
+    steer_footer: str = "",
 ) -> CardMessage:
     from agent_discord.orchestration.job_briefing import CHROME_LIVE
 
@@ -337,6 +338,10 @@ def progress_card(
     led = redact_text_markers((ledger or "").strip())
     if led:
         body = (body + ("\n" if body else "") + led).strip()
+    steer = redact_text_markers((steer_footer or "").strip())
+    if steer:
+        # Live footer attribution (Wave 6 P1a): by:<op> · <clip>
+        body = (body + ("\n" if body else "") + steer).strip()
     think = redact_text_markers(thinking or "")
     return CardMessage(
         kind="PROGRESS",
@@ -467,6 +472,8 @@ def receipt_card(
     lane: str = "",
     handoff_envelope: Any = None,
     ledger: str = "",
+    narrative: str = "",
+    cites: str = "",
 ) -> CardMessage:
     title, color = _RECEIPT_TITLES.get(receipt.status, ("Receipt", COLOR_IDLE))
     summary = str(strip_forbidden_keys({"summary": receipt.summary}).get("summary", ""))
@@ -515,6 +522,13 @@ def receipt_card(
     led = redact_text_markers((ledger or "").strip())
     if led:
         fields.append(("Ledger", led[:200], False))
+    story = redact_text_markers((narrative or "").strip())
+    if story:
+        # Need→Done narrative beats under the ledger (Wave 6 P1d) — not a second board.
+        fields.append(("Story", story[:220], False))
+    cite_line = redact_text_markers((cites or "").strip())
+    if cite_line:
+        fields.append(("Cites", cite_line[:200], False))
     _ = max_progress
     fname, fbytes = settle_file_attachment(receipt)
     chrome = _receipt_chrome(receipt.status)
