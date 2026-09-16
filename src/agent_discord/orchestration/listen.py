@@ -1032,6 +1032,11 @@ def _tick_host_liveness_best_effort(
         workspace_id=workspace_id,
         workspace=workspace,
     )
+    _tick_rich_presence_best_effort(
+        store,
+        channel_id=channel_id,
+        workspace_id=workspace_id,
+    )
 
 
 def _tick_status_digest_best_effort(
@@ -1057,6 +1062,28 @@ def _tick_status_digest_best_effort(
             store=store,
             workspace_id=workspace_id,
             force=force,
+        )
+    except Exception:
+        pass
+
+
+def _tick_rich_presence_best_effort(
+    store: Any,
+    *,
+    channel_id: str,
+    workspace_id: str = "",
+    armed: Optional[bool] = None,
+) -> None:
+    """Mac Rich Presence (Band B). Fail soft; independent of bot gateway."""
+
+    try:
+        from agent_discord.host.presence import tick_rich_presence
+
+        tick_rich_presence(
+            store,
+            channel_id=channel_id,
+            workspace_id=workspace_id,
+            armed=armed,
         )
     except Exception:
         pass

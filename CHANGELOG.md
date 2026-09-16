@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.82
+
+Band B (Discord-native):
+
+- Optional Mac **Rich Presence** via `pypresence` (`discord-os[presence]`). Independent of bot gateway presence.
+- `details` = live Job title or `idle`; `state` = HOST `On` / `Off` / `Halt`.
+- Flag `DISCORD_OS_PRESENCE=0` disables (default ON when the extra + `DISCORD_APPLICATION_ID` are present).
+- Fail soft if Discord desktop / IPC / the extra is missing — never crash `host run`.
+- Docs: `docs/co-work/band-b-pypresence.md`.
+
+HARD parks unchanged. Band C (webhooks) not opened.
+
 ## 0.5.81
 
 Band A (Discord-native):

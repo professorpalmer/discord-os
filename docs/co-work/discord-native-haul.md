@@ -42,9 +42,9 @@ The Discord OSS surface for *modules you import beside an existing discord.py ga
    - Pass/fail: fewer layout bugs, same interaction IDs/JobPool wiring, no gateway fork.  
    - Fail → fall back to `discord-pager` + hand LayoutView.
 
-2. **Add pypresence beside the Mac process (60 min)**  
+2. **Add pypresence beside the Mac process (60 min)** — **shipped 0.5.82**  
    - Presence details = current Job / idle; state = HOST mode.  
-   - Independent of bot token path.
+   - Independent of bot token path. Flag `DISCORD_OS_PRESENCE=0`.
 
 3. **Webhook channel for ops (30 min)**  
    - Tip deploy, Job failure, rate-limit storms → webhook. Keep interactive cards on the bot.
