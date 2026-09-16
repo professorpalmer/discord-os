@@ -582,6 +582,16 @@ class AgentOrchestrator:
                     summary=spoken,
                     error=spoken,
                 )
+                try:
+                    from agent_discord.host.webhook import notify_job_fail
+
+                    notify_job_fail(
+                        summary=spoken,
+                        error=spoken,
+                        run_id=run_id,
+                    )
+                except Exception:
+                    pass
                 if self.discord is not None:
                     try:
                         send_card(
@@ -1243,6 +1253,12 @@ class AgentOrchestrator:
             result.status == TaskStatus.FAILED
             and self._is_rate_limit(result.error)
         ):
+            try:
+                from agent_discord.host.webhook import notify_rate_limit
+
+                notify_rate_limit(detail=str(result.error or "429"))
+            except Exception:
+                pass
             self._sleep_retry()
             retry_request = DispatchRequest(
                 task_id=request.task_id,
@@ -1401,6 +1417,18 @@ class AgentOrchestrator:
             _job_code = self.store.task_job_code(task_id)
         except Exception:
             _job_code = ""
+        if result.status == TaskStatus.FAILED:
+            try:
+                from agent_discord.host.webhook import notify_job_fail
+
+                notify_job_fail(
+                    job_code=_job_code,
+                    summary=safe_final_summary,
+                    error=safe_error or "",
+                    run_id=run_id,
+                )
+            except Exception:
+                pass
         try:
             from agent_discord.orchestration.handoff_compensation import (
                 maybe_post_handoff_compensation,

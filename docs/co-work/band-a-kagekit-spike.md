@@ -22,4 +22,4 @@ Optional extras: `pip install discord-os[kagekit]` for local experiments — **n
 
 ## Next (not Band A)
 
-Band B pypresence shipped in 0.5.82. Band C+: webhook / jishaku — see `discord-native-haul.md`.
+Band B pypresence shipped in 0.5.82. Band C webhook shipped in 0.5.84. Band D: jishaku — see `discord-native-haul.md`.

@@ -46,8 +46,9 @@ The Discord OSS surface for *modules you import beside an existing discord.py ga
    - Presence details = current Job / idle; state = HOST mode.  
    - Independent of bot token path. Flag `DISCORD_OS_PRESENCE=0`.
 
-3. **Webhook channel for ops (30 min)**  
-   - Tip deploy, Job failure, rate-limit storms → webhook. Keep interactive cards on the bot.
+3. **Webhook channel for ops (30 min)** — **shipped 0.5.84**  
+   - Tip deploy, Job failure, rate-limit storms → webhook. Keep interactive cards on the bot.  
+   - Extra `discord-os[webhook]`. `DISCORD_OS_WEBHOOK=0` or empty URL = off.
 
 4. **Load jishaku behind owner check** for local tip debugging only.
 

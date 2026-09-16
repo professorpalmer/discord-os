@@ -34,3 +34,4 @@ Screenshots: real drops under [../screenshots](../screenshots/) only — do not 
 - [Wave 7 haul](wave7-haul.md) / [audit](wave7-audit.md)
 - [Band A kagekit spike](band-a-kagekit-spike.md) — FAIL adopt; thin HOST Page fallback
 - [Band B pypresence](band-b-pypresence.md) — optional Mac Rich Presence; `DISCORD_OS_PRESENCE=0`
+- [Band C webhook](band-c-webhook.md) — optional ops side-channel; `DISCORD_OS_WEBHOOK=0` or empty URL
