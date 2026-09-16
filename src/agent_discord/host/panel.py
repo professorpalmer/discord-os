@@ -598,6 +598,8 @@ def host_panel_payload(
         update_pill = update_available_pill()
     except Exception:
         update_pill = ""
+    job_rows = [j for j in (jobs or []) if str(j.get("task_id") or "") != "host-liveness"]
+    empty_jobs = not bool(job_rows) and not bool((last_job or "").strip())
     card = host_card(
         armed=armed,
         channel_id=channel_id,
@@ -617,6 +619,7 @@ def host_panel_payload(
         bank=bank,
         github=_panel_github(),
         update_pill=update_pill,
+        empty_jobs=empty_jobs,
     )
     # Discord-half P1: HOST Jobs chrome accent follows top Need/Live/Done bucket.
     if (

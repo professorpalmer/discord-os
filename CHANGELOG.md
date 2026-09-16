@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.80
+
+Wave 7 P0 (board + brain lakes):
+
+- **P0a** Cold-start TTFP demo + HOST empty-state tip (`Pair → Ask → Done`); setup stopwatch subsection.
+- **P0b** COMPARISON foils: BAGEN/TokenOps, AgentTrails, Harness-MU, Agent-Harness, Goose skills catalog.
+
+Still parked: phone companion Tailscale/ttyd/filebrowser, CU/docker, mailbox, multi-host DO, second JobPool, auto forum tags, multi-gateway, silent ssh.
+
 ## 0.5.79
 
 Wave 6 P2 stretch (board + brain lakes):

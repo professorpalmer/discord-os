@@ -17,6 +17,10 @@ WAVE6_SHARE = [
     ROOT / "docs" / "co-work" / "wave6-spend-meter.md",
 ]
 
+WAVE7_SHARE = [
+    ROOT / "docs" / "co-work" / "wave7-ttfp-demo.md",
+]
+
 FORBIDDEN_OVERCLAIM = (
     "graham",
     "companion-strip",
@@ -59,3 +63,30 @@ def test_wave6_share_brand_and_no_overclaim():
     assert "goose" in comparison
     assert "ledger" in comparison or "spendguard" in comparison
     assert "cloud agent" in comparison
+
+
+def test_wave7_ttfp_brand_and_parks():
+    for path in WAVE7_SHARE:
+        assert path.is_file(), path
+        text = path.read_text().lower()
+        if "graham" in text:
+            assert "never graham" in text or "not graham" in text
+        if "tailscale" in text or "ttyd" in text or "filebrowser" in text:
+            assert "no " in text or "park" in text or "not " in text
+    demo = (ROOT / "docs" / "co-work" / "wave7-ttfp-demo.md").read_text().lower()
+    assert "pair" in demo and "ask" in demo and "done" in demo
+    assert "board + brain lakes" in demo
+    comparison = (ROOT / "docs" / "COMPARISON.md").read_text().lower()
+    assert "wave 7" in comparison
+    assert "ttfp" in comparison or "bagen" in comparison or "agenttrails" in comparison
+    setup = (ROOT / "docs" / "setup" / "README.md").read_text().lower()
+    assert "ttfp" in setup or "stopwatch" in setup
+
+
+def test_host_empty_state_tip():
+    from agent_discord.orchestration.cards import host_card
+
+    card = host_card(armed=False, paired=False, empty_jobs=True, last_job="")
+    assert "Pair → Ask → Done" in (card.description or "")
+    warm = host_card(armed=True, paired=True, empty_jobs=False, last_job="DOS-1 · live")
+    assert "Pair → Ask → Done" not in (warm.description or "")
