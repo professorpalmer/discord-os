@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 0.5.72
+
+Wave 4 — board + brain lakes (board catch-up, swim-lane relationships,
+per-DRI brain lake, meat-proxy cut on handoff). Still single-host SQLite; no
+multi-host brain lakes / Durable Objects clones; CU/docker/mailbox parked.
+
+### Board catch-up + ADR/PR coordination tax (P0)
+
+- Catch-up while Off appends **Conflicts** when Need/Live jobs share ADR/PR refs.
+- Armed schedules with `board catch-up:` / `digest:` / `[board-catchup]` prompts
+  post a board digest **without** cooking (no storm).
+- HOST Jobs last-job line may show `Lanes: DOS-A ↔ DOS-B via ADR-N`.
+
+### Brain lake + meat-proxy cut (P1)
+
+- `discord-os add brain --dri … --strategy-docs … --transcripts-channel …`
+- Worker prompt `[brain-lake]` inject; journal preference kind.
+- `handoff`/`peer` prepends lake context + ROE escalate hint (`meat_proxy_cut`).
+
+Docs: [board-catchup](docs/co-work/board-catchup.md), [brain-lake](docs/co-work/brain-lake.md).
+Tests: `tests/test_wave4_board_brain.py`.
+
 ## 0.5.67
 
 ## 0.5.68

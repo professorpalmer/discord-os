@@ -12,6 +12,8 @@ over new planes.
 | Recipe | Where | Cadence note |
 |---|---|---|
 | Shared-desk demo (&lt;15 min) | [co-work/shared-desk-demo](../co-work/shared-desk-demo.md) | Pair×2, desk-pack, dual ask, handoff, overnight brief, gate park |
+| Board catch-up (ADR/PR) | [co-work/board-catchup](../co-work/board-catchup.md) | Catch-up + digest schedules |
+| Brain lake / meat-proxy cut | [co-work/brain-lake](../co-work/brain-lake.md) | `add brain --dri` + handoff lake context |
 | Overnight brief | [co-work/overnight-brief](../co-work/overnight-brief.md) | `schedule` + Catch-up `skipped_while_disarmed` |
 | Desk-pack inject | [co-work/desk-pack](../co-work/desk-pack.md) | realm+memory(+wiki/github) |
 | Handoff / peer-task | [co-work/handoff](../co-work/handoff.md) | JobPool-only |

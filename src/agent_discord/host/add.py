@@ -410,7 +410,59 @@ def add_desk_pack(
         "channel_id": cid,
         "steps": steps,
         "restart": restart,
-        "story": "REQUIRE_OPERATORS → Pair×2 → desk-pack → dual ask/steer → gate park",
+        "story": "REQUIRE_OPERATORS → Pair×2 → desk-pack → add brain --dri → dual ask/steer → handoff → gate park",
+    }
+
+
+
+def add_brain(
+    store: Any,
+    *,
+    channel_id: str,
+    dri: str,
+    strategy_docs: str = "",
+    transcripts_channel: str = "",
+    journal: bool = True,
+    workspace_id: str = "default",
+    realm: str = "",
+    env_file: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Per-DRI brain lake: optional realm + brain bind (strategy/transcripts/journal).
+
+    Honest limit: single-host SQLite — not multi-host Durable Objects.
+    """
+
+    from agent_discord.host.brain import bind_brain
+
+    steps: list[dict[str, Any]] = []
+    cid = (channel_id or "").strip()
+    if (realm or "").strip():
+        steps.append(
+            add_realm(
+                store,
+                name=(realm or "").strip(),
+                channel_id=cid,
+                workspace_id=workspace_id,
+                env_file=env_file,
+            )
+        )
+    brain = bind_brain(
+        store,
+        workspace_id=workspace_id,
+        channel_id=cid,
+        dri=dri,
+        strategy_docs=strategy_docs,
+        transcripts_channel=transcripts_channel,
+        journal=journal,
+    )
+    steps.append(brain)
+    return {
+        "kind": "brain",
+        "channel_id": cid,
+        "dri": dri,
+        "steps": steps,
+        "honest_limit": brain.get("honest_limit"),
+        "story": "desk-pack → add brain --dri → journal/strategy inject → handoff lakes",
     }
 
 

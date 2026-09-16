@@ -492,8 +492,21 @@ def drain_inbound(
                 )
                 continue
             
+            from agent_discord.host.brain import format_meat_proxy_handoff_preamble
+
+            try:
+                enriched_prompt = format_meat_proxy_handoff_preamble(
+                    store,
+                    workspace_id=workspace_id,
+                    channel_id=channel_id,
+                    from_id=author,
+                    to_id=peer_id,
+                    peer_prompt=peer_prompt,
+                )
+            except Exception:
+                enriched_prompt = peer_prompt
             handoff_intake = TaskIntake(
-                text=peer_prompt,
+                text=enriched_prompt,
                 channel_id=channel_id,
                 workspace_id=workspace_id,
                 guild_id=guild_id,
@@ -505,6 +518,7 @@ def drain_inbound(
                     "handoff_from": author,
                     "handoff_to": peer_id,
                     "lane": "handoff",
+                    "meat_proxy_cut": True,
                 },
             )
             job_pool.submit(
@@ -1715,6 +1729,8 @@ def _fire_due_schedules(
         )
         return []
 
+    from agent_discord.orchestration.board_catchup import is_board_digest_prompt
+
     receipts: list[RunReceipt] = []
     for row in due:
         prompt = str(row.get("prompt") or "").strip()
@@ -1724,6 +1740,21 @@ def _fire_due_schedules(
             continue
         created_by = str(row.get("created_by") or "")
         if created_by and not author_may_dispatch(store, created_by):
+            continue
+        # Wave 4 P0: board digest schedules post conflict scan without a cook.
+        if is_board_digest_prompt(prompt):
+            _post_board_digest(
+                discord if discord is not None else getattr(orchestrator, "discord", None),
+                store,
+                channel_id=channel_id,
+                thread_id=thread_id,
+                prompt=prompt,
+            )
+            if callable(bumper) and every_s > 0:
+                try:
+                    bumper(schedule_id, now_ms + every_s * 1000)
+                except Exception:
+                    pass
             continue
         try:
             receipts.append(
@@ -1759,7 +1790,16 @@ def _catch_up_skipped_while_disarmed(
     now_ms: int,
     bumper: Any,
 ) -> None:
-    """One Catch-up briefing; bump due schedules so Off→On does not storm."""
+    """One Catch-up briefing; bump due schedules so Off→On does not storm.
+
+    Wave 4: also surface ADR/PR board conflicts so cron catch-up reduces
+    coordination tax without a job storm.
+    """
+
+    from agent_discord.orchestration.board_catchup import (
+        collect_channel_conflicts,
+        format_board_catchup,
+    )
 
     skipped: list[str] = []
     for row in due:
@@ -1785,12 +1825,52 @@ def _catch_up_skipped_while_disarmed(
                 pass
     if not skipped:
         return
-    body = (
-        f"Catch-up: {len(skipped)} schedule(s) skipped_while_disarmed — "
-        + "; ".join(skipped[:8])
+    conflicts = []
+    try:
+        conflicts = collect_channel_conflicts(store, channel_id)
+    except Exception:
+        conflicts = []
+    body = format_board_catchup(skipped_labels=skipped, conflicts=conflicts)
+    send = getattr(discord, "send_message", None) if discord is not None else None
+    if not callable(send):
+        return
+    try:
+        send(channel_id, body, thread_id=thread_id)
+    except TypeError:
+        try:
+            send(channel_id, body)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+def _post_board_digest(
+    discord: Any,
+    store: Any,
+    *,
+    channel_id: str,
+    thread_id: Optional[str],
+    prompt: str = "",
+) -> None:
+    """Armed board-digest schedule: conflict scan only (no cook storm)."""
+
+    from agent_discord.orchestration.board_catchup import (
+        collect_channel_conflicts,
+        format_board_catchup,
     )
-    if len(skipped) > 8:
-        body += f" (+{len(skipped) - 8} more)"
+
+    conflicts = []
+    try:
+        conflicts = collect_channel_conflicts(store, channel_id)
+    except Exception:
+        conflicts = []
+    pushed: list[str] = []
+    if conflicts:
+        pushed.append("review shared ADR/PR lanes before next implement")
+    elif (prompt or "").strip():
+        pushed.append("board quiet — no shared ADR/PR refs on Need/Live")
+    body = format_board_catchup(conflicts=conflicts, pushed=pushed)
     send = getattr(discord, "send_message", None) if discord is not None else None
     if not callable(send):
         return
