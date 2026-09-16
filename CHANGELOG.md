@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.66
+
+Wave 2 shareability: real cross-host read-only status (`discord-os host hosts`,
+dashboard/digest reach bits), forum-tags refresh without creating
+`available_tags` (HARD refuse in `modify_channel`), mailbox stays parked,
+crhq.ai ranked notes under `docs/co-work/`.
+
 ## 0.5.65
 
 - Loosen e2e parallel-drain timing bound (CI 3.11 flake under load); still proves non-blocking vs SlowBackend hold.
