@@ -195,6 +195,12 @@ def modify_channel(
     if not cid:
         raise ToolInvocationError("Discord channel id required")
     body = dict(payload or {})
+    # HARD lock: never auto-create / rewrite forum available_tags.
+    if "available_tags" in body:
+        raise ToolInvocationError(
+            "refused: Discord OS never mutates available_tags "
+            "(add tags manually on the forum)"
+        )
     raw = call_discord_json(
         token, "PATCH", f"/channels/{cid}", payload=body, opener=opener
     )
