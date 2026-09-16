@@ -1,7 +1,7 @@
 # Brain lake (per-DRI, Wave 4)
 
 ```bash
-discord-os add brain --channel-id CHANNEL --dri graham \
+discord-os add brain --channel-id CHANNEL --dri alex \
   --strategy-docs ~/Projects/strategy \
   --transcripts-channel TRANSCRIPTS_CHANNEL_ID
 ```

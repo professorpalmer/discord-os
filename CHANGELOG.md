@@ -4,7 +4,7 @@
 
 ## 0.5.72
 
-Wave 4 — Graham/Michael thread close (board catch-up, swim-lane relationships,
+Wave 4 — board + brain lakes (board catch-up, swim-lane relationships,
 per-DRI brain lake, meat-proxy cut on handoff). Still single-host SQLite; no
 multi-host brain lakes / Durable Objects clones; CU/docker/mailbox parked.
 

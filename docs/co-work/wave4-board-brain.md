@@ -1,4 +1,4 @@
-# Discord OS — Wave 4 (Graham @grahamcodes / Michael @backnotprop thread)
+# Discord OS — Wave 4 (board + brain lakes)
 
 **Audience:** Cary Palmer  
 **Date:** 2026-09-16 (America/Chicago)  
@@ -21,7 +21,7 @@
 - **P0a Board catch-up conflict digest** — Catch-up + `board catch-up:` / `digest:` schedules scan Need/Live jobs for shared ADR/PR refs; one briefing card; no storm.
 - **P0b Swim-lane relationships** — HOST/Jobs briefing appends `↔` lines when jobs share ADR/PR/cwd.
 
-### P1 — closes #2+#3 (markets to Graham)
+### P1 — closes #2+#3 (swim-lane + meat-proxy)
 - **P1a Brain lake bind** — `discord-os add brain --dri …` (+ desk-pack story); prompt inject strategy docs path + transcripts channel + journal notes.
 - **P1b Meat-proxy cut on handoff** — handoff/peer prepends lake context + ROE escalate hint so lakes talk via JobPool cards, not human copy-paste.
 
@@ -37,7 +37,7 @@ Share kit, COMPARISON, shared-desk demo, recipes, overnight brief, handoff/peer 
 ## Ship status (2026-09-16 ~00:47 CT)
 
 - **Version:** 0.5.72
-- **Commit:** `4584b2b130c28f24b3ba219e7ccbe72aecb10bf6` on branch `haul/wave4-graham-thread`
+- **Commit:** `4584b2b130c28f24b3ba219e7ccbe72aecb10bf6` on branch `haul/wave4-board-brain`
 - **Bundle:** `/workspace/discord-os-0.5.72-wave4.bundle`
 - **Patch:** `/workspace/discord-os-0.5.72-wave4.patch`
 - **Tests:** `tests/test_wave4_board_brain.py` + co-work / Catch-up — green in box venv
@@ -45,10 +45,10 @@ Share kit, COMPARISON, shared-desk demo, recipes, overnight brief, handoff/peer 
 
 ```bash
 cd /Users/carypalmer/Projects/discord-os
-git fetch /path/to/discord-os-0.5.72-wave4.bundle haul/wave4-graham-thread:haul/wave4-graham-thread
+git fetch /path/to/discord-os-0.5.72-wave4.bundle haul/wave4-board-brain:haul/wave4-board-brain
 # or: git am /path/to/discord-os-0.5.72-wave4.patch
-git checkout haul/wave4-graham-thread
+git checkout haul/wave4-board-brain
 git push -u origin HEAD
-gh pr create --title "Ship Discord OS 0.5.72 — Wave 4 Graham thread" --body "Board catch-up + brain lake + meat-proxy cut. See docs/co-work/wave4-graham-thread.md"
+gh pr create --title "Ship Discord OS 0.5.72 — Wave 4 board + brain lakes" --body "Board catch-up + brain lake + meat-proxy cut. See docs/co-work/wave4-board-brain.md"
 # PyPI if TWINE/PYPI token in ~/.zshrc
 ```

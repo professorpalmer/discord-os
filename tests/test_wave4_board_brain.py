@@ -123,20 +123,20 @@ def test_add_brain_and_prompt_block(tmp_path: Path, monkeypatch):
     payload = add_brain(
         store,
         channel_id="ch-brain",
-        dri="graham",
+        dri="alex",
         strategy_docs=str(docs),
         transcripts_channel="tr-1",
         journal=True,
     )
     assert payload["kind"] == "brain"
-    assert payload["dri"] == "graham"
-    store.set_preference("default", "journal:graham:1", "noted swim lanes", kind="journal")
+    assert payload["dri"] == "alex"
+    store.set_preference("default", "journal:alex:1", "noted swim lanes", kind="journal")
     binding = store.get_binding("default", "ch-brain")
     block = format_brain_prompt_block(
         binding, store=store, workspace_id="default"
     )
     assert "[brain-lake]" in block
-    assert "graham" in block
+    assert "alex" in block
     assert "Strategy docs" in block
     assert "Durable Objects" in block
     preamble = format_meat_proxy_handoff_preamble(
