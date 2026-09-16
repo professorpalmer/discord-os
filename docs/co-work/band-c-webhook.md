@@ -40,4 +40,4 @@ Code: `src/agent_discord/host/webhook.py`. Tests mock HTTP — no live Discord w
 
 ## Parks
 
-Board + brain lakes (never Graham). Band D (jishaku) not opened. Presence left alone. HARD parks unchanged: CU/docker, mailbox, multi-host DO lakes, second JobPool, multi-gateway, auto forum tags, silent ssh cook, phone companion Tailscale/ttyd/filebrowser.
+Board + brain lakes (never Graham). Band D jishaku shipped in 0.5.85 (loop closed). Presence left alone. HARD parks unchanged: CU/docker, mailbox, multi-host DO lakes, second JobPool, multi-gateway, auto forum tags, silent ssh cook, phone companion Tailscale/ttyd/filebrowser.

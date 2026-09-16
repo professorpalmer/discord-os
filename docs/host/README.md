@@ -154,11 +154,16 @@ Desktop Discord on this Mac can show HOST as an activity. Independent of bot gat
 
 HTTP-only alerts to a Discord webhook. **Not** JobPool / HOST cards. Install `discord-os[webhook]`. Set `DISCORD_OS_WEBHOOK_URL` (comma-separated URLs ok). `DISCORD_OS_WEBHOOK=0` **or** empty URL = off. Fires host start / version kick (once), Job fail, Halt, and a debounced rate-limit storm hook. Fail soft — never blocks gateway, cards, or JobPool. See [band-c-webhook](../co-work/band-c-webhook.md).
 
+## jishaku (Cary tip debugging only)
+
+Not a product feature. Optional extra `discord-os[debug]`. Default **off.** `DISCORD_OS_JISHAKU=1` **and** owner / allowlisted operator. Flag alone does not enable. Cog attach parked (REST host; no second gateway). See [band-d-jishaku](../co-work/band-d-jishaku.md).
+
 ## Code
 
 - `src/agent_discord/host/panel.py` — HOST card, Ask channel; `refresh_host_jobs_panel` after ranking flips
 - `src/agent_discord/host/presence.py` — optional pypresence (Job title + On/Off/Halt)
 - `src/agent_discord/host/webhook.py` — optional discord-webhook ops side-channel
+- `src/agent_discord/host/jishaku.py` — optional jishaku tip-debug gate (default off; owner only)
 - `src/agent_discord/host/power.py` — armed / pid
 - `src/agent_discord/host/runners.py` — multi-host allowlist (fail-closed)
 - `src/agent_discord/orchestration/service.py` — operators / REQUIRE_OPERATORS

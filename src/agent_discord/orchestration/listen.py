@@ -361,6 +361,18 @@ def drain_inbound(
                 store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
+        if _maybe_absorb_jishaku(
+            message,
+            discord=discord,
+            store=store,
+            channel_id=channel_id,
+            thread_id=message.thread_id or thread_id,
+            env=env,
+        ):
+            watermark = _advance_listen_watermark(
+                store, watermark_key, created_ms, message.message_id, watermark
+            )
+            continue
         intake_text, intake_meta, skip_voice = _collab_intake(message, discord)
         if skip_voice:
             _claim_inbound(store, discord, message, channel_id)
@@ -1292,6 +1304,42 @@ def _maybe_post_dual_steer_note(
 def _workspace_from(orchestrator: Any) -> Optional[Path]:
     raw = getattr(orchestrator, "workspace", None)
     return Path(raw) if raw is not None else None
+
+
+def _maybe_absorb_jishaku(
+    message: DiscordMessage,
+    *,
+    discord: Any,
+    store: Any,
+    channel_id: str,
+    thread_id: Optional[str],
+    env: Optional[Mapping[str, str]],
+) -> bool:
+    """Intercept ``jsk`` / ``jishaku`` only when ``DISCORD_OS_JISHAKU=1``."""
+
+    try:
+        from agent_discord.host.jishaku import (
+            absorb_jishaku_command,
+            is_jishaku_command,
+            jishaku_flag_on,
+        )
+    except Exception:
+        return False
+    if not jishaku_flag_on(env):
+        return False
+    if not is_jishaku_command(message.content or ""):
+        return False
+    _claim_inbound(store, discord, message, channel_id)
+    absorb_jishaku_command(
+        message,
+        discord=discord,
+        store=store,
+        channel_id=channel_id,
+        thread_id=thread_id,
+        env=env,
+        role_ids=_author_role_ids(message),
+    )
+    return True
 
 
 def _absorb_connect(

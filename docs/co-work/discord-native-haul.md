@@ -16,6 +16,8 @@ The Discord OSS surface for *modules you import beside an existing discord.py ga
 
 **Do not** migrate Discord OS off discord.py for library fashion. Stay on Rapptz; bolt UI.
 
+**Loop status (0.5.85):** Bands A–D shipped. Discord-native prioritized tack-on loop **closed**. Wave 7 P1 not opened.
+
 ---
 
 ## Top tack-on candidates (ranked)
@@ -50,7 +52,9 @@ The Discord OSS surface for *modules you import beside an existing discord.py ga
    - Tip deploy, Job failure, rate-limit storms → webhook. Keep interactive cards on the bot.  
    - Extra `discord-os[webhook]`. `DISCORD_OS_WEBHOOK=0` or empty URL = off.
 
-4. **Load jishaku behind owner check** for local tip debugging only.
+4. **Load jishaku behind owner check** for local tip debugging only. — **shipped 0.5.85** (loop closed)  
+   - Extra `discord-os[debug]`. Default off. `DISCORD_OS_JISHAKU=1` **and** owner / allowlisted operator.  
+   - Cog attach parked (REST host; no `commands.Bot` / second gateway).
 
 5. **Do not** open PRs to swap discord.py → hikari/pycord this quarter.
 
@@ -99,4 +103,4 @@ Discord-specific HCI 2023–2026 is scarce but pointed: **ApoloBot (CHI’25)** 
 - https://arxiv.org/abs/2502.18861 (ApoloBot)  
 - https://arxiv.org/abs/2509.25492 (Botender)  
 
-**Recommendation Cary can act on:** Spike **kagekit** this week; ship **pypresence** + **webhooks** regardless; stay on discord.py; park forks/Activities/voice until a deliberate bet.
+**Recommendation Cary can act on:** Bands A–D shipped (kagekit spike FAIL→Page; pypresence; webhooks; jishaku owner-only). Discord-native prioritized loop **closed**. Stay on discord.py; park forks/Activities/voice until a deliberate bet. Wave 7 P1 not opened.

@@ -1748,6 +1748,12 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
             notify_host_start(channel_id=str(args.channel_id or ""))
         except Exception:
             pass
+        try:
+            from agent_discord.host.jishaku import maybe_load_jishaku
+
+            maybe_load_jishaku(store=store)
+        except Exception:
+            pass
         # Local process lock. Message intake stays REST. Host run opens a
         # Discord Gateway only so On/Off buttons work (no public URL).
         if not args.fake and config.discord_bot_token:
