@@ -270,10 +270,10 @@ def test_absorb_uses_mocked_loader(tmp_path: Path):
     store.close()
 
 
-def test_package_version_is_085():
-    assert __version__ == "0.5.85"
+def test_package_version_is_current():
+    assert __version__ == "0.5.86"
     text = Path("pyproject.toml").read_text()
-    assert 'version = "0.5.85"' in text
+    assert 'version = "0.5.86"' in text
     assert 'debug = ["jishaku>=2.5"]' in text
 
 
