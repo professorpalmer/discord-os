@@ -461,6 +461,7 @@ def receipt_card(
     job_code: str = "",
     operator: str = "",
     lane: str = "",
+    handoff_envelope: Any = None,
 ) -> CardMessage:
     title, color = _RECEIPT_TITLES.get(receipt.status, ("Receipt", COLOR_IDLE))
     summary = str(strip_forbidden_keys({"summary": receipt.summary}).get("summary", ""))
@@ -501,6 +502,11 @@ def receipt_card(
     lane_s = (lane or "").strip()
     if lane_s:
         fields.append(("Lane", lane_s, True))
+    if handoff_envelope is not None:
+        clipped = getattr(handoff_envelope, "clipped_fields", None)
+        rows = clipped(max_len=72) if callable(clipped) else []
+        for label, value in rows[:6]:
+            fields.append((str(label), str(value), True))
     _ = max_progress
     fname, fbytes = settle_file_attachment(receipt)
     chrome = _receipt_chrome(receipt.status)

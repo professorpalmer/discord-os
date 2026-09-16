@@ -204,6 +204,7 @@ def reactive_receipt_card(
     job_code: str = "",
     operator: str = "",
     lane: str = "",
+    handoff_envelope=None,
 ) -> CardMessage:
     """Settle / deny / Done paint — idle Continue when a job thread exists."""
 
@@ -216,6 +217,7 @@ def reactive_receipt_card(
         job_code=job_code,
         operator=operator,
         lane=lane,
+        handoff_envelope=handoff_envelope,
     )
     # Align accent + chrome from the seam (Need/Live/Done).
     return CardMessage(

@@ -493,7 +493,34 @@ def drain_inbound(
                 continue
             
             from agent_discord.host.brain import format_meat_proxy_handoff_preamble
+            from agent_discord.orchestration.handoff_envelope import (
+                build_handoff_envelope,
+                find_live_handoff_claim,
+                spoken_already_claimed,
+            )
 
+            envelope, cleaned_prompt = build_handoff_envelope(
+                from_id=author,
+                to_id=peer_id,
+                peer_prompt=peer_prompt,
+            )
+            claimed = find_live_handoff_claim(
+                store, envelope.handoff_id, channel_id=channel_id
+            )
+            if claimed is not None:
+                _post_host_deny(
+                    discord,
+                    channel_id,
+                    follow_thread,
+                    spoken_already_claimed(
+                        envelope.handoff_id,
+                        job_code=str(claimed.get("job_code") or ""),
+                    ),
+                )
+                watermark = _advance_listen_watermark(
+                    store, watermark_key, created_ms, message.message_id, watermark
+                )
+                continue
             try:
                 enriched_prompt = format_meat_proxy_handoff_preamble(
                     store,
@@ -501,10 +528,24 @@ def drain_inbound(
                     channel_id=channel_id,
                     from_id=author,
                     to_id=peer_id,
-                    peer_prompt=peer_prompt,
+                    peer_prompt=cleaned_prompt,
+                    envelope=envelope,
                 )
+            except TypeError:
+                try:
+                    enriched_prompt = format_meat_proxy_handoff_preamble(
+                        store,
+                        workspace_id=workspace_id,
+                        channel_id=channel_id,
+                        from_id=author,
+                        to_id=peer_id,
+                        peer_prompt=cleaned_prompt,
+                    )
+                except Exception:
+                    enriched_prompt = cleaned_prompt
             except Exception:
-                enriched_prompt = peer_prompt
+                enriched_prompt = cleaned_prompt
+            handoff_meta = envelope.as_metadata()
             handoff_intake = TaskIntake(
                 text=enriched_prompt,
                 channel_id=channel_id,
@@ -513,13 +554,7 @@ def drain_inbound(
                 thread_id=follow_thread,
                 message_id=message.message_id or None,
                 requester_id=peer_id,
-                metadata={
-                    "peer_task": True,
-                    "handoff_from": author,
-                    "handoff_to": peer_id,
-                    "lane": "handoff",
-                    "meat_proxy_cut": True,
-                },
+                metadata=handoff_meta,
             )
             job_pool.submit(
                 orchestrator.run_task,
@@ -531,7 +566,8 @@ def drain_inbound(
                 if callable(send):
                     send(
                         channel_id,
-                        f"Handoff → <@{peer_id}> (JobPool) — {peer_prompt[:120]}",
+                        f"Handoff → <@{peer_id}> id={envelope.handoff_id} "
+                        f"(JobPool) — {cleaned_prompt[:100]}",
                         thread_id=follow_thread,
                     )
             except Exception:

@@ -25,7 +25,7 @@ Discord OS is a **shared desk**: Discord is the screen, this Mac process is the 
 | Vendor cowork / computer-use runtime | Elsewhere — see [docs/COMPARISON.md](docs/COMPARISON.md) |
 | Thin “message → subprocess → stdout” bridge | A smaller custom bot |
 
-**Shared desk in &lt;15 minutes:** [docs/co-work/shared-desk-demo.md](docs/co-work/shared-desk-demo.md) (Pair×2 → desk-pack → dual ask → handoff → overnight brief → gate park). **Recipes index:** [docs/recipes/README.md](docs/recipes/README.md).
+**Shared desk in &lt;15 minutes:** [docs/co-work/shared-desk-demo.md](docs/co-work/shared-desk-demo.md) (Pair×2 → desk-pack → dual ask → handoff → overnight brief → gate park). **Recipes index:** [docs/recipes/README.md](docs/recipes/README.md). **Board + brain lakes:** [docs/co-work/wave5-board-brain-demo.md](docs/co-work/wave5-board-brain-demo.md).
 
 **Compare:** [docs/COMPARISON.md](docs/COMPARISON.md). **Policy locks:** [docs/host/policy.md](docs/host/policy.md).
 
