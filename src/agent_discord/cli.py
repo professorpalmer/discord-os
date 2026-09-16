@@ -515,6 +515,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_add_desk.add_argument("--wiki-url", default="")
     p_add_desk.add_argument("--wiki-token", default="")
     p_add_desk.add_argument("--github-token", default="")
+    p_add_brain = add_sub.add_parser(
+        "brain",
+        help="Per-DRI brain lake bind (strategy docs + transcripts + journal; single-host)",
+    )
+    p_add_brain.add_argument("--channel-id", required=True)
+    p_add_brain.add_argument("--dri", required=True, help="DRI / operator label for this brain")
+    p_add_brain.add_argument("--strategy-docs", default="", help="Path to strategy docs dir/file")
+    p_add_brain.add_argument("--transcripts-channel", default="", help="Discord channel id for meeting transcripts")
+    p_add_brain.add_argument("--no-journal", action="store_true", help="Skip journal inject")
+    p_add_brain.add_argument("--realm", default="", help="Optional realm name to bind first")
+    p_add_brain.add_argument("--workspace-id", default="default")
+    p_add_brain.add_argument("--json", action="store_true")
     p_add_forum_tags = add_sub.add_parser(
         "forum-tags",
         help="Refresh tags-as-tickets map from existing forum available_tags (never creates tags)",
@@ -922,6 +934,7 @@ def cmd_schedule(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
 def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     out = out or sys.stdout
     from agent_discord.host.add import (
+        add_brain,
         add_desk_pack,
         add_github,
         add_memory,
@@ -997,6 +1010,24 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                 )
             finally:
                 store.close()
+        elif command == "brain":
+            config = load_config()
+            store = SQLiteStore(config.database_path)
+            store.initialize()
+            try:
+                payload = add_brain(
+                    store,
+                    channel_id=args.channel_id,
+                    dri=args.dri,
+                    strategy_docs=getattr(args, "strategy_docs", "") or "",
+                    transcripts_channel=getattr(args, "transcripts_channel", "") or "",
+                    journal=not bool(getattr(args, "no_journal", False)),
+                    workspace_id=getattr(args, "workspace_id", None) or "default",
+                    realm=getattr(args, "realm", "") or "",
+                )
+            finally:
+                store.close()
+
         elif command == "forum-tags":
             from agent_discord.host.forum_realm import (
                 ForumRealmError,
@@ -1029,7 +1060,7 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
             return 0
         else:
             print(
-                "add: realm, memory, repo, wiki, tool, github, desk-pack, forum-tags, or list",
+                "add: realm, memory, repo, wiki, tool, github, desk-pack, brain, forum-tags, or list",
                 file=sys.stderr,
             )
             return 2
@@ -1146,6 +1177,13 @@ def cmd_run(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     if args.fake:
         provider = FakeDiscordMCPProvider()
         backend = FakePuppetmasterBackend()
+    elif kind == "brain":
+        print(
+            f"brain dri={payload.get('dri')} #{payload.get('channel_id')} "
+            f"(single-host lake; not multi-host DO)",
+            file=out,
+        )
+
     else:
         provider = select_provider(config)
         backend = _select_backend(config)

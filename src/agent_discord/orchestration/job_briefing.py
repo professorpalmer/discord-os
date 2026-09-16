@@ -101,3 +101,19 @@ def is_idle_job(job: Mapping[str, Any]) -> bool:
 
     status = str(job.get("status") or "").strip().lower()
     return status in {"completed", "failed", "cancelled"}
+
+
+def lane_relationships(jobs: list[Mapping[str, Any]], *, limit: int = 6) -> list[str]:
+    """Technical relationship lines for swim lanes (shared ADR/PR/cwd).
+
+    Soft-empty when fewer than two active jobs. Used by HOST Jobs briefing.
+    """
+
+    from agent_discord.orchestration.board_catchup import (
+        format_conflict_lines,
+        scan_job_conflicts,
+    )
+
+    hits = scan_job_conflicts(jobs)
+    return format_conflict_lines(hits, limit=limit)
+

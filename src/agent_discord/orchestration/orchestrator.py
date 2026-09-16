@@ -663,6 +663,25 @@ class AgentOrchestrator:
                     },
                 )
         binding = self.store.get_binding(intake.workspace_id, intake.channel_id) or {}
+        try:
+            from agent_discord.host.brain import format_brain_prompt_block
+
+            brain_block = format_brain_prompt_block(
+                binding,
+                store=self.store,
+                workspace_id=intake.workspace_id,
+            )
+        except Exception:
+            brain_block = ""
+        if brain_block:
+            memories.insert(
+                0,
+                {
+                    "memory_id": "brain-lake",
+                    "content": brain_block[:2000],
+                    "source": "brain-lake",
+                },
+            )
         research_context = self._optional_research_context(intake)
         provenance: dict[str, Any] = {
             "source": "sqlite",

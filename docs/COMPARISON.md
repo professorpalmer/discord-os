@@ -45,6 +45,13 @@ Discord OS keeps the supervisor thin:
 
 Use a supervisor OS when you want fleet orchestration as the core. Use Discord OS when the **phone Discord channel** is the desk and the Mac is the computer.
 
+## Wave 4 (Graham thread close — still no fleet)
+
+- **Board catch-up** — Catch-up + `digest:` / `board catch-up:` schedules surface ADR/PR lane conflicts.
+- **Brain lake** — `discord-os add brain --dri` (strategy docs + transcripts + journal) on one Mac SQLite.
+- **Meat-proxy cut** — handoff/peer carries lake context; humans Pair/gate on ROE only.
+- Still **not** multi-host brain lakes / Durable Objects clones.
+
 ## Wave 2 shareability (still no fleet)
 
 - **Cross-host RO** — `discord-os host hosts` (+ dashboard/digest reach bits). Allowlist fail-closed; probes never cook; `kind=ssh` unreachable is spoken honestly (no silent local fallback).

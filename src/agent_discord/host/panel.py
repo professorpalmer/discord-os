@@ -1625,7 +1625,11 @@ def _panel_last_job(store: Any, channel_id: str) -> str:
     jobs = _panel_jobs(store, channel_id)
     if not jobs:
         return ""
-    return briefing_line(jobs[0])
+    line = briefing_line(jobs[0])
+    footer = _lane_relationship_footer(jobs)
+    if footer:
+        return f"{line} · {footer}" if line else footer
+    return line
 
 
 def _panel_realm(store: Any, channel_id: str) -> str:
@@ -2181,3 +2185,16 @@ def _handle_poll_modal(
     except Exception as exc:
         print(f"panel poll failed: {exc}", flush=True)
     return "poll"
+
+
+def _lane_relationship_footer(jobs: list) -> str:
+    """Wave 4: swim-lane technical relationships for HOST Jobs."""
+    try:
+        from agent_discord.orchestration.job_briefing import lane_relationships
+        lines = lane_relationships(jobs or [])
+    except Exception:
+        return ""
+    if not lines:
+        return ""
+    return "Lanes: " + " · ".join(lines[:4])
+
