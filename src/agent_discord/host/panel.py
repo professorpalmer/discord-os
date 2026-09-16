@@ -598,7 +598,7 @@ def host_panel_payload(
         update_pill = update_available_pill()
     except Exception:
         update_pill = ""
-    job_rows = [j for j in (jobs or []) if str(j.get("task_id") or "") != "host-need"]
+    job_rows = [j for j in (jobs or []) if str(j.get("task_id") or "") != "host-liveness"]
     empty_jobs = not bool(job_rows) and not bool((last_job or "").strip())
     card = host_card(
         armed=armed,
