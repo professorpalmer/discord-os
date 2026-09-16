@@ -239,14 +239,26 @@ def tick_rich_presence(
     global _SESSION
     if not presence_enabled(env):
         return False
+    app_id = str(application_id or "").strip()
+    if not app_id:
+        try:
+            from agent_discord.config import apply_runtime_secrets, load_config
+
+            app_id = resolve_application_id(
+                env, config=apply_runtime_secrets(load_config())
+            )
+        except Exception:
+            app_id = resolve_application_id(env)
     if _SESSION is None:
         _SESSION = RichPresence(
             client=client,
-            application_id=application_id,
+            application_id=app_id,
             env=env,
         )
     elif client is not None and _SESSION._client is None:
         _SESSION._client = client
+    elif app_id and not getattr(_SESSION, "_application_id", ""):
+        _SESSION._application_id = app_id
     try:
         payload = snapshot_presence(
             store,

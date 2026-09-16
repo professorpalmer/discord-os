@@ -36,3 +36,8 @@ Code: `src/agent_discord/host/presence.py`. Tests mock IPC — no Discord deskto
 ## Parks
 
 Board + brain lakes (never Graham). Band C (webhooks) not opened. HARD parks unchanged: CU/docker, mailbox, multi-host DO lakes, second JobPool, multi-gateway, auto forum tags, silent ssh cook, phone companion Tailscale/ttyd/filebrowser.
+
+
+## Hotfix 0.5.83
+
+Host ticks resolve the application id from cwd `.env` / `load_config` when `DISCORD_APPLICATION_ID` is not exported into the LaunchAgent environment.
