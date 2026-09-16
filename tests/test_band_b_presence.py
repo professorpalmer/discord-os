@@ -270,3 +270,60 @@ def test_band_b_doc_records_flag_and_parks():
     assert "fail soft" in lowered or "fail-soft" in lowered
     assert "graham" not in lowered or "never graham" in lowered
     assert "webhook" not in lowered or "band c" in lowered
+
+
+def test_tick_resolves_application_id_from_config(monkeypatch, tmp_path):
+    """LaunchAgent may omit DISCORD_APPLICATION_ID in process env; .env/config must win."""
+
+    from agent_discord.host import presence as rp
+
+    monkeypatch.delenv("DISCORD_APPLICATION_ID", raising=False)
+    monkeypatch.setenv("DISCORD_OS_PRESENCE", "1")
+    rp.reset_rich_presence_for_tests()
+
+    class _Cfg:
+        discord_application_id = "123456789012345678"
+
+    class _Store:
+        def host_is_armed(self, channel_id: str) -> bool:
+            return True
+
+        def list_recent_jobs(self, channel_id: str, limit: int = 8):
+            return []
+
+    seen: dict[str, str] = {}
+
+    class _Client:
+        def __init__(self, app_id: str) -> None:
+            seen["app_id"] = str(app_id)
+
+        def connect(self) -> None:
+            return None
+
+        def update(self, **kwargs) -> None:
+            seen["update"] = "1"
+
+    def _load():
+        return _Cfg()
+
+    def _apply(cfg):
+        return cfg
+
+    monkeypatch.setattr("agent_discord.config.load_config", _load)
+    monkeypatch.setattr("agent_discord.config.apply_runtime_secrets", _apply)
+
+    # Force Presence() path to use our client factory via injecting after resolve
+    real_ensure = rp.RichPresence._ensure_client
+
+    def _ensure(self) -> bool:
+        app_id = self._application_id or rp.resolve_application_id(self._env)
+        if not app_id:
+            # mimic production: resolve via config inside tick already set _application_id
+            return False
+        self._client = _Client(app_id)
+        return True
+
+    monkeypatch.setattr(rp.RichPresence, "_ensure_client", _ensure)
+    ok = rp.tick_rich_presence(_Store(), channel_id="ch", armed=True)
+    assert ok is True
+    assert seen.get("app_id") == "123456789012345678"

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.83
+
+### Band B hotfix — Rich Presence application id from config
+- `tick_rich_presence` resolves `DISCORD_APPLICATION_ID` via `load_config()` when process env is empty (LaunchAgent + cwd `.env`).
+- Still fail-soft when Discord desktop IPC is missing.
+
 ## 0.5.82
 
 Band B (Discord-native):
