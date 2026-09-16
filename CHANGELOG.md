@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.77
+
+Wave 6 P0 (board + brain lakes):
+
+- **P0a** HOST phone spend meter + Halt honesty (`format_spend_meter` / `progress_bar`); unknown ≠ $0.
+- **P0b** COMPARISON foils (Goose / Cloud Agents / Spec Kit / Ledger) + `wave6-board-brain-demo.md` (Discord-native phone only).
+
+Still parked: phone companion Tailscale/ttyd/filebrowser, CU/docker, mailbox, multi-host DO, second JobPool, auto forum tags, multi-gateway, silent ssh.
+
 ## 0.5.76
 
 Wave 5 P2 stretch (board + brain lakes):

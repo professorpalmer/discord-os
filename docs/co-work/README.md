@@ -25,3 +25,5 @@ Screenshots: real drops under [../screenshots](../screenshots/) only — do not 
 | [wave5-claim](wave5-claim.md) | Blackboard `claim <job_code>` |
 - [Handoff compensation NOTE](wave5-compensation.md) — Saga-lite parent NOTE on failed peer
 - [DRI role SOP](wave5-dri-role.md) — `add brain --role implementer|reviewer|planner`
+- [Wave 6 spend meter](wave6-spend-meter.md) — HOST phone ASCII meter + Halt honesty
+- [Wave 6 board + brain demo](wave6-board-brain-demo.md) — <15m Discord-native phone loop

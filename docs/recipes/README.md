@@ -11,6 +11,7 @@ over new planes.
 
 | Recipe | Where | Cadence note |
 |---|---|---|
+| Wave 6 board + brain demo | [wave6-board-brain-demo.md](../co-work/wave6-board-brain-demo.md) | Discord phone; spend meter glance |
 | Wave 5 board + brain demo | [co-work/wave5-board-brain-demo](../co-work/wave5-board-brain-demo.md) | desk-pack → brain → handoff envelope → board catch-up |
 | Shared-desk demo (&lt;15 min) | [co-work/shared-desk-demo](../co-work/shared-desk-demo.md) | Pair×2, desk-pack, dual ask, handoff, overnight brief, gate park |
 | Board catch-up (ADR/PR) | [co-work/board-catchup](../co-work/board-catchup.md) | Catch-up + digest schedules |

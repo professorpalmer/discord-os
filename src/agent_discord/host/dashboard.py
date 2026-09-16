@@ -280,11 +280,29 @@ def render_status_html(snapshot: Mapping[str, Any]) -> str:
     running = "running" if host.get("running") else "stopped"
     armed = host.get("armed")
     power = "on" if armed else "off" if armed is False else "n/a"
-    cap = spend.get("cap_usd")
-    cap_s = f"{cap:.4f}" if isinstance(cap, (int, float)) else "none"
-    spent = spend.get("spend_usd")
-    spent_s = f"{float(spent):.4f}" if isinstance(spent, (int, float)) else "0"
-    halted = " halted" if spend.get("halted") else ""
+    known = spend.get("spend_known")
+    if known is None:
+        known = bool(spend.get("spend_usd"))
+    spent_val = None
+    if known:
+        try:
+            spent_val = float(spend.get("spend_usd"))
+        except (TypeError, ValueError):
+            known = False
+            spent_val = None
+    cap_raw = spend.get("cap_usd")
+    try:
+        cap_val = float(cap_raw) if cap_raw is not None else None
+    except (TypeError, ValueError):
+        cap_val = None
+    from agent_discord.orchestration.service import format_spend_meter
+
+    spend_strip = format_spend_meter(
+        spent_val,
+        known=bool(known),
+        cap_usd=cap_val,
+        halted=bool(spend.get("halted")),
+    )
 
     job_rows = []
     for job in jobs:
@@ -346,7 +364,7 @@ code {{ background: #eee; padding: 0.1rem 0.3rem; }}
  · power: <strong>{html.escape(power)}</strong>
  · channel: <code>{html.escape(str(host.get("channel_id") or "n/a"))}</code></p>
 <h2>Spend</h2>
-<p>{html.escape(spent_s)} / cap {html.escape(cap_s)}{html.escape(halted)}</p>
+<p><code>{html.escape(spend_strip)}</code></p>
 <h2>Jobs</h2>
 <table><thead><tr><th>code</th><th>status</th><th>summary</th></tr></thead>
 <tbody>{''.join(job_rows) or '<tr><td colspan="3">(none)</td></tr>'}</tbody></table>

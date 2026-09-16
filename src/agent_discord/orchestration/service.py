@@ -121,6 +121,42 @@ def format_spend(amount: Optional[float], *, known: bool = True) -> str:
     return format_usd(float(amount))
 
 
+def format_spend_meter(
+    spend_usd: Optional[float],
+    *,
+    known: bool = True,
+    cap_usd: Optional[float] = None,
+    halted: bool = False,
+    width: int = 12,
+) -> str:
+    """HOST /status spend strip — ASCII meter when cap known; never invent $0.
+
+    Wave 6 P0a phone honesty: progress_bar when cap is set; otherwise
+    ``spent · cap none · known|unknown``. Halt badge shares the strip.
+    """
+
+    known_flag = "known" if known else "unknown"
+    spent_s = format_spend(
+        float(spend_usd) if known and spend_usd is not None else None,
+        known=bool(known),
+    )
+    halt_badge = " · halted" if halted else ""
+    if cap_usd is None:
+        return f"{spent_s} · cap none · {known_flag}{halt_badge}"
+
+    from agent_discord.discord.layout import progress_bar
+
+    cap_s = format_usd(float(cap_usd))
+    if known and spend_usd is not None and float(cap_usd) > 0:
+        pct = max(0.0, min(100.0, float(spend_usd) / float(cap_usd) * 100.0))
+        bar = progress_bar(pct, width=width)
+        return f"{bar} · {spent_s} / {cap_s}{halt_badge}"
+    # Cap known but spend unknown — empty meter, explicit unknown (not $0).
+    empty = f"[{'.' * max(1, int(width))}] ?"
+    return f"{empty} · {spent_s} / {cap_s} · {known_flag}{halt_badge}"
+
+
+
 SPEND_COST_KNOWN_KEY = "spend_cost_known"
 
 
