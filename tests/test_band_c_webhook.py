@@ -12,6 +12,8 @@ from agent_discord.contracts import TaskIntake, TaskStatus
 from agent_discord.discord.facade import DiscordFacade
 from agent_discord.discord.providers.fake import FakeDiscordMCPProvider
 from agent_discord.host.webhook import (
+    WEBHOOK_USERNAME,
+
     ENV_WEBHOOK,
     ENV_WEBHOOK_URL,
     KIND_HALT,
@@ -28,6 +30,8 @@ from agent_discord.host.webhook import (
     notify_rate_limit,
     reset_webhook_for_tests,
     webhook_enabled,
+    webhook_username,
+    WEBHOOK_USERNAME,
     webhook_flag_on,
     webhook_urls,
 )
@@ -82,8 +86,8 @@ def test_webhook_urls_comma_and_alias():
 
 
 def test_format_ops_alert_brand_and_kinds():
-    start = format_ops_alert(KIND_HOST_START, version="0.5.84")
-    assert start.startswith(f"{PRODUCT_NAME} 0.5.84 · host start")
+    start = format_ops_alert(KIND_HOST_START, version="0.5.86")
+    assert start.startswith(f"{PRODUCT_NAME} 0.5.86 · host start")
     assert "tip / version kick" in start
     fail = format_ops_alert(KIND_JOB_FAIL, detail="DOS-1 · boom")
     assert "job fail" in fail
@@ -258,7 +262,7 @@ def test_host_start_hook_is_wired_and_fail_soft():
 
 def test_package_version_is_084():
     text = Path("CHANGELOG.md").read_text()
-    assert "## 0.5.84" in text
+    assert "## 0.5.86" in text
     assert "Band C" in text
 
 
@@ -275,3 +279,45 @@ def test_band_c_doc_records_flag_and_parks():
     assert "jishaku" in lowered
     assert "graham" not in lowered or "never graham" in lowered
     assert "board + brain" in lowered
+
+
+def test_webhook_username_has_no_discord_substring():
+    assert "discord" not in WEBHOOK_USERNAME.lower()
+    assert "discord" not in webhook_username().lower()
+    assert webhook_username("Discord OS") == WEBHOOK_USERNAME
+    assert webhook_username("DOS Ops") == "DOS Ops"
+    assert webhook_username("Board Brain") == "Board Brain"
+    assert webhook_username("My Discord Bot") == WEBHOOK_USERNAME
+
+
+def test_default_execute_uses_safe_username(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _Hook:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def execute(self):
+            return "ok"
+
+    import agent_discord.host.webhook as wh
+
+    monkeypatch.setattr(wh, "discord_webhook_available", lambda: True)
+
+    def fake_import(name, *args, **kwargs):
+        if name == "discord_webhook":
+            import types
+            mod = types.ModuleType("discord_webhook")
+            mod.DiscordWebhook = _Hook
+            return mod
+        return __import__(name, *args, **kwargs)
+
+    # Patch the import inside _default_execute by injecting module
+    import sys
+    import types
+    mod = types.ModuleType("discord_webhook")
+    mod.DiscordWebhook = _Hook
+    monkeypatch.setitem(sys.modules, "discord_webhook", mod)
+    wh._default_execute("https://example.invalid/hook", "hi")
+    assert captured.get("username") == WEBHOOK_USERNAME
+    assert "discord" not in str(captured.get("username")).lower()

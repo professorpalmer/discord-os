@@ -16,6 +16,10 @@ from typing import Any, Callable, Mapping, Optional, Sequence
 
 from agent_discord import PRODUCT_NAME, __version__
 
+# Discord rejects webhook usernames containing the substring "discord".
+# Message body still brands as Discord OS via PRODUCT_NAME.
+WEBHOOK_USERNAME = "DOS Ops"
+
 ENV_WEBHOOK = "DISCORD_OS_WEBHOOK"
 ENV_WEBHOOK_URL = "DISCORD_OS_WEBHOOK_URL"
 ENV_WEBHOOK_URLS = "DISCORD_OS_WEBHOOK_URLS"
@@ -115,6 +119,16 @@ def format_ops_alert(
     return text
 
 
+
+def webhook_username(name: str = WEBHOOK_USERNAME) -> str:
+    """Return a Discord-safe webhook username (no ``discord`` substring)."""
+
+    label = (name or WEBHOOK_USERNAME).strip() or WEBHOOK_USERNAME
+    if "discord" in label.lower():
+        return WEBHOOK_USERNAME
+    return label[:80]
+
+
 def _default_execute(url: str, content: str) -> Any:
     from discord_webhook import DiscordWebhook
 
@@ -122,7 +136,7 @@ def _default_execute(url: str, content: str) -> Any:
         url=url,
         content=content,
         timeout=_TIMEOUT_S,
-        username=PRODUCT_NAME,
+        username=webhook_username(),
         rate_limit_retry=False,
         allowed_mentions={"parse": []},
     )

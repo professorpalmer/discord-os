@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.86
+
+### Band C hotfix — webhook username Discord-safe
+- Webhook `username` is now `DOS Ops` (no `discord` substring). Discord API rejects usernames containing `discord`.
+- Message **content** still brands as Discord OS.
+- Tests cover banned username + default execute username.
+
 ## 0.5.85
 
 Band D (Discord-native) — **final tack-on; loop (Bands A–D) closed**:
