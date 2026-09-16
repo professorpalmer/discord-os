@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+## 0.5.67
+
+Wave 3 shareability polish (docs-first): overnight brief recipe (schedule +
+Catch-up honesty), versioned [recipes](docs/recipes/README.md) cadence index,
+shared-desk demo &lt;15 min (handoff + overnight brief), COMPARISON Wave 2 bump
+(cross-host RO + forum-tags lock). Mailbox/CU/auto-tags stay parked.
+
 ## 0.5.66
 
 Wave 2 shareability: real cross-host read-only status (`discord-os host hosts`,
@@ -14,8 +23,6 @@ crhq.ai ranked notes under `docs/co-work/`.
 ## 0.5.64
 
 - Fix `UnboundLocalError` on `resolved_write_key` in listen (handoff branch local import shadowed the module binding) — restores JobPool dispatch / CI greens from 0.5.62+.
-
-## Unreleased
 
 ## 0.5.62
 

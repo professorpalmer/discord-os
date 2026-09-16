@@ -25,7 +25,7 @@ Discord OS is a **shared desk**: Discord is the screen, this Mac process is the 
 | Vendor cowork / computer-use runtime | Elsewhere — see [docs/COMPARISON.md](docs/COMPARISON.md) |
 | Thin “message → subprocess → stdout” bridge | A smaller custom bot |
 
-**Shared desk in &lt;10 minutes:** [docs/co-work/shared-desk-demo.md](docs/co-work/shared-desk-demo.md) (`REQUIRE_OPERATORS` → Pair×2 → bind realm+memory → dual ask/steer → gate park).
+**Shared desk in &lt;15 minutes:** [docs/co-work/shared-desk-demo.md](docs/co-work/shared-desk-demo.md) (Pair×2 → desk-pack → dual ask → handoff → overnight brief → gate park). **Recipes index:** [docs/recipes/README.md](docs/recipes/README.md).
 
 **Compare:** [docs/COMPARISON.md](docs/COMPARISON.md). **Policy locks:** [docs/host/policy.md](docs/host/policy.md).
 
@@ -83,6 +83,7 @@ Read these if you are an agent in this repo. Start at [docs/](docs/README.md).
 |---|---|
 | How to read this repo | [AGENTS.md](AGENTS.md) |
 | Setup and `add` | [docs/setup](docs/setup/README.md) |
+| Recipes / playbooks | [docs/recipes](docs/recipes/README.md) |
 | Host / On / Off / LaunchAgent | [docs/host](docs/host/README.md) |
 | Channel realms | [docs/realms](docs/realms/README.md) |
 | Parallel jobs | [docs/jobs](docs/jobs/README.md) |
