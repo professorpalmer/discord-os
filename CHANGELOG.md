@@ -4,6 +4,11 @@
 
 ## 0.5.62
 
+## 0.5.63
+
+- Refresh README / cards screenshots from current phone UI (HOST More, parallel job threads, Done card).
+- Caption updates only; no runtime behavior change.
+
 Co-work P1: JobPool-only `handoff`/`peer` tasks, operator/lane fields on receipt
 cards, `discord-os add desk-pack`, `schedule --list` (+ `schedule --every`).
 Docs under `docs/co-work/`.

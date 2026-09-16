@@ -16,7 +16,7 @@ A follow-up in a **live** job thread steers that worker (or queues in SQLite if 
 
 State → button set / accent / stage (write-gate Allow / Always / Deny, plan Approve / Cancel, Continue) is the [reactive spike](reactive.md). Per-tool / AskUserQuestion mid-run park (live worker hold) is [ask-gate](ask-gate.md). Plan-mode Approve is [plan-approve](plan-approve.md). Not Activities. Not a client UI.
 
-![next-level cards](../screenshots/next-level-cards.png)
+![Done job card from phone (Discord OS / openrouter/auto)](../screenshots/next-level-cards.png)
 
 ## Code
 

@@ -71,9 +71,9 @@ From Discord you can also type `bind puppetmaster` or `bind memory` in that chan
 | a sentence | A task. Up to eight live jobs by default (`DISCORD_OS_MAX_LIVE`); analyze may overlap. |
 | reply in a job thread | Live → steer (or queue until the cook can take it). Idle/Done → new job in that thread (session). **Cancel** on the live card interrupts. |
 
-![HOST card and a finished job thread](docs/screenshots/discord-host.png)
+![HOST More menu from phone](docs/screenshots/discord-host.png)
 
-![Parallel asks, live thinking card](docs/screenshots/discord-jobs.png)
+![Parallel asks as job threads from phone](docs/screenshots/discord-jobs.png)
 
 ## Docs
 
