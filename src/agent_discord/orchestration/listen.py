@@ -34,6 +34,7 @@ from agent_discord.orchestration.service import (
     inbound_queue_enabled,
     is_spend_halted,
     operators_configured,
+    parse_handoff_command,
     parse_schedule_command,
     seed_spend_cap_from_env,
     seed_write_gate_from_env,
@@ -459,6 +460,74 @@ def drain_inbound(
                 store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
+        handed = parse_handoff_command(intake_text or (message.content or ""))
+        if handed is not None:
+            peer_id, peer_prompt = handed
+            if job_pool is None:
+                _post_host_deny(
+                    discord,
+                    channel_id,
+                    follow_thread,
+                    "Need: handoff/peer-task requires JobPool (live host) — refused.",
+                )
+                watermark = _advance_listen_watermark(
+                    store, watermark_key, created_ms, message.message_id, watermark
+                )
+                continue
+            author = str(message.author_id or "")
+            if author and not author_may_dispatch(store, author):
+                watermark = _advance_listen_watermark(
+                    store, watermark_key, created_ms, message.message_id, watermark
+                )
+                continue
+            if not author_may_dispatch(store, peer_id):
+                _post_host_deny(
+                    discord,
+                    channel_id,
+                    follow_thread,
+                    f"Need: handoff peer {peer_id} is not an operator — Pair them first.",
+                )
+                watermark = _advance_listen_watermark(
+                    store, watermark_key, created_ms, message.message_id, watermark
+                )
+                continue
+            from agent_discord.orchestration.routing import resolved_write_key
+
+            handoff_intake = TaskIntake(
+                text=peer_prompt,
+                channel_id=channel_id,
+                workspace_id=workspace_id,
+                guild_id=guild_id,
+                thread_id=follow_thread,
+                message_id=message.message_id or None,
+                requester_id=peer_id,
+                metadata={
+                    "peer_task": True,
+                    "handoff_from": author,
+                    "handoff_to": peer_id,
+                    "lane": "handoff",
+                },
+            )
+            job_pool.submit(
+                orchestrator.run_task,
+                handoff_intake,
+                write_key=resolved_write_key(handoff_intake, orchestrator),
+            )
+            try:
+                send = getattr(discord, "send_message", None)
+                if callable(send):
+                    send(
+                        channel_id,
+                        f"Handoff → <@{peer_id}> (JobPool) — {peer_prompt[:120]}",
+                        thread_id=follow_thread,
+                    )
+            except Exception:
+                pass
+            watermark = _advance_listen_watermark(
+                store, watermark_key, created_ms, message.message_id, watermark
+            )
+            continue
+
         extra_meta["inbound_claimed"] = True
         intake = TaskIntake(
             text=text,

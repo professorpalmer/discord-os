@@ -429,11 +429,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_pair.add_argument("--role-id", default=None, help="Optional guild role snowflake")
 
-    p_sched = sub.add_parser("schedule", help="Fire a text job on an interval from this host")
-    p_sched.add_argument("--every", required=True, help="Interval such as 1h, 30m, or 3600s")
-    p_sched.add_argument("--channel-id", required=True)
+    p_sched = sub.add_parser("schedule", help="Interval jobs on this host")
+    p_sched.add_argument(
+        "--list",
+        action="store_true",
+        help="List schedules (next_ms, created_by) instead of adding",
+    )
+    p_sched.add_argument("--every", default=None, help="Interval such as 1h, 30m, or 3600s")
+    p_sched.add_argument("--channel-id", default="")
     p_sched.add_argument("--workspace-id", default="default")
-    p_sched.add_argument("prompt", nargs="+", help="Job text to dispatch when due")
+    p_sched.add_argument("prompt", nargs="*", help="Job text to dispatch when due")
 
     p_dashboard = sub.add_parser(
         "dashboard",
@@ -490,6 +495,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_add_github.add_argument("--token", default="", help="GitHub token (or use gh auth login)")
     p_add_github.add_argument("--json", action="store_true")
+    p_add_desk = add_sub.add_parser(
+        "desk-pack",
+        help="Inject realm+memory (+ optional wiki/github) for a shared-desk channel",
+    )
+    p_add_desk.add_argument("--channel-id", required=True)
+    p_add_desk.add_argument("--realm", default="puppetmaster")
+    p_add_desk.add_argument("--workspace-id", default="default")
+    p_add_desk.add_argument("--wiki-url", default="")
+    p_add_desk.add_argument("--wiki-token", default="")
+    p_add_desk.add_argument("--github-token", default="")
     p_add_list = add_sub.add_parser("list", help="Show wired realms, memory, wiki, and tools")
     p_add_list.add_argument("--workspace-id", default="default")
     p_add_list.add_argument("--json", action="store_true")
@@ -843,24 +858,44 @@ def cmd_schedule(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     out = out or sys.stdout
     from agent_discord.orchestration.service import parse_every_seconds
 
-    try:
-        every_s = parse_every_seconds(args.every)
-    except ValueError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-    prompt = " ".join(args.prompt).strip()
-    if not prompt:
-        print("schedule prompt is required", file=sys.stderr)
-        return 2
     config = apply_runtime_secrets(load_config())
     store = SQLiteStore(config.database_path)
     store.initialize()
     try:
+        want_list = bool(getattr(args, "list", False)) or not getattr(args, "every", None)
+        if want_list:
+            cid = (getattr(args, "channel_id", None) or "").strip() or None
+            rows = store.list_schedules(cid)
+            if not rows:
+                print("no schedules", file=out)
+                return 0
+            for row in rows:
+                print(
+                    f"{row.get('schedule_id')} every={row.get('every_s')}s "
+                    f"next_ms={row.get('next_ms')} by={row.get('created_by') or '-'} "
+                    f"enabled={row.get('enabled')} :: {(row.get('prompt') or '')[:80]}",
+                    file=out,
+                )
+            return 0
+        try:
+            every_s = parse_every_seconds(args.every)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        prompt = " ".join(args.prompt or []).strip()
+        if not prompt:
+            print("schedule prompt is required", file=sys.stderr)
+            return 2
+        channel_id = (getattr(args, "channel_id", None) or "").strip()
+        if not channel_id:
+            print("--channel-id is required", file=sys.stderr)
+            return 2
         schedule_id = store.add_schedule(
-            channel_id=args.channel_id,
-            workspace_id=args.workspace_id,
+            channel_id=channel_id,
+            workspace_id=getattr(args, "workspace_id", None) or "default",
             prompt=prompt,
             every_s=every_s,
+            created_by="cli",
         )
         print(f"scheduled {schedule_id} every {every_s}s", file=out)
     finally:
@@ -871,6 +906,7 @@ def cmd_schedule(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
 def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     out = out or sys.stdout
     from agent_discord.host.add import (
+        add_desk_pack,
         add_github,
         add_memory,
         add_realm,
@@ -929,8 +965,27 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
             )
         elif command == "github":
             payload = add_github(token=getattr(args, "token", "") or "")
+        elif command == "desk-pack":
+            config = load_config()
+            store = SQLiteStore(config.database_path)
+            store.initialize()
+            try:
+                payload = add_desk_pack(
+                    store,
+                    channel_id=args.channel_id,
+                    realm=getattr(args, "realm", None) or "puppetmaster",
+                    workspace_id=getattr(args, "workspace_id", None) or "default",
+                    wiki_url=getattr(args, "wiki_url", None) or "",
+                    wiki_token=getattr(args, "wiki_token", None) or "",
+                    github_token=getattr(args, "github_token", None) or "",
+                )
+            finally:
+                store.close()
         else:
-            print("add: realm, memory, repo, wiki, tool, github, or list", file=sys.stderr)
+            print(
+                "add: realm, memory, repo, wiki, tool, github, desk-pack, or list",
+                file=sys.stderr,
+            )
             return 2
     except ValueError as exc:
         print(f"add: {exc}", file=sys.stderr)
@@ -974,6 +1029,14 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                 "added github. Pass --token or run gh auth login on this Mac.",
                 file=out,
             )
+    elif kind == "desk-pack":
+        print(
+            f"desk-pack #{payload.get('channel_id')} "
+            f"({len(payload.get('steps') or ())} steps) — {payload.get('story')}",
+            file=out,
+        )
+        for step in payload.get("steps") or ():
+            print(f"  - {step.get('kind')}", file=out)
     if payload.get("restart"):
         print("restart the host so the running process sees this", file=out)
     return 0

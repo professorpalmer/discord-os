@@ -342,6 +342,26 @@ def _posted_message_id(posted: Any) -> str:
     return str(getattr(posted, "message_id", "") or "")
 
 
+
+def _receipt_card_for_intake(receipt, intake=None, **kwargs):
+    """Settle card with operator/lane attribution when intake is known."""
+
+    from agent_discord.orchestration.reactive import reactive_receipt_card
+
+    operator = ""
+    lane = ""
+    if intake is not None:
+        operator = str(getattr(intake, "requester_id", None) or "")
+        meta = getattr(intake, "metadata", None) or {}
+        if isinstance(meta, dict):
+            lane = str(meta.get("lane") or meta.get("realm") or "")
+            if meta.get("handoff_from") and meta.get("handoff_to"):
+                operator = f"{meta.get('handoff_to')} (from {meta.get('handoff_from')})"
+    return reactive_receipt_card(
+        receipt, operator=operator, lane=lane, **kwargs
+    )
+
+
 class AgentOrchestrator:
     """intake → context snapshot → pinned dispatch → events → Discord → receipt."""
 
@@ -529,7 +549,7 @@ class AgentOrchestrator:
                         send_card(
                             self.discord,
                             intake.channel_id,
-                            reactive_receipt_card(receipt, has_thread=False),
+                            _receipt_card_for_intake(receipt, has_thread=False),
                         )
                     except Exception:
                         try:
@@ -1357,8 +1377,9 @@ class AgentOrchestrator:
         think = live.thinking or thinking_hold
         if think and public_card_text(think, limit=0) == safe_final_summary:
             think = ""
-        card = reactive_receipt_card(
+        card = _receipt_card_for_intake(
             receipt,
+            intake=intake,
             has_thread=bool(live.thread_id or job_thread_id),
             thinking=think,
         )
@@ -1477,7 +1498,7 @@ class AgentOrchestrator:
             error=handoff_error,
         )
         if self.post_progress_to_discord and self.discord is not None:
-            live.finish(reactive_receipt_card(receipt, has_thread=bool(live.thread_id or job_thread_id)), summary=redact_text_markers(stitched))
+            live.finish(_receipt_card_for_intake(receipt, intake=intake, has_thread=bool(live.thread_id or job_thread_id)), summary=redact_text_markers(stitched))
         self._event(
             task_id,
             run_id,
@@ -1696,7 +1717,7 @@ class AgentOrchestrator:
             channel_id = str(task.get("channel_id") or meta.get("channel_id") or "").strip()
             thread_id = str(task.get("thread_id") or meta.get("thread_id") or "").strip() or None
             card_mid = str(meta.get("card_message_id") or "").strip()
-            card = reactive_receipt_card(
+            card = _receipt_card_for_intake(
                 RunReceipt(
                     task_id=task_id,
                     run_id=run_id,
@@ -1779,7 +1800,7 @@ class AgentOrchestrator:
             if isinstance(task, dict):
                 thread_id = str(task.get("thread_id") or "").strip()
             if self.post_progress_to_discord and self.discord is not None:
-                card = reactive_receipt_card(
+                card = _receipt_card_for_intake(
                     RunReceipt(
                         task_id=task_id,
                         run_id=rid,
@@ -2737,7 +2758,7 @@ class AgentOrchestrator:
             channel_id = str(task.get("channel_id") or meta.get("channel_id") or "").strip()
             thread_id = str(task.get("thread_id") or meta.get("thread_id") or "").strip() or None
             card_mid = str(meta.get("card_message_id") or "").strip()
-            card = reactive_receipt_card(
+            card = _receipt_card_for_intake(
                 RunReceipt(
                     task_id=task_id,
                     run_id=run_id,
@@ -3294,7 +3315,7 @@ class AgentOrchestrator:
             summary=spoken,
         )
         if self.post_progress_to_discord and self.discord is not None:
-            live.finish(reactive_receipt_card(receipt, has_thread=bool(live.thread_id)), summary=spoken)
+            live.finish(_receipt_card_for_intake(receipt, intake=intake, has_thread=bool(live.thread_id)), summary=spoken)
         self._react_terminal(
             intake, TaskStatus.COMPLETED, thread_id=live.thread_id
         )
@@ -3641,7 +3662,7 @@ class AgentOrchestrator:
             return
         try:
             if confirmed:
-                card = reactive_receipt_card(
+                card = _receipt_card_for_intake(
                     RunReceipt(
                         task_id=task_id,
                         run_id=run_id,
