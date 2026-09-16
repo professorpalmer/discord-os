@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.5.73
+
+- Align package `__version__` with 0.5.72 board + brain lakes cut.
+
 ## 0.5.72
 
 Wave 4 — board + brain lakes (board catch-up, swim-lane relationships,
