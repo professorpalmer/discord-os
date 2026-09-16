@@ -623,14 +623,27 @@ def render_host_card(
     return host_card(armed=armed, channel_id=channel_id).text
 
 
-def _host_description(*, last_job: str = "", update_pill: str = "") -> str:
-    """HOST card body: optional Update-available pill above the Jobs briefing line."""
+def _host_description(
+    *,
+    last_job: str = "",
+    update_pill: str = "",
+    paired: bool = True,
+    empty_jobs: bool = False,
+) -> str:
+    """HOST card body: optional Update-available pill above the Jobs briefing line.
+
+    Wave 7 P0a: unpaired + no jobs → one spoken tip (Pair → Ask → Done). No wizard.
+    """
 
     pill = (update_pill or "").strip()
     job = (last_job or "").strip()
-    if pill and job:
-        return f"{pill}\n{job}"
-    return pill or job
+    tip = ""
+    if empty_jobs and not paired:
+        tip = "Tip: Pair → Ask → Done"
+    body = job or tip
+    if pill and body:
+        return f"{pill}\n{body}"
+    return pill or body
 
 
 def host_card(
@@ -653,6 +666,7 @@ def host_card(
     github: str = "",
     spend_known: bool = True,
     update_pill: str = "",
+    empty_jobs: bool = False,
 ) -> CardMessage:
     _ = channel_id
     fields = _host_status_fields(
@@ -693,7 +707,12 @@ def host_card(
     return CardMessage(
         kind="HOST",
         title="Halted" if halted and armed else ("Running" if armed else "Stopped"),
-        description=_host_description(last_job=last_job, update_pill=update_pill),
+        description=_host_description(
+            last_job=last_job,
+            update_pill=update_pill,
+            paired=paired,
+            empty_jobs=empty_jobs,
+        ),
         color=COLOR_FAIL if halted and armed else (COLOR_LIVE if armed else COLOR_IDLE),
         avatar_url=avatar_url,
         fields=fields,

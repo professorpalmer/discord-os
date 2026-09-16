@@ -66,3 +66,14 @@ Registered aliases (same verbs as text; no `/add`): `/bind`, `/status`, `/on`, `
 - `src/agent_discord/host/add.py` — dotenv upsert + binds
 - `src/agent_discord/bootstrap.py` — workspace + `.env` template
 - `src/agent_discord/host/install.py` — login helper
+
+## TTFP stopwatch (Wave 7)
+
+**Time-to-first-Done** is the cold-start success metric — not “the bot joined.”
+
+1. Start a stopwatch when you open Portal / run setup.
+2. Follow [`docs/co-work/wave7-ttfp-demo.md`](../co-work/wave7-ttfp-demo.md) (Discord phone only).
+3. Stop when the first **Done** card lands.
+
+Warm desk target &lt;15 min; cold &lt;25 min. HOST shows `Tip: Pair → Ask → Done` when unpaired with no jobs.
+

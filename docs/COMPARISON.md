@@ -77,6 +77,20 @@ Use a supervisor OS when you want fleet orchestration as the core. Use Discord O
 **Shareability bar:** filmable HOST spend glance + Wave 6 board+brain phone demo (`docs/co-work/wave6-board-brain-demo.md`) — Discord-native only, no companion terminal/files strip.
 
 
+
+## Wave 7 (TTFP + harness foils)
+
+| Foil | Discord OS stance |
+|---|---|
+| **BAGEN / TokenOps** | HOST spend meter + Halt honesty — soft-warn / Halt, not a sold spend firewall. |
+| **AgentTrails** | SQLite lineage search + Done Story/cites — not a provenance GUI product. |
+| **Harness-MU** | Pair / operator allowlist hooks — not a multi-tenant gatekeeper SaaS. |
+| **Agent-Harness** | Local desk goldens + recipes — not a hosted eval platform. |
+| **Goose skills catalog** | Markdown recipes under `docs/recipes/` discoverable in Discord tip — not a Goose YAML runtime. |
+
+**Shareability bar:** cold-start **TTFP** film (`docs/co-work/wave7-ttfp-demo.md`) + board + brain lakes + Discord phone-native honesty (no companion strip).
+
+
 ## Shareability bar (Puppetmaster-tier)
 
 Someone else can:
