@@ -357,6 +357,63 @@ def add_github(
     }
 
 
+
+def add_desk_pack(
+    store: Any,
+    *,
+    channel_id: str,
+    realm: str = "puppetmaster",
+    workspace_id: str = "default",
+    wiki_url: str = "",
+    wiki_token: str = "",
+    github_token: str = "",
+    env_file: Optional[Path] = None,
+) -> dict[str, Any]:
+    """One-shot shared-desk inject: realm + memory + optional wiki/github.
+
+    Story: ``REQUIRE_OPERATORS`` → Pair×2 → desk-pack → dual ask/steer → gate park.
+    Realm/memory bind live in SQLite; wiki/github write ``.env`` (restart host).
+    """
+
+    cid = (channel_id or "").strip()
+    if not cid:
+        raise ValueError("add desk-pack needs --channel-id")
+    steps: list[dict[str, Any]] = []
+    steps.append(
+        add_realm(
+            store,
+            name=(realm or "puppetmaster").strip() or "puppetmaster",
+            channel_id=cid,
+            workspace_id=workspace_id,
+            env_file=env_file,
+        )
+    )
+    steps.append(
+        add_memory(
+            store,
+            channel_id=cid,
+            workspace_id=workspace_id,
+            env_file=env_file,
+        )
+    )
+    restart = False
+    if (wiki_url or "").strip() or (wiki_token or "").strip():
+        wiki = add_wiki(url=wiki_url, token=wiki_token, env_file=env_file)
+        steps.append(wiki)
+        restart = restart or bool(wiki.get("restart"))
+    if (github_token or "").strip():
+        gh = add_github(token=github_token, env_file=env_file)
+        steps.append(gh)
+        restart = restart or bool(gh.get("restart"))
+    return {
+        "kind": "desk-pack",
+        "channel_id": cid,
+        "steps": steps,
+        "restart": restart,
+        "story": "REQUIRE_OPERATORS → Pair×2 → desk-pack → dual ask/steer → gate park",
+    }
+
+
 def list_added(
     store: Any = None,
     *,

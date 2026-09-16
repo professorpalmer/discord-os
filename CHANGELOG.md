@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.5.62
+
+Co-work P1: JobPool-only `handoff`/`peer` tasks, operator/lane fields on receipt
+cards, `discord-os add desk-pack`, `schedule --list` (+ `schedule --every`).
+Docs under `docs/co-work/`.
+
+
 ## 0.5.61
 
 Co-work P0 share kit + cron catch-up honesty: README positioning strip,

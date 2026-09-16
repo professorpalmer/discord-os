@@ -755,3 +755,25 @@ def _token_count(raw: Any) -> Optional[int]:
 
 def _truthy(raw: Optional[str]) -> bool:
     return str(raw or "").strip().lower() in {"1", "true", "yes", "on", "halted"}
+
+
+_HANDOFF_RE = re.compile(
+    r"^(?:/)?(?:handoff|peer)\s+<?@?!?(\d{5,})>?\s*[:\-]?\s*(.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def parse_handoff_command(text: str) -> Optional[tuple[str, str]]:
+    """Parse ``handoff <@id>: prompt`` / ``peer <id> prompt`` → (peer_id, prompt)."""
+
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    match = _HANDOFF_RE.match(raw)
+    if not match:
+        return None
+    peer = match.group(1).strip()
+    prompt = match.group(2).strip()
+    if not peer or not prompt:
+        return None
+    return peer, prompt
