@@ -247,10 +247,20 @@ def test_publish_host_card_includes_buttons(tmp_path: Path):
         if item.get("type") == 10
     )
     assert "### Stopped" in texts
+    # Band A HOST Page: action rows sit outside the status Container.
     assert any(
         item.get("custom_id") == ON_ID
-        for row in meta["components"][0].get("components", [])
-        for item in row.get("components", [])
+        for top in meta["components"]
+        for item in (
+            top.get("components", [])
+            if top.get("type") == 1
+            else [
+                btn
+                for row in top.get("components", [])
+                if row.get("type") == 1
+                for btn in row.get("components", [])
+            ]
+        )
     )
     store.close()
 

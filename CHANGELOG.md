@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.81
+
+Band A (Discord-native):
+
+- Spike **discord-kagekit** — **not adopted** (Interaction/LayoutView + random Tab IDs fight REST/FakeDiscord).
+- Thin HOST **Page** layout (`host_page.py`): status Container + action bar outside; flag `DISCORD_OS_HOST_PAGE` (default on).
+- Docs: `docs/co-work/band-a-kagekit-spike.md`; optional extras `[kagekit]`.
+
+HARD parks unchanged. Band B (pypresence) not opened.
+
 ## 0.5.80
 
 Wave 7 P0 (board + brain lakes):
