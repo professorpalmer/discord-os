@@ -1098,10 +1098,12 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                 return 2
             finally:
                 store.close()
+            life = payload.get("lifecycle_tag_ids") or {}
             print(
                 f"forum-tags {payload['channel_id']} "
                 f"tags_as_tickets={payload['tags_as_tickets']} "
                 f"map={payload['status_tag_ids']} "
+                f"lifecycle={life} "
                 f"(created_available_tags=false)",
                 file=out,
             )

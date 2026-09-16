@@ -1052,6 +1052,11 @@ class AgentOrchestrator:
                     steer_bit = self.last_steer_footer(run_id)
                 except Exception:
                     steer_bit = ""
+                stall_bit = ""
+                try:
+                    stall_bit = self.stall_oneliner_if_needed(run_id)
+                except Exception:
+                    stall_bit = ""
                 live.paint(
                     reactive_progress_card(
                         stage=stream_stage,
@@ -1060,6 +1065,7 @@ class AgentOrchestrator:
                         percent=last_percent,
                         run_id=run_id,
                         steer_footer=steer_bit,
+                        stall_line=stall_bit,
                     ),
                     stage=stream_stage,
                     keep=spoken,
@@ -1390,16 +1396,16 @@ class AgentOrchestrator:
         self._run_status[run_id] = result.status
 
         # Wave 5 P2a: Saga-lite compensation NOTE for failed/cancelled handoff peers.
+        _job_code = ""
+        try:
+            _job_code = self.store.task_job_code(task_id)
+        except Exception:
+            _job_code = ""
         try:
             from agent_discord.orchestration.handoff_compensation import (
                 maybe_post_handoff_compensation,
             )
 
-            _job_code = ""
-            try:
-                _job_code = self.store.task_job_code(task_id)
-            except Exception:
-                _job_code = ""
             maybe_post_handoff_compensation(
                 store=self.store,
                 discord=self.discord,
@@ -1409,6 +1415,26 @@ class AgentOrchestrator:
                 status=result.status,
                 summary=safe_final_summary,
                 job_code=_job_code,
+            )
+        except Exception:
+            pass
+
+        # Wave 6 P2a: ParaRecover-lite recovery beat (diagnostic + Retry/Dismiss).
+        try:
+            from agent_discord.orchestration.recovery_beat import (
+                maybe_post_recovery_beat,
+            )
+
+            maybe_post_recovery_beat(
+                store=self.store,
+                discord=self.discord,
+                intake=intake,
+                task_id=task_id,
+                run_id=run_id,
+                status=result.status,
+                summary=safe_final_summary,
+                job_code=_job_code,
+                error=safe_error,
             )
         except Exception:
             pass
@@ -1784,6 +1810,12 @@ class AgentOrchestrator:
         if not isinstance(meta, dict):
             meta = {}
         spoken = (spoken or "Denied. Write was not started.").strip() or "Denied. Write was not started."
+        try:
+            from agent_discord.orchestration.roe_escalate import escalate_for_deny
+
+            spoken = escalate_for_deny(spoken=spoken, gate_kind="write")
+        except Exception:
+            pass
         merger = getattr(self.store, "merge_task_metadata", None)
         if callable(merger) and task_id:
             try:
@@ -3059,12 +3091,15 @@ class AgentOrchestrator:
         return receipt
 
     def _halted_receipt(self, intake: TaskIntake) -> RunReceipt:
+        from agent_discord.orchestration.roe_escalate import escalate_for_halt_receipt
+
+        spoken = escalate_for_halt_receipt()
         return RunReceipt(
             task_id="",
             run_id="",
             status=TaskStatus.FAILED,
-            summary="spend halted",
-            error="spend halted",
+            summary=spoken,
+            error=spoken,
         )
 
     def _record_usage_spend(
@@ -3696,6 +3731,31 @@ class AgentOrchestrator:
         with self._steer_lock:
             row = self._last_steer.get(rid) or {}
         return str(row.get("footer") or "").strip()
+
+    def stall_oneliner_if_needed(self, run_id: str) -> str:
+        """Opt-in quiet Live stall line after N steers without progress."""
+
+        from agent_discord.orchestration.stall_signal import (
+            format_stall_oneliner,
+            should_show_stall,
+        )
+
+        rid = (run_id or "").strip()
+        if not rid:
+            return ""
+        with self._steer_lock:
+            steers = list(self._steer_ops.get(rid) or [])
+        if not should_show_stall(steers):
+            return ""
+        job_code = ""
+        try:
+            run = self.store.get_run(rid) or {}
+            tid = str(run.get("task_id") or "")
+            if tid:
+                job_code = self.store.task_job_code(tid) or ""
+        except Exception:
+            job_code = ""
+        return format_stall_oneliner(steer_count=len(steers), job_code=job_code)
 
     def dual_steer_note_if_needed(self, run_id: str) -> str:
         """Return one quiet conflict NOTE body, or empty if none / already noted."""

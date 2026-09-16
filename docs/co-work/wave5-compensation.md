@@ -14,3 +14,7 @@ When a **peer/handoff** JobPool cook settles **failed** or **cancelled**, Discor
 1. `handoff @peer …` with JobPool live.
 2. Cancel or fail the peer cook.
 3. Parent thread shows the compensation NOTE; HOST lineage / progress ledger may surface the edge.
+
+## Wave 6 extension
+
+Failed Live (not only handoff peers) also get a human **recovery beat** — see [wave6-recovery-beat](wave6-recovery-beat.md).
