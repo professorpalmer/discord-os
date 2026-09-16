@@ -21,4 +21,6 @@ Shared-desk materials for Discord OS (Puppetmaster-tier shareability).
 Screenshots: real drops under [../screenshots](../screenshots/) only — do not invent images.
 | [wave5-handoff-envelope](wave5-handoff-envelope.md) | Typed handoff envelope + already_claimed |
 | [wave5-board-brain-demo](wave5-board-brain-demo.md) | &lt;15m board + brain lakes loop |
+| [wave5-plan-gallery](wave5-plan-gallery.md) | Plan Allow → kind=plan journal |
+| [wave5-claim](wave5-claim.md) | Blackboard `claim <job_code>` |
 

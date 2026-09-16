@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.5.75
+
+Wave 5 P1 — compact brain recall pack (`brain show`), progress ledger strip,
+plan gallery (`kind=plan`), board write-key/path conflicts, blackboard
+`claim <job_code>`. Board + brain lakes; HARD parks unchanged.
+
+
 ## 0.5.74
 
 Wave 5 P0 — typed handoff envelope + idempotent `already_claimed`, board + brain

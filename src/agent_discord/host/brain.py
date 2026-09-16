@@ -134,29 +134,79 @@ def list_journal_notes(
     return notes[:limit]
 
 
-def format_brain_prompt_block(
+
+def list_done_summaries(
+    store: Any,
+    *,
+    channel_id: str = "",
+    limit: int = 3,
+) -> list[str]:
+    """Recent Done job summaries with task/job ids for the recall pack."""
+
+    if store is None:
+        return []
+    lister = getattr(store, "list_recent_jobs", None)
+    if not callable(lister):
+        return []
+    try:
+        rows = lister(channel_id or "", limit=max(12, limit * 4))
+    except Exception:
+        return []
+    out: list[str] = []
+    for row in rows or ():
+        status = str(row.get("status") or "").strip().lower()
+        if status not in {"completed", "succeeded", "done", "success"}:
+            continue
+        code = str(row.get("job_code") or row.get("task_id") or "").strip()
+        summary = str(row.get("summary") or "").strip().replace("\n", " ")
+        if not summary:
+            continue
+        clipped = summary if len(summary) <= 100 else summary[:97] + "..."
+        out.append(f"{code}: {clipped}" if code else clipped)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def clip_pack_text(text: str, *, max_bytes: int = 1800) -> str:
+    raw = text or ""
+    encoded = raw.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return raw
+    # Keep head; avoid cutting mid-line when possible.
+    trimmed = encoded[: max(0, max_bytes - 3)].decode("utf-8", errors="ignore")
+    if "\n" in trimmed:
+        trimmed = trimmed.rsplit("\n", 1)[0]
+    return trimmed.rstrip() + "..."
+
+
+def build_compact_recall_pack(
     binding: Mapping[str, Any] | None,
     *,
     store: Any = None,
     workspace_id: str = "default",
+    channel_id: str = "",
+    max_bytes: int = 1800,
+    max_journal: int = 5,
+    max_docs: int = 6,
+    max_done: int = 3,
 ) -> str:
-    """Worker prompt inject for a DRI brain lake (honest single-host)."""
+    """Budgeted MemGPT-style recall pack for a DRI brain lake."""
 
     brain = brain_from_binding(binding)
     if not brain:
         return ""
-    lines = ["[brain-lake]"]
+    lines = ["[brain-lake]", "pack: compact-recall"]
     dri = brain.get("dri") or ""
     if dri:
         lines.append(f"DRI: {dri}")
     docs = brain.get("strategy_docs") or ""
     if docs:
         lines.append(f"Strategy docs: {docs}")
-        # List a few filenames so the worker does not hunt.
         try:
             path = Path(docs)
             if path.is_dir():
-                names = sorted(p.name for p in path.iterdir() if p.is_file())[:8]
+                names = sorted(p.name for p in path.iterdir() if p.is_file())[:max_docs]
                 if names:
                     lines.append("Docs: " + ", ".join(names))
             elif path.is_file():
@@ -165,18 +215,117 @@ def format_brain_prompt_block(
             pass
     transcripts = brain.get("transcripts_channel") or ""
     if transcripts:
-        lines.append(f"Meeting transcripts channel: {transcripts}")
+        lines.append(f"Transcripts channel: {transcripts}")
     if brain.get("journal") and store is not None:
-        notes = list_journal_notes(store, workspace_id=workspace_id, dri=dri)
+        notes = list_journal_notes(
+            store, workspace_id=workspace_id, dri=dri, limit=max_journal
+        )
         if notes:
             lines.append("Journal:")
-            for note in notes:
-                clipped = note if len(note) <= 160 else note[:157] + "..."
+            for note in notes[:max_journal]:
+                clipped = note if len(note) <= 140 else note[:137] + "..."
                 lines.append(f"- {clipped}")
+    if store is not None:
+        dones = list_done_summaries(store, channel_id=channel_id, limit=max_done)
+        if dones:
+            lines.append("Recent Done:")
+            for item in dones:
+                lines.append(f"- {item}")
+    # Plan gallery hits (P1c)
+    if store is not None:
+        plans = list_plan_gallery(store, workspace_id=workspace_id, limit=3)
+        if plans:
+            lines.append("[plan-gallery]")
+            for item in plans:
+                lines.append(f"- {item}")
     lines.append(
         "Honest limit: single-host SQLite brain lake — not multi-host Durable Objects."
     )
-    return "\n".join(lines)
+    return clip_pack_text("\n".join(lines), max_bytes=max_bytes)
+
+
+def list_plan_gallery(
+    store: Any,
+    *,
+    workspace_id: str = "default",
+    limit: int = 3,
+) -> list[str]:
+    """Recent kind=plan preference rows for [plan-gallery] inject."""
+
+    if store is None:
+        return []
+    lister = getattr(store, "list_preferences", None)
+    if not callable(lister):
+        return []
+    try:
+        rows = list(lister(workspace_id, kind="plan") or [])
+    except TypeError:
+        try:
+            rows = [r for r in (lister(workspace_id) or []) if str(r.get("kind") or "") == "plan"]
+        except Exception:
+            return []
+    except Exception:
+        return []
+    out: list[str] = []
+    for row in rows:
+        key = str(row.get("key") or "").strip()
+        val = str(row.get("value") or "").strip().replace("\n", " ")
+        if not val:
+            continue
+        clipped = val if len(val) <= 120 else val[:117] + "..."
+        label = key.split(":")[-1][:12] if key else "plan"
+        out.append(f"{label}: {clipped}")
+        if len(out) >= limit:
+            break
+    return out
+
+
+def record_plan_gallery(
+    store: Any,
+    *,
+    workspace_id: str,
+    channel_id: str,
+    plan_text: str,
+) -> str:
+    """Persist an approved plan for later [plan-gallery] recall. Returns key."""
+
+    import hashlib
+
+    body = (plan_text or "").strip()
+    if not body or store is None:
+        return ""
+    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
+    cid = (channel_id or "").strip() or "ch"
+    key = f"plan:{cid}:{digest}"
+    setter = getattr(store, "set_preference", None)
+    if not callable(setter):
+        return ""
+    clipped = body if len(body) <= 800 else body[:797] + "..."
+    try:
+        setter(workspace_id or "default", key, clipped, kind="plan")
+    except Exception:
+        return ""
+    return key
+
+
+def format_brain_prompt_block(
+    binding: Mapping[str, Any] | None,
+    *,
+    store: Any = None,
+    workspace_id: str = "default",
+    channel_id: str = "",
+    max_bytes: int = 1800,
+) -> str:
+    """Worker prompt inject — compact recall pack (Wave 5 P1a)."""
+
+    return build_compact_recall_pack(
+        binding,
+        store=store,
+        workspace_id=workspace_id,
+        channel_id=channel_id,
+        max_bytes=max_bytes,
+    )
+
 
 
 def format_meat_proxy_handoff_preamble(

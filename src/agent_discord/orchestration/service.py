@@ -757,6 +757,24 @@ def _truthy(raw: Optional[str]) -> bool:
     return str(raw or "").strip().lower() in {"1", "true", "yes", "on", "halted"}
 
 
+_CLAIM_RE = re.compile(
+    r"^(?:/)?claim\s+(DOS-[A-Za-z0-9]+|[A-Za-z0-9_-]{3,})\s*$",
+    re.IGNORECASE,
+)
+
+
+def parse_claim_command(text: str) -> Optional[str]:
+    """Parse ``claim <job_code>`` → job_code (blackboard volunteer take)."""
+
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    match = _CLAIM_RE.match(raw)
+    if not match:
+        return None
+    return match.group(1).strip()
+
+
 _HANDOFF_RE = re.compile(
     r"^(?:/)?(?:handoff|peer)\s+<?@?!?(\d{5,})>?\s*[:\-]?\s*(.+)$",
     re.IGNORECASE | re.DOTALL,

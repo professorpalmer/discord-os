@@ -25,3 +25,10 @@ proxy.
 
 **Single-host SQLite.** Not a multi-host Durable Objects brain lake. CU/docker
 and external mailbox stay parked.
+
+
+## Compact recall pack (Wave 5 P1a)
+
+`format_brain_prompt_block` / `discord-os brain show --channel-id ID` emit a
+budgeted pack: DRI, top strategy filenames, ≤5 journal notes, ≤3 Done summaries,
+optional `[plan-gallery]` hits. Hard byte clip (~1800).

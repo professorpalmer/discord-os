@@ -2356,6 +2356,51 @@ class AgentOrchestrator:
                     )
                 except Exception:
                     pass
+            # Wave 5 P1c: optional plan gallery journal (opt-in env or always-on thin)
+            try:
+                import os
+                from agent_discord.host.brain import record_plan_gallery
+
+                if str(os.environ.get("DISCORD_OS_PLAN_GALLERY") or "1").strip().lower() not in {
+                    "0",
+                    "false",
+                    "no",
+                    "off",
+                }:
+                    plan_text = str(
+                        (meta.get("plan_text") or meta.get("plan") or "")
+                        if isinstance(meta, dict)
+                        else ""
+                    )
+                    channel_id = ""
+                    task_row = self.store.get_task(task_id) if task_id else None
+                    if isinstance(task_row, dict):
+                        channel_id = str(task_row.get("channel_id") or "")
+                        if not plan_text:
+                            tmeta = task_row.get("metadata_json") or "{}"
+                            import json
+                            if isinstance(tmeta, str):
+                                try:
+                                    tmeta = json.loads(tmeta)
+                                except Exception:
+                                    tmeta = {}
+                            if isinstance(tmeta, dict):
+                                plan_text = str(
+                                    tmeta.get("plan_text")
+                                    or (tmeta.get("intake_meta") or {}).get("plan_text")
+                                    or ""
+                                )
+                    if plan_text:
+                        record_plan_gallery(
+                            self.store,
+                            workspace_id=str(
+                                (task_row or {}).get("workspace_id") or "default"
+                            ),
+                            channel_id=channel_id,
+                            plan_text=plan_text,
+                        )
+            except Exception:
+                pass
             return out
         # deny / cancel
         return self._finish_gate(

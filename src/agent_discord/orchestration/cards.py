@@ -318,6 +318,7 @@ def progress_card(
     chrome: str = "",
     operator: str = "",
     lane: str = "",
+    ledger: str = "",
 ) -> CardMessage:
     from agent_discord.orchestration.job_briefing import CHROME_LIVE
 
@@ -333,6 +334,9 @@ def progress_card(
         bits.append(f"lane {(lane or '').strip()}")
     if bits:
         body = (" · ".join(bits) + ("\n" + body if body else "")).strip()
+    led = redact_text_markers((ledger or "").strip())
+    if led:
+        body = (body + ("\n" if body else "") + led).strip()
     think = redact_text_markers(thinking or "")
     return CardMessage(
         kind="PROGRESS",
@@ -462,6 +466,7 @@ def receipt_card(
     operator: str = "",
     lane: str = "",
     handoff_envelope: Any = None,
+    ledger: str = "",
 ) -> CardMessage:
     title, color = _RECEIPT_TITLES.get(receipt.status, ("Receipt", COLOR_IDLE))
     summary = str(strip_forbidden_keys({"summary": receipt.summary}).get("summary", ""))
@@ -507,6 +512,9 @@ def receipt_card(
         rows = clipped(max_len=72) if callable(clipped) else []
         for label, value in rows[:6]:
             fields.append((str(label), str(value), True))
+    led = redact_text_markers((ledger or "").strip())
+    if led:
+        fields.append(("Ledger", led[:200], False))
     _ = max_progress
     fname, fbytes = settle_file_attachment(receipt)
     chrome = _receipt_chrome(receipt.status)

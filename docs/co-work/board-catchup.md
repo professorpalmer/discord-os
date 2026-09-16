@@ -21,3 +21,9 @@ when two active jobs share an ADR/PR/checkout. Forum tags stay manual.
 
 - Heuristic text scan of intake/summary (+ task metadata).
 - Single-host SQLite. No multi-host brain-lake sync.
+
+
+## Write-key / path conflicts (Wave 5 P1d)
+
+Conflicts also group jobs sharing `realm_write_key` / `write_key` / path-like
+tokens (`src/...`). Still one Catch-up / digest briefing — no storm.
