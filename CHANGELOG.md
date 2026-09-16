@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.5.61
+
+Co-work P0 share kit + cron catch-up honesty: README positioning strip,
+`docs/COMPARISON.md`, `docs/co-work/shared-desk-demo.md`. Overdue schedules
+while HOST Off post one Catch-up `skipped_while_disarmed` and bump forward
+(no Off→On job storm).
+
+
 ## 0.5.60
 
 Quiet-unless-real Discord noise: status digest signature ignores terminal jobs

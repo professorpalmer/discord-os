@@ -489,6 +489,7 @@ def drain_inbound(
             workspace_id=workspace_id,
             guild_id=guild_id,
             thread_id=thread_id,
+            discord=discord,
         )
     )
     receipts.extend(
@@ -1611,10 +1612,16 @@ def _fire_due_schedules(
     workspace_id: str,
     guild_id: Optional[str],
     thread_id: Optional[str],
+    discord: Any = None,
 ) -> list[RunReceipt]:
+    """Fire due schedules while HOST is armed.
+
+    While Off (disarmed), overdue rows are **not** flooded as jobs. Instead we
+    bump each schedule forward and post at most one Catch-up briefing with
+    ``skipped_while_disarmed`` so On does not storm.
+    """
+
     if store is None or is_spend_halted(store, workspace_id):
-        return []
-    if not _channel_is_armed(store, channel_id):
         return []
     due_reader = getattr(store, "due_schedules", None)
     bumper = getattr(store, "bump_schedule", None)
@@ -1625,6 +1632,21 @@ def _fire_due_schedules(
         due = list(due_reader(now_ms, channel_id))
     except Exception:
         return []
+    if not due:
+        return []
+
+    if not _channel_is_armed(store, channel_id):
+        _catch_up_skipped_while_disarmed(
+            discord if discord is not None else getattr(orchestrator, "discord", None),
+            store,
+            due,
+            channel_id=channel_id,
+            thread_id=thread_id,
+            now_ms=now_ms,
+            bumper=bumper,
+        )
+        return []
+
     receipts: list[RunReceipt] = []
     for row in due:
         prompt = str(row.get("prompt") or "").strip()
@@ -1657,3 +1679,59 @@ def _fire_due_schedules(
             except Exception:
                 pass
     return receipts
+
+
+def _catch_up_skipped_while_disarmed(
+    discord: Any,
+    store: Any,
+    due: list,
+    *,
+    channel_id: str,
+    thread_id: Optional[str],
+    now_ms: int,
+    bumper: Any,
+) -> None:
+    """One Catch-up briefing; bump due schedules so Off→On does not storm."""
+
+    skipped: list[str] = []
+    for row in due:
+        prompt = str(row.get("prompt") or "").strip()
+        schedule_id = str(row.get("schedule_id") or "")
+        every_s = int(row.get("every_s") or 0)
+        if not schedule_id:
+            continue
+        label = prompt if prompt else schedule_id
+        if len(label) > 80:
+            label = label[:77] + "..."
+        skipped.append(label)
+        if callable(bumper) and every_s > 0:
+            try:
+                bumper(schedule_id, now_ms + every_s * 1000)
+            except Exception:
+                pass
+        elif callable(bumper):
+            # No interval — push a day so it does not remain perpetually due.
+            try:
+                bumper(schedule_id, now_ms + 86_400_000)
+            except Exception:
+                pass
+    if not skipped:
+        return
+    body = (
+        f"Catch-up: {len(skipped)} schedule(s) skipped_while_disarmed — "
+        + "; ".join(skipped[:8])
+    )
+    if len(skipped) > 8:
+        body += f" (+{len(skipped) - 8} more)"
+    send = getattr(discord, "send_message", None) if discord is not None else None
+    if not callable(send):
+        return
+    try:
+        send(channel_id, body, thread_id=thread_id)
+    except TypeError:
+        try:
+            send(channel_id, body)
+        except Exception:
+            pass
+    except Exception:
+        pass

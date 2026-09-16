@@ -14,6 +14,21 @@ Public package is [`discord-os`](https://pypi.org/project/discord-os/). Repo: [`
 pip install discord-os
 ```
 
+
+## Positioning (share kit)
+
+Discord OS is a **shared desk**: Discord is the screen, this Mac process is the computer, Puppetmaster cooks on OpenRouter/agentic only. Not a hosted fleet, not computer-use (CU/docker stay parked), not a Discord↔shell paste bot.
+
+| You want | Use |
+|---|---|
+| Phone-first On/Off/Ask + job threads on your Mac | Discord OS |
+| Vendor cowork / computer-use runtime | Elsewhere — see [docs/COMPARISON.md](docs/COMPARISON.md) |
+| Thin “message → subprocess → stdout” bridge | A smaller custom bot |
+
+**Shared desk in &lt;10 minutes:** [docs/co-work/shared-desk-demo.md](docs/co-work/shared-desk-demo.md) (`REQUIRE_OPERATORS` → Pair×2 → bind realm+memory → dual ask/steer → gate park).
+
+**Compare:** [docs/COMPARISON.md](docs/COMPARISON.md). **Policy locks:** [docs/host/policy.md](docs/host/policy.md).
+
 ## Setup
 
 Once, in a browser: [Discord Developer Portal](https://discord.com/developers/applications) → New Application → **Bot** → Reset Token (`DISCORD_BOT_TOKEN`) → enable **Message Content Intent** → General Information → Application ID (`DISCORD_APPLICATION_ID`). Copy a private channel ID.

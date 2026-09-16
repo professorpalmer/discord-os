@@ -164,3 +164,10 @@ Opt-in local spoken Done on this Mac. Discord guild voice join re-checked:
 ## Slash (opt-in)
 
 Text binds and the HOST panel are the default. Slash is optional (default off) and mirrors the same verbs when registered — `/bind` (name autocomplete), `/job` (DOS-* autocomplete), `/status`, `/on`, `/off`, `/stop`, `/open`, `/connect`. When interactions are exposed, the host self-heals registration (version-aware; fail soft). Not required for doctor, binds, or jobs. No `/add`. See [slash.md](slash.md). Code: `src/agent_discord/discord/interactions.py`.
+
+## Schedules while Off
+
+Due schedules do **not** queue as a job storm when HOST is Off. Listen posts one
+**Catch-up** briefing (`skipped_while_disarmed`) and bumps each schedule forward.
+Turn On for the next interval — not a flood of overdue cooks.
+

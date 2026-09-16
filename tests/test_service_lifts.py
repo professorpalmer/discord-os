@@ -215,6 +215,55 @@ def test_due_schedule_fires_from_listen(tmp_path: Path):
     _ = fake
 
 
+
+
+def test_due_schedules_catch_up_while_disarmed(tmp_path: Path):
+    """Off + overdue → one Catch-up, bump forward, no job storm."""
+
+    orch, store, fake, backend = _orch(tmp_path)
+    store.add_operator("owner-1", role="owner")
+    store.set_host_control("ch", armed=False)
+    for prompt in ("alpha task", "beta task", "gamma task"):
+        store.add_schedule(
+            channel_id="ch",
+            workspace_id="ws",
+            prompt=prompt,
+            every_s=3600,
+            created_by="owner-1",
+            next_ms=0,
+        )
+    before = backend.dispatch_count
+    receipts = drain_inbound(orch, orch.discord, channel_id="ch", workspace_id="ws", since_ms=0)
+    assert receipts == []
+    assert backend.dispatch_count == before
+    assert store.due_schedules(0, "ch") == []
+    catchups = [m for m in fake.sent if "skipped_while_disarmed" in (m.content or "")]
+    assert len(catchups) == 1
+    assert "Catch-up" in catchups[0].content
+    assert "3 schedule" in catchups[0].content
+    store.close()
+
+
+def test_due_schedule_still_fires_when_armed(tmp_path: Path):
+    """Armed path unchanged — due schedule still cooks."""
+
+    orch, store, fake, backend = _orch(tmp_path)
+    store.add_operator("owner-1", role="owner")
+    store.set_host_control("ch", armed=True)
+    store.add_schedule(
+        channel_id="ch",
+        workspace_id="ws",
+        prompt="what is Discord OS?",
+        every_s=3600,
+        created_by="owner-1",
+        next_ms=0,
+    )
+    receipts = drain_inbound(orch, orch.discord, channel_id="ch", workspace_id="ws", since_ms=0)
+    assert receipts
+    assert backend.dispatch_count >= 1
+    store.close()
+    _ = fake
+
 def test_schedule_command_parser():
     parsed = parse_schedule_command("schedule every 1h: run tests")
     assert parsed == (3600, "run tests")
