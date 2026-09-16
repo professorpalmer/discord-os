@@ -114,7 +114,7 @@ def test_tick_posts_on_change_not_repeat(tmp_path: Path, monkeypatch) -> None:
         snapshot=snap2,
     )
     assert body is not None
-    assert "0.0500" in body
+    assert "$0.05" in body
     assert len(provider.sent) == 1
 
     # Same signature → no spam
