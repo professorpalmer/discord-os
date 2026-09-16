@@ -11,3 +11,7 @@ discord-os add forum-tags --channel-id FORUM_ID
 HARD lock: `modify_channel` refuses any PATCH that includes `available_tags`.
 Missing status tags → soft-skip sync (or spoken Need when required); add tags
 manually in Discord.
+
+## Spec Kit lifecycle labels (Wave 6 P2c)
+
+Optional manual tags (`specify` / `plan` / `tasks` / `implement` / `review`) map into binding `lifecycle_tag_ids` on forum-tags refresh. Never auto-create — see [wave6-speckit-tags](wave6-speckit-tags.md).

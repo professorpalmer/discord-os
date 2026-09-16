@@ -50,7 +50,27 @@ FORUM_NEED_TAGS_MISSING = (
 # Binding metadata: tags-as-tickets deepen (still JobPool — not a second system).
 TAGS_AS_TICKETS_FLAG = "tags_as_tickets"
 STATUS_TAG_IDS_KEY = "status_tag_ids"
+LIFECYCLE_TAG_IDS_KEY = "lifecycle_tag_ids"
 APPLIED_TAGS_KEY = "applied_tags"
+
+# Spec Kit-ish lifecycle labels (normalized) → phase key.
+# Optional manual map only — matched against existing available_tags; never create.
+_LIFECYCLE_NAME_ALIASES: dict[str, str] = {
+    "specify": "specify",
+    "spec": "specify",
+    "specification": "specify",
+    "plan": "plan",
+    "planning": "plan",
+    "tasks": "tasks",
+    "task": "tasks",
+    "breakdown": "tasks",
+    "implement": "implement",
+    "implementation": "implement",
+    "impl": "implement",
+    "coding": "implement",
+    "review": "review",
+    "revise": "review",
+}
 
 # Discord hard limit on thread applied_tags.
 MAX_APPLIED_TAGS = 5
@@ -646,6 +666,26 @@ def build_status_tag_id_map(
     return by_status
 
 
+def build_lifecycle_tag_id_map(
+    available: Sequence[ForumTag],
+) -> dict[str, str]:
+    """Map Spec Kit-ish phase → Discord tag id from existing available_tags.
+
+    Manual only: first matching alias wins per phase. Never invents or creates tags.
+    """
+
+    by_phase: dict[str, str] = {}
+    for tag in available or ():
+        key = normalize_tag_name(tag.name)
+        phase = _LIFECYCLE_NAME_ALIASES.get(key)
+        if phase is None:
+            phase = _LIFECYCLE_NAME_ALIASES.get(key.replace("-", ""))
+        if not phase or phase in by_phase:
+            continue
+        by_phase[phase] = tag.tag_id
+    return by_phase
+
+
 def resolve_status_from_applied_tags(
     applied_ids: Sequence[str],
     status_tag_ids: Mapping[str, str],
@@ -757,10 +797,12 @@ def cache_status_tags_from_forum_payload(
 
     available = parse_available_tags(payload)
     status_map = build_status_tag_id_map(available)
+    lifecycle_map = build_lifecycle_tag_id_map(available)
     enabled = bool(status_map)
     updates = {
         TAGS_AS_TICKETS_FLAG: enabled,
         STATUS_TAG_IDS_KEY: status_map,
+        LIFECYCLE_TAG_IDS_KEY: lifecycle_map,
     }
     writer = getattr(store, "merge_binding_metadata", None)
     if callable(writer):
@@ -993,6 +1035,7 @@ def refresh_status_tags_from_discord(
         "channel_id": cid,
         "tags_as_tickets": bool(updates.get(TAGS_AS_TICKETS_FLAG)),
         "status_tag_ids": dict(updates.get(STATUS_TAG_IDS_KEY) or {}),
+        "lifecycle_tag_ids": dict(updates.get(LIFECYCLE_TAG_IDS_KEY) or {}),
         "created_available_tags": False,
     }
 
@@ -1011,11 +1054,13 @@ __all__ = [
     "ForumTag",
     "GUILD_FORUM",
     "MAX_APPLIED_TAGS",
+    "LIFECYCLE_TAG_IDS_KEY",
     "STATUS_TAG_IDS_KEY",
     "TAGS_AS_TICKETS_FLAG",
     "apply_thread_status_tags",
     "assert_forum_channel",
     "binding_is_forum_realm",
+    "build_lifecycle_tag_id_map",
     "build_status_tag_id_map",
     "cache_status_tags_from_forum_payload",
     "refresh_status_tags_from_discord",

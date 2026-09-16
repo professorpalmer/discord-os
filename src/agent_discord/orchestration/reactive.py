@@ -86,8 +86,7 @@ def reactive_paint(
 
     - awaiting_plan → plan Approve / Cancel (P2.8; not write-gate Always)
     - pending (or explicit awaiting_approval) → parked Allow / Always / Deny
-    - failed with a thread → Continue + Dismiss (ack failed Need)
-    - failed without a thread → Continue + Retry + Dismiss
+    - failed (thread or not) → Continue + Retry + Dismiss (Wave 6 P2a recovery)
     - completed / cancelled with a thread → idle Continue
     - running → Cancel
     - otherwise → done Continue + Retry (receipt chrome)
@@ -110,10 +109,7 @@ def reactive_paint(
         )
     if state is TaskStatus.FAILED:
         stage, accent = _STAGE_CHROME[TaskStatus.FAILED]
-        if has_thread:
-            return ReactivePaint(
-                actions=ACTIONS_FAILED, accent=accent, stage=stage, chrome=CHROME_NEED
-            )
+        # Wave 6 P2a recovery beat: Retry + Dismiss on failed Live (thread or not).
         return ReactivePaint(
             actions=ACTIONS_FAILED_DONE, accent=accent, stage=stage, chrome=CHROME_NEED
         )
@@ -181,6 +177,7 @@ def reactive_progress_card(
     job_code: str = "",
     steer_footer: str = "",
     ledger: str = "",
+    stall_line: str = "",
 ) -> CardMessage:
     """Live cook flush — Cancel row from the seam."""
 
@@ -196,6 +193,7 @@ def reactive_progress_card(
         chrome=paint.chrome,
         steer_footer=steer_footer,
         ledger=ledger,
+        stall_line=stall_line,
     )
 
 

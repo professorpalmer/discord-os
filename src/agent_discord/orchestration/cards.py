@@ -320,6 +320,7 @@ def progress_card(
     lane: str = "",
     ledger: str = "",
     steer_footer: str = "",
+    stall_line: str = "",
 ) -> CardMessage:
     from agent_discord.orchestration.job_briefing import CHROME_LIVE
 
@@ -342,6 +343,10 @@ def progress_card(
     if steer:
         # Live footer attribution (Wave 6 P1a): by:<op> · <clip>
         body = (body + ("\n" if body else "") + steer).strip()
+    stall = redact_text_markers((stall_line or "").strip())
+    if stall:
+        # Wave 6 P2e: opt-in quiet stall one-liner after N steers w/o progress
+        body = (body + ("\n" if body else "") + stall).strip()
     think = redact_text_markers(thinking or "")
     return CardMessage(
         kind="PROGRESS",

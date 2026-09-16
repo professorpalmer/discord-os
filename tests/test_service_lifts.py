@@ -190,7 +190,8 @@ def test_spend_halt_blocks_new_dispatch(tmp_path: Path):
         TaskIntake(text="what is Discord OS?", channel_id="ch", workspace_id="ws")
     )
     assert receipt.status == TaskStatus.FAILED
-    assert receipt.error == "spend halted"
+    assert "ROE escalate" in (receipt.error or "")
+    assert "Halt" in (receipt.error or "") or "halt" in (receipt.error or "").lower()
     assert backend.dispatch_count == 0
     store.close()
 

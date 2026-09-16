@@ -111,10 +111,11 @@ def test_reactive_for_job_matches_host_jobs_mapping():
     )
     assert reactive_for_job({"status": "running"}).actions == ACTIONS_RUNNING
     failed = reactive_for_job({"status": "failed", "thread_id": "th"})
-    assert failed.actions == ACTIONS_FAILED
+    # Wave 6 P2a: recovery beat uses Retry + Dismiss even with a thread.
+    assert failed.actions == ACTIONS_FAILED_DONE
     assert failed.accent == COLOR_FAIL
     assert failed.stage == "Failed"
-    assert action_labels(failed.actions) == FAILED_BUTTONS
+    assert action_labels(failed.actions) == FAILED_DONE_BUTTONS
     failed_done = reactive_for_job({"status": "failed"})
     assert failed_done.actions == ACTIONS_FAILED_DONE
     assert action_labels(failed_done.actions) == FAILED_DONE_BUTTONS
@@ -181,10 +182,11 @@ def test_reactive_helpers_own_park_running_settle_buttons():
         ),
         has_thread=True,
     )
-    assert _labels(failed.rows[0]) == list(FAILED_BUTTONS)
+    assert _labels(failed.rows[0]) == list(FAILED_DONE_BUTTONS)
     assert failed.color == COLOR_FAIL
     assert [item["custom_id"] for item in failed.rows[0]["components"]] == [
         "discord-os:job:continue:run-fail",
+        "discord-os:job:retry:run-fail",
         "discord-os:job:dismiss:run-fail",
     ]
 

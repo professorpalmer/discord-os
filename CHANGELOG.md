@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.79
+
+Wave 6 P2 stretch (board + brain lakes):
+
+- **P2a** Human recovery beat after failed peer/Live (diagnostic + Retry/Dismiss; extends W5 compensation).
+- **P2b** Parameterized recipe docs (Goose-shaped inputs table) — docs only, no YAML runtime.
+- **P2c** Spec Kit lifecycle labels as optional forum **manual** tags map (`lifecycle_tag_ids`; never auto-create).
+- **P2d** OCL-shaped ROE escalate copy on Halt / gate Deny (wording + receipt).
+- **P2e** Stall one-liner on Live after N steers w/o progress (`DISCORD_OS_STALL_STEERS` opt-in).
+
+Still parked: P2f mailbox/IRC, P2g multi-host DO, P2h CU/docker / phone Tailscale/ttyd/filebrowser, second JobPool, multi-gateway, silent ssh, auto forum tag create.
+
 ## 0.5.78
 
 Wave 6 P1 (board + brain lakes):
