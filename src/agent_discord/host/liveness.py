@@ -6,8 +6,7 @@ This module keeps a thin digest (power / pid / doctor / gateway) and
 surfaces it as:
 
 * a HOST **Need** line on the Jobs ranking / HOST card description
-* an on-change spoken status post in the host channel (Discord mobile already
-  pushes on channel posts — not a second push vendor)
+* never a Discord channel post (phone push was the old vendor)
 
 Debounced on signature change. No tokens in posts. No dashboard write API.
 Puppetmaster is the cook backend — unused here; liveness is inline.
@@ -243,25 +242,6 @@ def digest_spoken_message(digest: HostDigest) -> str:
     return redact_text_markers(_scrub_secrets(body))
 
 
-def _gateway_only_bad(digest: HostDigest) -> bool:
-    """True when the only unhealthy bit is gateway (transient flap candidate)."""
-
-    return (
-        digest.gateway == GATEWAY_BAD
-        and digest.doctor == DOCTOR_OK
-        and digest.pid != PID_DEAD
-    )
-
-
-def _prev_gateway_only_bad(previous_signature: str) -> bool:
-    prev = (previous_signature or "").strip()
-    return (
-        "gateway=BAD" in prev
-        and "doctor=FAIL" not in prev
-        and "pid=DEAD" not in prev
-    )
-
-
 def should_announce(
     digest: HostDigest,
     previous_signature: str = "",
@@ -270,36 +250,12 @@ def should_announce(
     gateway_bad_streak: int = 0,
     gateway_bad_posted: bool = False,
 ) -> bool:
-    """Post only on signature change (or force). Skip repeated OK spam.
+    """Liveness never posts to Discord. HOST Need + CLI doctor stay.
 
-    Gateway-only BAD needs a sustained streak (default 2 ticks) before Discord
-    hears about it; recovery from an unposted flap stays quiet.
+    Channel posts were the phone-push vendor (0.5.60 debounce was not enough).
     """
 
-    if force:
-        return True
-    prev = (previous_signature or "").strip()
-    if digest.signature == prev:
-        return False
-    if digest.ok and not prev:
-        # First healthy observation — stay quiet.
-        return False
-    if (
-        digest.ok
-        and prev
-        and "doctor=FAIL" not in prev
-        and "pid=DEAD" not in prev
-        and "gateway=BAD" not in prev
-    ):
-        # Healthy → healthy (field shuffle only) — quiet.
-        return False
-    # Recovery from gateway-only BAD that never posted — quiet (transient flap).
-    if digest.ok and _prev_gateway_only_bad(prev) and not gateway_bad_posted:
-        return False
-    # First gateway-only BAD observation(s) — hold until streak sustained.
-    if _gateway_only_bad(digest) and int(gateway_bad_streak) < 2:
-        return False
-    return True
+    return False
 
 
 def synthetic_host_need_job(digest: HostDigest) -> Optional[dict[str, Any]]:
@@ -396,16 +352,6 @@ def remember_signature(store: Any, workspace_id: str, signature: str) -> None:
         pass
 
 
-def recalled_signature(store: Any, workspace_id: str) -> str:
-    getter = getattr(store, "get_preference", None) if store is not None else None
-    if not callable(getter):
-        return ""
-    try:
-        return str(getter(workspace_id or "default", PREF_SIG_KEY) or "")
-    except Exception:
-        return ""
-
-
 def tick_host_liveness(
     discord: Any,
     *,
@@ -420,10 +366,9 @@ def tick_host_liveness(
     doctor_lines: Optional[Sequence[str]] = None,
     doctor_code: Optional[int] = None,
 ) -> Optional[str]:
-    """Compute digest; post spoken status on change; persist Need state.
+    """Compute digest and persist Need state. Never posts to Discord.
 
-    Returns the posted message body when a channel post happened, else None.
-    Best-effort — never raises on the listen path.
+    Returns None. Best-effort — never raises on the listen path.
     """
 
     try:
@@ -479,53 +424,8 @@ def _tick_host_liveness(
         now=checked_now,
         config=config,
     )
-    prev_sig = recalled_signature(store, workspace_id) or str(prior.get("signature") or "")
-    prior_streak = int(prior.get("gateway_bad_streak") or 0)
-    if _gateway_only_bad(digest):
-        gateway_bad_streak = prior_streak + 1
-    elif digest.gateway == GATEWAY_BAD:
-        # doctor/pid also unhappy — count as sustained immediately
-        gateway_bad_streak = max(prior_streak + 1, 2)
-    else:
-        gateway_bad_streak = 0
-    gateway_bad_posted = bool(prior.get("gateway_bad_posted"))
-    announce = should_announce(
-        digest,
-        prev_sig,
-        force=force and not digest.ok,
-        gateway_bad_streak=gateway_bad_streak,
-        gateway_bad_posted=gateway_bad_posted,
-    )
-    # Persist streak; clear posted latch only after a healthy tick so recovery
-    # announce can still see that the prior BAD was spoken.
-    persist_posted_latch = False if digest.ok else gateway_bad_posted
-    save_liveness_state(
-        ws,
-        digest,
-        posted=False,
-        gateway_bad_streak=gateway_bad_streak,
-        gateway_bad_posted=persist_posted_latch,
-    )
+    save_liveness_state(ws, digest, posted=False)
     remember_signature(store, workspace_id, digest.signature)
-
-    if not announce:
-        return None
-    if not (channel_id or "").strip():
-        return None
-
-    body = digest_spoken_message(digest)
-    posted = _post_status(discord, channel_id, body)
-    if posted:
-        if _gateway_only_bad(digest) or digest.gateway == GATEWAY_BAD:
-            gateway_bad_posted = True
-        save_liveness_state(
-            ws,
-            digest,
-            posted=True,
-            gateway_bad_streak=gateway_bad_streak,
-            gateway_bad_posted=gateway_bad_posted,
-        )
-        return body
     return None
 
 
@@ -540,7 +440,7 @@ def notify_doctor_failure(
     workspace_id: str = "default",
     config: Any = None,
 ) -> Optional[str]:
-    """Desk ``doctor --notify``: post FAIL digest to the host channel."""
+    """Desk ``doctor --notify``: refresh digest state. Never channel-posts."""
 
     cid = (channel_id or "").strip()
     if not cid:
@@ -662,23 +562,6 @@ def resolve_digest_for_panel(
         checked_at=cached.checked_at,
         gateway=gateway,
     )
-
-
-def _post_status(discord: Any, channel_id: str, body: str) -> bool:
-    send = getattr(discord, "send_message", None)
-    if not callable(send):
-        return False
-    try:
-        send(channel_id, body)
-        return True
-    except TypeError:
-        try:
-            send(channel_id, body, thread_id=None)
-            return True
-        except Exception:
-            return False
-    except Exception:
-        return False
 
 
 def _safe_fail_fragment(line: str) -> str:

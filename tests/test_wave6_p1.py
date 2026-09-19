@@ -90,9 +90,9 @@ def test_doctor_notify_fail_only_default():
     verbose = filter_doctor_notify_lines(lines, verbose=True)
     assert any(x.startswith("WARN ") for x in verbose)
     assert any(x.startswith("FAIL ") for x in verbose)
-    assert doctor_notify_should_post(1, lines, verbose=False)
-    assert not doctor_notify_should_post(0, ["OK workspace", "WARN soft"], verbose=False)
-    assert doctor_notify_should_post(0, ["WARN soft"], verbose=True)
+    assert doctor_notify_should_post(1, lines, verbose=False) is False
+    assert doctor_notify_should_post(0, ["OK workspace", "WARN soft"], verbose=False) is False
+    assert doctor_notify_should_post(0, ["WARN soft"], verbose=True) is False
 
 
 def test_overnight_brief_pack_inject(tmp_path: Path):
