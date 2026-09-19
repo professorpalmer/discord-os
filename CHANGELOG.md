@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.87
+
+### Never post doctor / liveness to Discord
+- Listen `tick_host_liveness` and `doctor --notify` refresh HOST Need / digest state only.
+- `should_announce` and `doctor_notify_should_post` are hard-false. Debounce (0.5.60) still leaked FAIL/recovery channel posts and phone pushes.
+- HOST card Need and `discord-os host doctor` print stay.
+
 ## 0.5.86
 
 ### Band C hotfix — webhook username Discord-safe

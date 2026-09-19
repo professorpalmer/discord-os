@@ -11,7 +11,6 @@ from agent_discord.host.liveness import (
     DOCTOR_FAIL,
     DOCTOR_OK,
     GATEWAY_BAD,
-    GATEWAY_OK,
     PID_DEAD,
     PID_OK,
     POWER_OFF,
@@ -20,6 +19,7 @@ from agent_discord.host.liveness import (
     compute_host_digest,
     digest_spoken_message,
     host_need_line,
+    last_digest_from_state,
     merge_host_need_jobs,
     notify_doctor_failure,
     should_announce,
@@ -66,34 +66,19 @@ def test_digest_and_need_line_on_doctor_fail(tmp_path: Path, monkeypatch) -> Non
     store.close()
 
 
-def test_should_announce_debounces_ok() -> None:
+def test_should_announce_never_posts() -> None:
     ok = HostDigest(power=POWER_OK, pid=PID_OK, doctor=DOCTOR_OK)
     fail = HostDigest(
         power=POWER_OK,
         pid=PID_DEAD,
         doctor=DOCTOR_FAIL,
         fail_summary="host.pid dead",
+        gateway=GATEWAY_BAD,
     )
     assert should_announce(ok, "") is False
-    assert should_announce(fail, "") is True
-    assert should_announce(fail, fail.signature) is False
-    assert should_announce(ok, fail.signature) is True  # recovery
-    assert should_announce(ok, ok.signature) is False
-
-
-def test_should_announce_quiets_transient_gateway_flap() -> None:
-    ok = HostDigest(power=POWER_OK, pid=PID_OK, doctor=DOCTOR_OK, gateway=GATEWAY_OK)
-    gbad = HostDigest(
-        power=POWER_OK,
-        pid=PID_OK,
-        doctor=DOCTOR_OK,
-        gateway=GATEWAY_BAD,
-        fail_summary="heartbeat ACK stale",
-    )
-    assert should_announce(gbad, ok.signature, gateway_bad_streak=1) is False
-    assert should_announce(gbad, ok.signature, gateway_bad_streak=2) is True
-    assert should_announce(ok, gbad.signature, gateway_bad_posted=False) is False
-    assert should_announce(ok, gbad.signature, gateway_bad_posted=True) is True
+    assert should_announce(fail, "", force=True) is False
+    assert should_announce(fail, "", gateway_bad_streak=99) is False
+    assert should_announce(ok, fail.signature, gateway_bad_posted=True) is False
 
 
 def test_merge_host_need_ranks_first() -> None:
@@ -120,7 +105,7 @@ def test_merge_host_need_ranks_first() -> None:
     assert merge_host_need_jobs(jobs, healthy) == jobs
 
 
-def test_tick_posts_on_fail_change(tmp_path: Path, monkeypatch) -> None:
+def test_tick_never_posts_doctor_digest(tmp_path: Path, monkeypatch) -> None:
     ws = _ws(tmp_path, monkeypatch)
     store = SQLiteStore(ws / "agent_discord.sqlite3")
     store.initialize()
@@ -140,25 +125,22 @@ def test_tick_posts_on_fail_change(tmp_path: Path, monkeypatch) -> None:
         doctor_lines=["FAIL gateway_owners stale"],
         doctor_code=1,
     )
-    assert body is not None
-    assert "doctor FAIL" in body
-    assert "test-token" not in body
+    assert body is None
+    assert provider.sent == []
+    cached = last_digest_from_state(ws)
+    assert cached is not None
+    assert cached.doctor == DOCTOR_FAIL
 
-    assert provider.sent
-    assert "Discord OS host" in (provider.sent[0].content or "")
-
-    # Same signature — no second post
-    again = tick_host_liveness(
+    fail_posted = notify_doctor_failure(
         discord,
         workspace=ws,
         channel_id="chan-1",
         store=store,
-        force=False,
-        min_interval_s=0,
         doctor_lines=["FAIL gateway_owners stale"],
         doctor_code=1,
     )
-    assert again is None
+    assert fail_posted is None
+    assert provider.sent == []
     store.close()
 
 

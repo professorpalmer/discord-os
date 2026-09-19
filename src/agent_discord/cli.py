@@ -271,7 +271,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_host_doctor.add_argument(
         "--notify",
         action="store_true",
-        help="On FAIL, post a thin host-status digest to the host channel (phone-visible)",
+        help="Accepted; never posts to Discord (Need / digest state only)",
     )
     p_host_doctor.add_argument(
         "--verbose",
@@ -2522,10 +2522,7 @@ def cmd_host_doctor(args: argparse.Namespace, *, out: TextIO | None = None) -> i
 def _doctor_notify(
     code: int, lines: list[str], *, verbose: bool = False
 ) -> Optional[str]:
-    """Post phone-visible FAIL digest to the host channel. Best-effort.
-
-    Wave 6 P1b: FAIL-only by default; WARN collapsed unless ``verbose``.
-    """
+    """Refresh digest state only. Never posts to Discord."""
 
     from agent_discord.config import apply_runtime_secrets, load_config
     from agent_discord.discord.facade import DiscordFacade

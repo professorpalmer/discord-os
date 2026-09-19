@@ -701,11 +701,7 @@ def doctor_notify_should_post(
     *,
     verbose: bool = False,
 ) -> bool:
-    """Whether --notify should post to the host channel."""
+    """Whether --notify should post to the host channel. Never."""
 
-    filtered = filter_doctor_notify_lines(lines, verbose=verbose)
-    if filtered:
-        return True
-    # Exit code alone without FAIL lines: still quiet unless verbose+WARN.
     return False
 

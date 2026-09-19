@@ -77,7 +77,7 @@ macOS LaunchAgent (`com.discord-os.host`) or the Windows equivalent from `host/i
 discord-os host status
 discord-os host doctor          # LaunchAgent / workspace / pid / gateway
 discord-os host doctor --fix   # clear dead-pid gateway locks only
-discord-os host doctor --notify # on FAIL, post thin digest to host channel (phone)
+discord-os host doctor --notify # refresh Need state; never posts to Discord
 discord-os host dashboard       # read-only companion at http://127.0.0.1:8765/
 discord-os host stop
 discord-os host start --channel-id ID
@@ -91,10 +91,9 @@ with spoken `Expired. Write was not started.` Set `0` or `off` to disable.
 
 ## Phone-visible host liveness (P0.2)
 
-Desk doctor + loopback dashboard do not wake the phone when LaunchAgent / pid
-dies mid-cowork. A thin digest (`power` / `pid` / `doctor`) ranks as a HOST
-**Need** line and posts to the host channel **on change** (debounced). See
-[liveness.md](liveness.md).
+Desk doctor + loopback dashboard stay on the Mac. A thin digest (`power` /
+`pid` / `doctor`) ranks as a HOST **Need** line. It does **not** post to the
+host channel (0.5.87). See [liveness.md](liveness.md).
 
 ## Companion dashboard (read-only)
 
