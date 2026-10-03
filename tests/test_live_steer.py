@@ -170,3 +170,75 @@ def test_steer_is_an_honest_miss_without_backend_support(tmp_path: Path) -> None
     orch.run_task(_intake())
     assert seen == [False]
     store.close()
+
+
+_PATH_ENV = {"PATH": "/usr/bin:/bin"}
+
+
+def _cost_cli(tmp_path: Path, payload: dict) -> Path:
+    import json
+
+    out = tmp_path / "cost.json"
+    out.write_text(json.dumps(payload), encoding="utf-8")
+    script = tmp_path / "pm-cost"
+    script.write_text(f"#!/bin/sh\ncat {out}\n", encoding="utf-8")
+    script.chmod(0o755)
+    return script
+
+
+def test_measured_job_usage_reads_puppetmaster_cost(tmp_path: Path) -> None:
+    """Audit F1: tokens and cost come from puppetmaster cost, not stdout."""
+
+    from agent_discord.puppetmaster.backend import measured_job_usage
+
+    cli = _cost_cli(
+        tmp_path,
+        {
+            "token_usage": {"measured_runs": 1, "measured_tokens_in": 6015, "measured_tokens_out": 215},
+            "actual_cost": {"measured_cost_usd": 0.00101},
+        },
+    )
+    assert measured_job_usage(str(cli), "job_x", env=_PATH_ENV) == {
+        "input_tokens": 6015,
+        "output_tokens": 215,
+        "cost_usd": 0.00101,
+    }
+
+
+def test_measured_job_usage_never_invents_zero_cost(tmp_path: Path) -> None:
+    from agent_discord.puppetmaster.backend import measured_job_usage
+
+    cli = _cost_cli(
+        tmp_path,
+        {
+            "token_usage": {"measured_runs": 0, "estimated_tokens_in": 500},
+            "actual_cost": {"measured_cost_usd": None, "estimated_cost_usd": 0.2},
+        },
+    )
+    assert measured_job_usage(str(cli), "job_x", env=_PATH_ENV) == {}
+    assert measured_job_usage("", "job_x") == {}
+    assert measured_job_usage(str(cli), "") == {}
+
+
+def test_receipt_usage_feeds_spend(tmp_path: Path) -> None:
+    from agent_discord.orchestration.service import provider_cost_usd
+    from agent_discord.puppetmaster.backend import usage_from_cli_meta
+
+    cli = _cost_cli(
+        tmp_path,
+        {
+            "token_usage": {"measured_runs": 1, "measured_tokens_in": 10, "measured_tokens_out": 2},
+            "actual_cost": {"measured_cost_usd": 0.5},
+        },
+    )
+    backend = AgenticPuppetmasterBackend(cli=str(cli), pin=AGENTIC_MODEL_PIN, env=_PATH_ENV)
+    receipt = DispatchEvent(
+        kind=EventKind.RECEIPT,
+        summary=ProgressSummary(stage="done", message="ok"),
+        payload={"final_summary": "ok"},
+    )
+    enriched = backend._with_measured_usage(receipt, "job_x")
+    usage = usage_from_cli_meta(AGENTIC_MODEL_PIN, "", enriched.payload)
+    assert usage.input_tokens == 10 and usage.output_tokens == 2
+    assert provider_cost_usd(usage) == 0.5
+    assert enriched.payload["job_id"] == "job_x"

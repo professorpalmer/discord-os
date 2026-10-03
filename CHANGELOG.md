@@ -72,6 +72,9 @@
 ### Status-only run updates keep usage and error
 - `update_run` no longer nulls `usage_json` or `error` when a later call only changes status (approve, dismiss, cancel, complete). Spend receipts and root causes survive.
 
+### Tokens and cost come from `puppetmaster cost`
+- After each local cook the final receipt carries Puppetmaster's measured tokens and cost, read with `puppetmaster cost <job_id> --json`. Before, usage came from worker stdout, which has neither, so tokens were null on every run. Only measured numbers count. An unpriced job stays unknown, never `$0`.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

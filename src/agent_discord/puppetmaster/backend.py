@@ -378,6 +378,43 @@ def usage_from_cli_meta(
     )
 
 
+def measured_job_usage(
+    cli: str, job_id: str, *, env: Optional[Mapping[str, str]] = None
+) -> dict[str, Any]:
+    """Tokens and cost Puppetmaster measured for a finished job.
+
+    Reads ``puppetmaster cost <job_id> --json``. Only measured numbers are
+    returned; estimates are not spend. Unknown cost stays absent (never $0).
+    """
+
+    ident = (job_id or "").strip()
+    if not cli or not ident:
+        return {}
+    try:
+        proc = subprocess.run(
+            with_state_dir([cli, "cost", ident, "--json"]),
+            capture_output=True,
+            text=True,
+            timeout=20,
+            env=worker_env(env),
+        )
+        data = json.loads(proc.stdout or "{}") if proc.returncode == 0 else {}
+    except Exception:  # best-effort: a cost read never fails the cook
+        return {}
+    if not isinstance(data, Mapping):
+        return {}
+    usage: dict[str, Any] = {}
+    tokens = data.get("token_usage")
+    if isinstance(tokens, Mapping) and _optional_int(tokens.get("measured_runs")):
+        usage["input_tokens"] = _optional_int(tokens.get("measured_tokens_in"))
+        usage["output_tokens"] = _optional_int(tokens.get("measured_tokens_out"))
+    actual = data.get("actual_cost")
+    cost = actual.get("measured_cost_usd") if isinstance(actual, Mapping) else None
+    if isinstance(cost, (int, float)) and cost >= 0:
+        usage["cost_usd"] = float(cost)
+    return usage
+
+
 def _optional_int(raw: Any) -> Optional[int]:
     if raw is None or raw == "":
         return None

@@ -6,7 +6,7 @@ import os
 import shutil
 import subprocess
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Optional
 
@@ -40,6 +40,7 @@ from agent_discord.puppetmaster.backend import (
     cli_supports_flag,
     confine_worker_cwd,
     iter_cli_process_events,
+    measured_job_usage,
     prepend_early_job_id,
     request_workdir,
     with_state_dir,
@@ -344,6 +345,10 @@ class AgenticPuppetmasterBackend:
                 timeout_seconds=self.timeout_seconds,
                 on_job_id=lambda job_id: self._job_ids.__setitem__(request.run_id, job_id),
             ):
+                if event.kind == EventKind.RECEIPT:
+                    event = self._with_measured_usage(
+                        event, self._job_ids.get(request.run_id, "")
+                    )
                 if request.run_id in self._cancel_requested:
                     self._statuses[request.run_id] = TaskStatus.CANCELLED
                     yield DispatchEvent(
@@ -370,6 +375,18 @@ class AgenticPuppetmasterBackend:
             self._cancel_requested.discard(request.run_id)
             self._job_ids.pop(request.run_id, None)
             handoff.cleanup()
+
+    def _with_measured_usage(self, event: DispatchEvent, job_id: str) -> DispatchEvent:
+        """Attach Puppetmaster's measured tokens and cost to the final receipt."""
+
+        measured = measured_job_usage(self.cli, job_id, env=self.env)
+        if not measured:
+            return event
+        payload = dict(event.payload or {})
+        nested = payload.get("usage")
+        payload["usage"] = {**(dict(nested) if isinstance(nested, Mapping) else {}), **measured}
+        payload.setdefault("job_id", job_id)
+        return replace(event, payload=payload)
 
     def steer(self, run_id: str, text: str) -> bool:
         """Deliver a follow-up to the live worker via ``puppetmaster steer``.
