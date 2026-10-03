@@ -416,6 +416,10 @@ def handle_interaction_payload(
         return _ephemeral("unsupported interaction")
     data = payload.get("data") if isinstance(payload.get("data"), Mapping) else {}
     name = str(data.get("name") or "").lower()
+    if name in _OPERATOR_COMMANDS and not _slash_author_may_operate(
+        payload, name=name, workspace=workspace, env=env
+    ):
+        return _ephemeral(f"Denied: only paired operators can use /{name}.")
     if name == "connect":
         result = handle_connect_message("/connect", workspace=workspace, env=env)
         return _ephemeral(result.card or result.error or "connect")
@@ -569,6 +573,46 @@ def _option_map(raw: Any) -> dict[str, str]:
     return out
 
 
+# Every slash command except read-only /status changes host state or shows
+# job content, so it needs an operator.
+_OPERATOR_COMMANDS = frozenset(
+    {"connect", "open", "on", "off", "stop", "bind", "job", "clear-needs"}
+)
+
+
+def _slash_author_may_operate(
+    payload: Mapping[str, Any],
+    *,
+    name: str,
+    workspace: Path,
+    env: Optional[Mapping[str, str]],
+) -> bool:
+    from agent_discord.orchestration.service import (
+        author_may_operate,
+        seed_owner_if_empty,
+    )
+
+    user_id = _author_id(payload)
+    member = payload.get("member")
+    roles = member.get("roles") if isinstance(member, Mapping) else None
+    role_ids = [str(r) for r in roles or () if str(r).strip()]
+    store = None
+    try:
+        store = _open_store(workspace)
+        if name == "on":
+            # Same first-armed-human seed as the panel On button.
+            seed_owner_if_empty(store, user_id or None, env=env)
+        return author_may_operate(store, user_id, name, role_ids=role_ids, env=env)
+    except Exception:
+        return False
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
+
+
 def _ephemeral(content: str) -> dict[str, Any]:
     return {
         "type": RESPONSE_CHANNEL_MESSAGE,
@@ -626,9 +670,6 @@ def _handle_power_slash(
     try:
         store = _open_store(workspace)
         if parsed.action == "on":
-            from agent_discord.orchestration.service import seed_owner_if_empty
-
-            seed_owner_if_empty(store, _author_id(payload) or None)
             writer = getattr(store, "set_host_control", None)
             if callable(writer):
                 writer(channel_id, armed=True)

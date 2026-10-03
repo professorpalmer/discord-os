@@ -842,7 +842,7 @@ def handle_gateway_interaction(
     *,
     token: str = "",
     opener: Any = None,
-    on_ask: Optional[Callable[[str], None]] = None,
+    on_ask: Optional[Callable[[str, str], None]] = None,
     on_power: Optional[Callable[[bool], None]] = None,
     on_job: Optional[Callable[[str, str], None]] = None,
     on_clear_needs: Optional[Callable[..., Any]] = None,
@@ -865,6 +865,8 @@ def handle_gateway_interaction(
         custom_id = str(data.get("custom_id") or "")
     confirm = ask_confirm_action_from_custom_id(custom_id)
     if confirm is not None:
+        if not _operator_may_click(store, payload, "ask-confirm", opener=opener):
+            return "denied"
         interaction_id, ix_token = interaction_ids(payload)
         if interaction_id and ix_token:
             try:
@@ -886,6 +888,8 @@ def handle_gateway_interaction(
         return "ask-confirm"
     ask = ask_action_from_custom_id(custom_id)
     if ask is not None:
+        if not _operator_may_click(store, payload, "ask", opener=opener):
+            return "denied"
         interaction_id, ix_token = interaction_ids(payload)
         if interaction_id and ix_token:
             try:
@@ -910,6 +914,8 @@ def handle_gateway_interaction(
 
     job = job_action_from_custom_id(custom_id)
     if job is not None:
+        if not _operator_may_click(store, payload, job.action, opener=opener):
+            return "denied"
         # Discord-half P1: ACK-first (defer), then edit-in-place / apply.
         interaction_id, ix_token = interaction_ids(payload)
         if interaction_id and ix_token:
@@ -1267,6 +1273,41 @@ def handle_gateway_interaction(
 
 
 
+def _operator_may_click(
+    store: Any,
+    payload: Mapping[str, Any],
+    action: str,
+    *,
+    opener: Any,
+) -> bool:
+    """Job-card and ask-gate buttons act on runs: operators only.
+
+    A non-operator click gets an ephemeral Denied instead of the deferred ACK,
+    so the card never changes for them.
+    """
+
+    from agent_discord.orchestration.service import author_may_operate
+
+    user_id = interaction_user_id(payload)
+    if author_may_operate(
+        store, user_id, action, role_ids=interaction_role_ids(payload)
+    ):
+        return True
+    print(f"panel denied action={action} user={user_id or '-'}", flush=True)
+    _ack_interaction(
+        payload,
+        {
+            "type": CALLBACK_MESSAGE,
+            "data": {
+                "content": "Denied. Only paired operators can act on jobs.",
+                "flags": FLAG_EPHEMERAL,
+            },
+        },
+        opener=opener,
+    )
+    return False
+
+
 def _tick_rich_presence_best_effort(store: Any, channel_id: str) -> None:
     """Mac Rich Presence after HOST On / Off / Halt. Fail soft."""
 
@@ -1359,7 +1400,7 @@ def _handle_modal_submit(
     *,
     token: str,
     opener: Any,
-    on_ask: Optional[Callable[[str], None]],
+    on_ask: Optional[Callable[[str, str], None]],
     host_roots: Optional[list[Any]],
     host_runner: Any,
     browser_open: Any,
@@ -1378,17 +1419,26 @@ def _handle_modal_submit(
             token=token,
             opener=opener,
         )
-    if custom_id == ASK_MODAL_ID:
-        if text and callable(on_ask):
-            try:
-                on_ask(text)
-            except Exception:
-                pass
-        return "ask" if text else None
-    from agent_discord.orchestration.service import author_may_operate
+    from agent_discord.orchestration.service import (
+        author_may_dispatch,
+        author_may_operate,
+    )
 
     user_id = interaction_user_id(payload)
     role_ids = interaction_role_ids(payload)
+    if custom_id == ASK_MODAL_ID:
+        if not text:
+            return None
+        # Same rule as a typed ask: the modal starts a cook.
+        if not author_may_dispatch(store, user_id, role_ids=role_ids):
+            print(f"panel denied action=ask user={user_id or '-'}", flush=True)
+            return "denied"
+        if callable(on_ask):
+            try:
+                on_ask(text, user_id)
+            except Exception:
+                pass
+        return "ask"
     if not author_may_operate(store, user_id, custom_id, role_ids=role_ids):
         return "denied"
     if custom_id == ROLES_MODAL_ID:

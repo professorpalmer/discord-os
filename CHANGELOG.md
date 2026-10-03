@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Operator checks on every state-changing Discord surface
+- Job-card buttons (Approve, Always, Deny, Cancel, Retry, Continue, Dismiss) and ask-gate options answer non-operators with an ephemeral Denied.
+- The HOST Ask modal follows the typed-ask rule and records the requester on the task.
+- Text `/connect`, `/on` and `/off` need an operator. A pasted key from anyone else is still deleted, never stored.
+- Slash `/connect`, `/open`, `/on`, `/off`, `/stop`, `/bind`, `/job` and `/clear-needs` need an operator. `/status` stays open.
+- Unpaired desk default (HARD lock 8) is unchanged.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

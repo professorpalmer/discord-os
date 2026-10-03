@@ -1719,7 +1719,8 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     exit_code = 0
     panel_stop = threading.Event()
     discord_down = threading.Event()
-    asks: Queue[tuple[str, str, str]] = Queue()
+    # (channel_id, prompt, replay_of, requester_id)
+    asks: Queue[tuple[str, str, str, str]] = Queue()
     ignore_history_before_ms = int(time.time() * 1000) - LISTEN_HISTORY_SLACK_MS
     from agent_discord.host.memory import seed_memory_channels
     from agent_discord.host.realms import listen_channel_ids, seed_channel_realms
@@ -1928,7 +1929,7 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                         print(f"listen drain failed: {exc}", flush=True)
             while True:
                 try:
-                    ask_channel, prompt, replay_of = asks.get_nowait()
+                    ask_channel, prompt, replay_of, requester_id = asks.get_nowait()
                 except Empty:
                     break
                 if not store.host_is_armed(ask_channel or args.channel_id):
@@ -1946,6 +1947,7 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                     workspace_id=args.workspace_id,
                     guild_id=args.guild_id,
                     thread_id=args.thread_id if ask_channel == args.channel_id else None,
+                    requester_id=requester_id or None,
                     metadata=ask_meta,
                 )
                 job_pool.submit(
@@ -2013,7 +2015,7 @@ def _start_panel_gateway(
     channel_id: str,
     stop: threading.Event,
     discord_down: threading.Event,
-    asks: Optional[Queue[tuple[str, str, str]]] = None,
+    asks: Optional[Queue[tuple[str, str, str, str]]] = None,
     orch: Any = None,
     host_roots: tuple[Any, ...] = (),
 ) -> None:
@@ -2034,10 +2036,6 @@ def _start_panel_gateway(
             sender("dnd", "the harness")
         else:
             sender("idle", "Discord OS")
-
-    def on_ask(text: str) -> None:
-        if asks is not None and text.strip():
-            asks.put((channel_id, text.strip(), ""))
 
     def on_connected(sender: Any) -> None:
         presence.clear()
@@ -2061,7 +2059,7 @@ def _start_panel_gateway(
 
         ask_channel = interaction_channel_id(payload, channel_id)
 
-        def on_ask_here(text: str) -> None:
+        def on_ask_here(text: str, requester_id: str) -> None:
             prompt = (text or "").strip()
             if not prompt:
                 return
@@ -2089,7 +2087,7 @@ def _start_panel_gateway(
                 except Exception:
                     pass
             if asks is not None:
-                asks.put((ask_channel, prompt, ""))
+                asks.put((ask_channel, prompt, "", requester_id))
 
         def on_job(action: str, run_id: str) -> None:
             if orch is not None:
@@ -2100,15 +2098,17 @@ def _start_panel_gateway(
                 if action == "retry" and asks is not None:
                     text = str((result or {}).get("intake_text") or "")
                     if text:
-                        asks.put((ask_channel, text, str((result or {}).get("replay_of") or "")))
+                        asks.put(
+                            (ask_channel, text, str((result or {}).get("replay_of") or ""), "")
+                        )
                 return
             if action == "retry" and asks is not None:
-                asks.put((ask_channel, f"retry run {run_id}", run_id))
+                asks.put((ask_channel, f"retry run {run_id}", run_id, ""))
                 return
             if action == "continue" and asks is not None:
                 from agent_discord.orchestration.job_briefing import DEFAULT_CONTINUE_PROMPT
 
-                asks.put((ask_channel, DEFAULT_CONTINUE_PROMPT, ""))
+                asks.put((ask_channel, DEFAULT_CONTINUE_PROMPT, "", ""))
                 return
             if action == "deny":
                 try:

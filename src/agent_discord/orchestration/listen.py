@@ -30,6 +30,7 @@ from agent_discord.orchestration.cards import (
 from agent_discord.orchestration.jobs import resolved_write_key
 from agent_discord.orchestration.service import (
     author_may_dispatch,
+    author_may_operate,
     expire_parked_approvals,
     inbound_queue_enabled,
     is_spend_halted,
@@ -1363,11 +1364,22 @@ def _absorb_connect(
             pass
     parsed = parse_connect_command(message.content or "")
     delete_ok = True
+    # Shred a pasted key even when the author may not connect it.
     if parsed.secret and message.message_id:
         try:
             discord.delete_message(channel_id, message.message_id)
         except Exception:
             delete_ok = False
+    if not author_may_operate(
+        store, message.author_id, "connect", role_ids=_author_role_ids(message), env=env
+    ):
+        _post_host_deny(
+            discord,
+            channel_id,
+            thread_id,
+            "Denied: only paired operators can connect provider keys.",
+        )
+        return
     if workspace is None:
         return
     result = handle_connect_message(
@@ -1474,6 +1486,16 @@ def _absorb_power(
         from agent_discord.orchestration.service import seed_owner_if_empty
 
         seed_owner_if_empty(store, message.author_id)
+    if parsed.action in {"on", "off"} and not author_may_operate(
+        store, message.author_id, parsed.action, role_ids=_author_role_ids(message)
+    ):
+        _post_host_deny(
+            discord,
+            channel_id,
+            thread_id,
+            "Denied: only paired operators can turn the host on or off.",
+        )
+        return
     writer = getattr(store, "set_host_control", None)
     if parsed.action in {"on", "off"} and callable(writer):
         writer(channel_id, armed=parsed.action == "on")
