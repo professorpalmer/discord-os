@@ -145,6 +145,9 @@
 ### A claimed ask survives a crash or restart
 - A durable pending-intake row covers the window between claiming a message and creating its task row. Host start replays any left behind, up to three tries.
 
+### Schedules and voice memos run off the listen thread
+- Due schedules go through JobPool with the realm write key, so the live slot limit and write lock apply. Voice memo transcription runs in a worker thread, so one long whisper run no longer stalls every channel.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

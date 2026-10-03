@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
@@ -229,6 +230,90 @@ def should_dispatch_inbound(message: DiscordMessage) -> bool:
         if isinstance(payload, dict) and payload.get("agent_discord_object") == 1:
             return False
     return True
+
+
+_VOICE_WORKERS: list[threading.Thread] = []
+_VOICE_WORKERS_LOCK = threading.Lock()
+
+
+def join_voice_workers(timeout: float = 30.0) -> None:
+    """Wait for off-thread transcription workers. Shutdown and tests."""
+
+    with _VOICE_WORKERS_LOCK:
+        workers = list(_VOICE_WORKERS)
+    for worker in workers:
+        worker.join(timeout=timeout)
+
+
+def _spawn_voice_worker(work: Any) -> None:
+    worker = threading.Thread(target=work, name="discord-os-voice", daemon=True)
+    with _VOICE_WORKERS_LOCK:
+        _VOICE_WORKERS[:] = [t for t in _VOICE_WORKERS if t.is_alive()]
+        _VOICE_WORKERS.append(worker)
+    worker.start()
+
+
+def _defer_voice_intake(
+    orchestrator: Any,
+    discord: Any,
+    store: Any,
+    job_pool: Any,
+    *,
+    message: DiscordMessage,
+    channel_id: str,
+    thread_id: Optional[str],
+    workspace_id: str,
+    guild_id: Optional[str],
+) -> None:
+    """Transcribe a voice memo off the listen thread, then dispatch it.
+
+    Whisper is a subprocess with a 60s timeout, so running it inside the drain
+    loop stalls every other channel. The gates that do not need the transcript
+    (armed, spend halt, operator) are checked here; the worker only transcribes
+    and submits.
+    """
+
+    if not _channel_is_armed(store, channel_id) or is_spend_halted(store, workspace_id):
+        return
+    if not author_may_dispatch(
+        store, message.author_id, role_ids=_author_role_ids(message)
+    ):
+        return
+    if not _claim_inbound(store, discord, message, channel_id):
+        return
+
+    def work() -> None:
+        try:
+            text, meta, whisper_miss, _needs = _collab_intake(message, discord)
+        except Exception:
+            text, meta, whisper_miss = "", {}, True
+        if whisper_miss or not text:
+            _post_voice_whisper_miss(discord, channel_id, thread_id)
+            return
+        extra_meta = dict(meta)
+        extra_meta["inbound_claimed"] = True
+        extra_meta["voice_deferred"] = True
+        intake = TaskIntake(
+            text=text,
+            channel_id=channel_id,
+            workspace_id=workspace_id,
+            guild_id=guild_id,
+            thread_id=thread_id,
+            message_id=message.message_id or None,
+            requester_id=message.author_id,
+            metadata=extra_meta,
+        )
+        record_pending_intake(store, intake)
+        try:
+            job_pool.submit(
+                orchestrator.run_task,
+                intake,
+                write_key=resolved_write_key(intake, orchestrator),
+            )
+        except Exception:
+            pass
+
+    _spawn_voice_worker(work)
 
 
 def record_pending_intake(store: Any, intake: TaskIntake) -> None:
@@ -539,7 +624,27 @@ def drain_inbound(
                 store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
-        intake_text, intake_meta, skip_voice = _collab_intake(message, discord)
+        intake_text, intake_meta, skip_voice, needs_transcribe = _collab_intake(
+            message, discord, transcribe=job_pool is None
+        )
+        if needs_transcribe:
+            # Whisper is a minute of subprocess. Never on the listen thread —
+            # one memo would stall every channel's poll.
+            _defer_voice_intake(
+                orchestrator,
+                discord,
+                store,
+                job_pool,
+                message=message,
+                channel_id=channel_id,
+                thread_id=message.thread_id or thread_id,
+                workspace_id=workspace_id,
+                guild_id=guild_id,
+            )
+            watermark = _advance_listen_watermark(
+                store, watermark_key, created_ms, message.message_id, watermark
+            )
+            continue
         if skip_voice:
             _claim_inbound(store, discord, message, channel_id)
             _post_voice_whisper_miss(
@@ -878,6 +983,7 @@ def drain_inbound(
             guild_id=guild_id,
             thread_id=thread_id,
             discord=discord,
+            job_pool=job_pool,
         )
     )
     receipts.extend(
@@ -2111,8 +2217,18 @@ def thread_history_entries(recent: Any) -> list[dict[str, str]]:
     ]
 
 
-def _collab_intake(message: DiscordMessage, discord: Any) -> tuple[str, dict[str, Any], bool]:
-    """Voice + thread-history context. Fetches bot-visible attachment bytes only."""
+def _collab_intake(
+    message: DiscordMessage,
+    discord: Any,
+    *,
+    transcribe: bool = True,
+) -> tuple[str, dict[str, Any], bool, bool]:
+    """Voice + thread-history context. Fetches bot-visible attachment bytes only.
+
+    Returns ``(intake_text, metadata, whisper_miss, needs_transcription)``. With
+    ``transcribe=False`` a voice memo is reported as needing transcription
+    rather than running whisper here, so the caller can move it off the loop.
+    """
 
     meta: dict[str, Any] = {}
     if isinstance(message.metadata, Mapping):
@@ -2148,31 +2264,33 @@ def _collab_intake(message: DiscordMessage, discord: Any) -> tuple[str, dict[str
             spoken_command_to_intake,
         )
     except Exception:
-        return "", meta, False
+        return "", meta, False, False
     try:
         intent = detect_voice_intent(message)
     except Exception:
-        return "", meta, False
+        return "", meta, False, False
     if not intent:
-        return "", meta, False
+        return "", meta, False, False
     if intent.get("kind") == "voice_attachment" and not (
         meta.get("transcript") or meta.get("voice_transcript")
     ):
+        if not transcribe:
+            return "", meta, False, True
         transcript = ""
         try:
             transcript = materialize_voice_intake(message, discord)
         except Exception:
             transcript = ""
         if not transcript:
-            return "", meta, True
+            return "", meta, True, False
         meta["voice_transcript"] = transcript
-        return spoken_command_to_intake(transcript) or transcript, meta, False
+        return spoken_command_to_intake(transcript) or transcript, meta, False, False
     transcript = str(intent.get("intake") or intent.get("transcript") or "")
     if not transcript and (meta.get("transcript") or meta.get("voice_transcript")):
         transcript = spoken_command_to_intake(
             str(meta.get("transcript") or meta.get("voice_transcript") or "")
         )
-    return transcript.strip(), meta, False
+    return transcript.strip(), meta, False, False
 
 
 def _author_role_ids(message: DiscordMessage) -> list[str]:
@@ -2232,8 +2350,14 @@ def _fire_due_schedules(
     guild_id: Optional[str],
     thread_id: Optional[str],
     discord: Any = None,
+    job_pool: Optional[Any] = None,
 ) -> list[RunReceipt]:
     """Fire due schedules while HOST is armed.
+
+    A due schedule is a job like any other: with a JobPool it goes through
+    submit, so it obeys max_live and the per-realm write lock instead of
+    cooking inline and stalling every channel's poll. Without a pool (one-shot
+    CLI drain) it still runs inline and returns its receipt.
 
     While Off (disarmed), overdue rows are **not** flooded as jobs. Instead we
     bump each schedule forward and post at most one Catch-up briefing with
@@ -2313,23 +2437,27 @@ def _fire_due_schedules(
             except Exception:
                 ask_text = prompt
                 overnight = False
-            receipts.append(
-                orchestrator.run_task(
-                    TaskIntake(
-                        text=ask_text,
-                        channel_id=channel_id,
-                        workspace_id=str(row.get("workspace_id") or workspace_id),
-                        guild_id=guild_id,
-                        thread_id=thread_id,
-                        requester_id=created_by or None,
-                        metadata={
-                            "scheduled": True,
-                            "schedule_id": schedule_id,
-                            "overnight_brief": overnight,
-                        },
-                    )
-                )
+            scheduled_intake = TaskIntake(
+                text=ask_text,
+                channel_id=channel_id,
+                workspace_id=str(row.get("workspace_id") or workspace_id),
+                guild_id=guild_id,
+                thread_id=thread_id,
+                requester_id=created_by or None,
+                metadata={
+                    "scheduled": True,
+                    "schedule_id": schedule_id,
+                    "overnight_brief": overnight,
+                },
             )
+            if job_pool is not None:
+                job_pool.submit(
+                    orchestrator.run_task,
+                    scheduled_intake,
+                    write_key=resolved_write_key(scheduled_intake, orchestrator),
+                )
+            else:
+                receipts.append(orchestrator.run_task(scheduled_intake))
         except Exception:
             continue
         if callable(bumper) and every_s > 0:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -294,4 +295,114 @@ def test_poisoned_pending_intake_stops_replaying(tmp_path: Path):
     assert store.list_pending_intake() != []
     assert replay_pending_intakes(orch) == []
     assert store.list_pending_intake() == []
+    store.close()
+
+
+# --- B10: schedules and whisper leave the listen thread ---
+
+
+class RecordingJobPool(LostJobPool):
+    """Runs submits inline, but records the write key the pool would hold."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.write_keys: list[str] = []
+
+    def submit(self, runner, intake, *, write_key: str = "") -> str:
+        self.submitted.append(intake)
+        self.write_keys.append(write_key)
+        runner(intake)
+        return f"job-{len(self.submitted)}"
+
+
+def test_due_schedule_goes_through_the_job_pool(tmp_path: Path):
+    provider = FakeDiscordMCPProvider()
+    orch, store, facade, _backend = _orch(tmp_path, provider)
+    store.set_host_control("ch", armed=True)
+    store.add_schedule(
+        channel_id="ch",
+        workspace_id="ws",
+        prompt="nightly audit",
+        every_s=3600,
+        created_by="",
+        next_ms=1,
+    )
+    pool = RecordingJobPool()
+    receipts = drain_inbound(
+        orch,
+        facade,
+        channel_id="ch",
+        workspace_id="ws",
+        since_ms=0,
+        job_pool=pool,
+    )
+    # Submitted, not cooked inline on the listen thread.
+    assert receipts == []
+    assert [i.text for i in pool.submitted] == ["nightly audit"]
+    assert pool.submitted[0].metadata.get("scheduled") is True
+    assert pool.write_keys[0]
+    store.close()
+
+
+def test_voice_transcription_does_not_block_the_drain(tmp_path: Path, monkeypatch):
+    from agent_discord.contracts import DiscordAttachment
+    from agent_discord.discord import voice as voice_mod
+    from agent_discord.orchestration import listen as listen_mod
+
+    release = threading.Event()
+    started = threading.Event()
+    finished = threading.Event()
+
+    def slow_transcribe(message, discord=None):
+        started.set()
+        release.wait(timeout=10)
+        finished.set()
+        return "run the tests"
+
+    monkeypatch.setattr(voice_mod, "materialize_voice_intake", slow_transcribe)
+    provider = FakeDiscordMCPProvider()
+    now_ms = 1_750_000_000_000
+    provider.inbox.append(
+        DiscordMessage(
+            channel_id="ch",
+            content="",
+            message_id=_snowflake_at(now_ms),
+            author_id="human-1",
+            attachments=(
+                DiscordAttachment(
+                    attachment_id="att-1",
+                    filename="voice-message.ogg",
+                    size=10,
+                    content_type="audio/ogg",
+                ),
+            ),
+        )
+    )
+    provider.inbox.append(
+        DiscordMessage(
+            channel_id="ch",
+            content="also do this",
+            message_id=_snowflake_at(now_ms + 1_000),
+            author_id="human-1",
+        )
+    )
+    orch, store, facade, _backend = _orch(tmp_path, provider)
+    store.set_host_control("ch", armed=True)
+    pool = RecordingJobPool()
+    drain_inbound(
+        orch,
+        facade,
+        channel_id="ch",
+        workspace_id="ws",
+        since_ms=0,
+        job_pool=pool,
+    )
+    # The drain returned while whisper is still running, and the text message
+    # behind the memo was dispatched instead of waiting a minute for it.
+    assert started.wait(timeout=10)
+    assert not finished.is_set()
+    assert [i.text for i in pool.submitted] == ["also do this"]
+    release.set()
+    listen_mod.join_voice_workers(timeout=10)
+    assert "run the tests" in [i.text for i in pool.submitted]
     store.close()
