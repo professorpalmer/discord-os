@@ -73,6 +73,7 @@ def test_reap_terminates_a_live_puppetmaster_group(monkeypatch, tmp_path: Path) 
         env={},
         ps_fn=lambda pid: "/opt/bin/puppetmaster agentic --provider openrouter",
         killpg_fn=fake_killpg,
+        etime_fn=lambda pid: "00:03",
     )
     assert [r["action"] for r in records] == ["reaped"]
     assert records[0]["killed"] is True
@@ -96,6 +97,7 @@ def test_reap_escalates_to_sigkill_when_sigterm_is_ignored(
         grace_seconds=0.05,
         ps_fn=lambda pid: "puppetmaster agentic",
         killpg_fn=lambda pgid, sig: sent.append(sig),
+        etime_fn=lambda pid: "00:03",
     )
     assert sent == [signal.SIGTERM, signal.SIGKILL]
     # Group still alive after SIGKILL: do not claim it died.
@@ -211,3 +213,58 @@ def test_agentic_backend_writes_and_clears_a_pid_sidecar(tmp_path: Path) -> None
 
     backend._unregister_child("run-9", child)
     assert _sidecars(folder) == []
+
+
+def test_reap_spares_another_puppetmaster_process_that_reused_the_pid(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A Marionette or MCP worker can reuse the pid; its start time gives it away."""
+
+    persist_local_pid_sidecar(run_id="run-1", pid=4242, pgid=4242, workspace=tmp_path, env={})
+    monkeypatch.setattr(
+        "agent_discord.puppetmaster.cancel_honesty.process_group_is_alive",
+        lambda pgid: True,
+    )
+    sent: list[int] = []
+    records = reap_orphaned_local_pids(
+        workspace=tmp_path,
+        env={},
+        ps_fn=lambda pid: "puppetmaster agentic --provider openrouter",
+        killpg_fn=lambda pgid, sig: sent.append(sig),
+        etime_fn=lambda pid: "2-03:00:00",  # started two days before the sidecar
+    )
+    assert [r["action"] for r in records] == ["not-ours"]
+    assert sent == []
+
+
+def test_reap_refuses_unsafe_process_groups(monkeypatch, tmp_path: Path) -> None:
+    import os
+
+    for index, (pid, pgid) in enumerate(((4242, 1), (1, 1), (4242, os.getpgrp()))):
+        persist_local_pid_sidecar(
+            run_id=f"run-{index}", pid=pid, pgid=pgid, workspace=tmp_path, env={}
+        )
+    monkeypatch.setattr(
+        "agent_discord.puppetmaster.cancel_honesty.process_group_is_alive",
+        lambda pgid: True,
+    )
+    sent: list[int] = []
+    records = reap_orphaned_local_pids(
+        workspace=tmp_path,
+        env={},
+        ps_fn=lambda pid: "puppetmaster agentic",
+        killpg_fn=lambda pgid, sig: sent.append(pgid),
+        etime_fn=lambda pid: "00:03",
+    )
+    assert sent == []
+    assert all(r["action"] == "unsafe" for r in records), records
+
+
+def test_parse_etime() -> None:
+    from agent_discord.puppetmaster.cancel_honesty import _parse_etime
+
+    assert _parse_etime("00:03") == 3
+    assert _parse_etime("01:02:03") == 3723
+    assert _parse_etime("2-03:00:00") == 2 * 86400 + 3 * 3600
+    assert _parse_etime("") is None
+    assert _parse_etime("bogus") is None

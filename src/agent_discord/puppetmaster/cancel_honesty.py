@@ -540,6 +540,59 @@ def process_command_line(pid: int, *, ps_fn: Any = None) -> str:
     return (completed.stdout or "").strip()
 
 
+_START_SKEW_MS = 5 * 60 * 1000
+
+
+def _parse_etime(text: str) -> Optional[int]:
+    """``ps -o etime`` ``[[dd-]hh:]mm:ss`` to seconds. None when unparseable."""
+
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    days = 0
+    if "-" in raw:
+        head, _, raw = raw.partition("-")
+        if not head.isdigit():
+            return None
+        days = int(head)
+    parts = raw.split(":")
+    if not all(part.isdigit() for part in parts) or not 2 <= len(parts) <= 3:
+        return None
+    seconds = 0
+    for part in parts:
+        seconds = seconds * 60 + int(part)
+    return days * 86400 + seconds
+
+
+def process_start_ms(
+    pid: int, *, etime_fn: Any = None, now_ms: Optional[int] = None
+) -> Optional[int]:
+    """When ``pid`` started (epoch ms), from ``ps -o etime``. None when unknown."""
+
+    target = int(pid or 0)
+    if target <= 0:
+        return None
+    try:
+        if etime_fn is not None:
+            text = str(etime_fn(target) or "")
+        else:
+            completed = subprocess.run(
+                ["ps", "-o", "etime=", "-p", str(target)],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            text = completed.stdout or ""
+    except Exception:
+        return None
+    elapsed = _parse_etime(text)
+    if elapsed is None:
+        return None
+    base = int(now_ms if now_ms is not None else time.time() * 1000)
+    return base - elapsed * 1000
+
+
 def process_group_is_alive(pgid: int) -> bool:
     """True when signal 0 reaches the process group."""
 
@@ -620,6 +673,7 @@ def reap_orphaned_local_pids(
     max_age_seconds: float = 24 * 3600,
     ps_fn: Any = None,
     killpg_fn: Any = None,
+    etime_fn: Any = None,
 ) -> list[dict[str, Any]]:
     """Terminate local worker groups left alive by an abrupt host exit.
 
@@ -667,12 +721,23 @@ def reap_orphaned_local_pids(
         }
         if created and (now_ms - created) > max_age_ms:
             record["action"] = "expired"
+        elif pgid <= 1 or pid <= 1 or pgid == os.getpgrp():
+            # A corrupt sidecar must never signal init or this host's own group.
+            record["action"] = "unsafe"
         elif not process_group_is_alive(pgid):
             record["action"] = "gone"
         else:
             command = process_command_line(pid, ps_fn=ps_fn)
+            started = process_start_ms(pid, etime_fn=etime_fn, now_ms=now_ms)
             if "puppetmaster" not in command.lower():
                 # Pid reuse (or an unreadable ps): do not signal a stranger.
+                record["action"] = "not-ours"
+                record["command"] = command[:200]
+            elif created and (
+                started is None or abs(started - created) > _START_SKEW_MS
+            ):
+                # Another Puppetmaster process (Marionette, an MCP worker) that
+                # reused the pid started at a different time than our child.
                 record["action"] = "not-ours"
                 record["command"] = command[:200]
             else:
