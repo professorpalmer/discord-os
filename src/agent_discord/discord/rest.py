@@ -19,7 +19,7 @@ from urllib.request import Request, urlopen
 
 from agent_discord.contracts import DiscordAttachment, DiscordMessage
 from agent_discord.discord.errors import ToolInvocationError
-from agent_discord.discord.layout import FLAG_COMPONENTS_V2
+from agent_discord.discord.layout import FLAG_COMPONENTS_V2, fit_components_v2
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
 USER_AGENT = "discord-os (https://github.com/professorpalmer/discord-os)"
@@ -673,7 +673,7 @@ def send_channel_message(
         payload["flags"] = int(flags)
     if flags & FLAG_COMPONENTS_V2:
         if components:
-            payload["components"] = list(components)
+            payload["components"] = fit_components_v2(components)
     else:
         payload["content"] = content or ""
         if embeds:
@@ -714,7 +714,7 @@ def edit_channel_message(
         payload["flags"] = int(flags)
     if flags & FLAG_COMPONENTS_V2:
         if components is not None:
-            payload["components"] = list(components)
+            payload["components"] = fit_components_v2(components)
     else:
         payload["content"] = content or ""
         if embeds is not None:
@@ -886,7 +886,7 @@ def send_channel_attachment(
         payload["flags"] = int(flags)
     if flags & FLAG_COMPONENTS_V2:
         if components:
-            payload["components"] = list(components)
+            payload["components"] = fit_components_v2(components)
     else:
         payload["content"] = content or ""
         if embeds:

@@ -95,6 +95,9 @@
 - A POST is no longer replayed after a timeout or reset, which could post duplicate cards. Only a request that provably never left the host is retried.
 - Discord error bodies are included in the raised error, with the bot token redacted.
 
+### Components v2 cards always fit
+- Cards are trimmed to Discord's 40-component and 4,000-character limits before send or edit. Long text is truncated, and buttons and selects are never dropped. Before, an oversized card got a 400 and the live card silently stopped updating.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
