@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import plistlib
 from pathlib import Path
 
 from agent_discord.discord.errors import ToolInvocationError
@@ -10,7 +11,11 @@ from agent_discord.discord.realtime import GatewayClosed, run_discord_gateway
 from agent_discord.discord.rest import callback_interaction, send_channel_message
 from agent_discord.discord.ws import decode_frame, encode_frame
 from agent_discord.discord.providers.fake import FakeDiscordMCPProvider
-from agent_discord.host.install import render_launchd_plist
+from agent_discord.host.install import (
+    SERVICE_THROTTLE_INTERVAL_S,
+    render_launchd_plist,
+    render_systemd_unit,
+)
 from agent_discord.contracts import TaskStatus
 from agent_discord.host.actions import DEST_HOST, DEST_REMOTE, open_custom_id
 from agent_discord.host.panel import (
@@ -458,6 +463,55 @@ def test_launchd_plist_contains_channel_and_service_env(tmp_path: Path):
     assert "DISCORD_OS_SERVICE" in plist
     assert "PYTHONUNBUFFERED" in plist
     assert "KeepAlive" in plist
+    # Audit 2026-10-02 G2-3: KeepAlive without a throttle is a 10 s respawn loop.
+    assert "<key>ThrottleInterval</key>" in plist
+    assert f"<integer>{SERVICE_THROTTLE_INTERVAL_S}</integer>" in plist
+
+
+def test_launchd_plist_throttles_keepalive_respawn(tmp_path: Path):
+    """A startup failure must back off, not spin: ThrottleInterval beside KeepAlive."""
+
+    plist = plistlib.loads(
+        render_launchd_plist(
+            argv=["/py", "-m", "agent_discord", "host", "run", "--channel-id", "99"],
+            workspace=tmp_path,
+            cwd=tmp_path,
+            log=tmp_path / "host.log",
+        ).encode("utf-8")
+    )
+    assert plist["KeepAlive"] is True
+    assert plist["ThrottleInterval"] == SERVICE_THROTTLE_INTERVAL_S
+    assert SERVICE_THROTTLE_INTERVAL_S >= 30
+
+
+def test_launchd_plist_throttle_is_overridable_and_floored(tmp_path: Path):
+    body = render_launchd_plist(
+        argv=["/py"],
+        workspace=tmp_path,
+        cwd=tmp_path,
+        log=tmp_path / "host.log",
+        throttle_interval_s=0,
+    )
+    assert plistlib.loads(body.encode("utf-8"))["ThrottleInterval"] == 1
+    body = render_launchd_plist(
+        argv=["/py"],
+        workspace=tmp_path,
+        cwd=tmp_path,
+        log=tmp_path / "host.log",
+        throttle_interval_s=90,
+    )
+    assert plistlib.loads(body.encode("utf-8"))["ThrottleInterval"] == 90
+
+
+def test_systemd_unit_backs_off_restart(tmp_path: Path):
+    unit = render_systemd_unit(
+        argv=["/py", "-m", "agent_discord", "host", "run", "--channel-id", "99"],
+        workspace=tmp_path,
+        cwd=tmp_path,
+        log=tmp_path / "host.log",
+    )
+    assert "Restart=always" in unit
+    assert f"RestartSec={SERVICE_THROTTLE_INTERVAL_S}" in unit
 
 
 def test_files_button_opens_workspace(tmp_path: Path):

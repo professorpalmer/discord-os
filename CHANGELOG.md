@@ -84,6 +84,9 @@
 ### host.log rotates at 10 MB
 - The host copy-truncates `host.log` into `host.log.1`..`.3` past 10 MB, at startup and at most once a minute. Copy-truncate keeps launchd's open descriptor on the live file.
 
+### LaunchAgent ThrottleInterval
+- The rendered plist sets `ThrottleInterval` 30 (and the systemd unit `RestartSec=30`), so a crash at startup is a readable log, not a 10 s respawn loop.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

@@ -71,7 +71,10 @@ discord-os pair --user-id YOUR_DISCORD_USER_SNOWFLAKE --role owner
 
 ## Login helper
 
-macOS LaunchAgent (`com.discord-os.host`) or the Windows equivalent from `host/install.py`. After a PyPI bump, install into that venv and kick the helper. The HOST card shows an **Update available · X.Y.Z** pill when the installed package lags PyPI latest (fail soft if PyPI is unreachable; no auto-upgrade). Upgrade: `pip install -U discord-os` in `~/discord-os/.venv`, then `discord-os host restart` (or bounce `com.discord-os.host`).
+macOS LaunchAgent (`com.discord-os.host`) or the Windows equivalent from `host/install.py`.
+`KeepAlive` is paired with **`ThrottleInterval` 30** (systemd: `RestartSec=30`) so a
+host that dies at startup — bad token, `ConfigError`, sqlite lock — backs off into a
+readable `host.log` instead of a silent 10 s respawn loop. After a PyPI bump, install into that venv and kick the helper. The HOST card shows an **Update available · X.Y.Z** pill when the installed package lags PyPI latest (fail soft if PyPI is unreachable; no auto-upgrade). Upgrade: `pip install -U discord-os` in `~/discord-os/.venv`, then `discord-os host restart` (or bounce `com.discord-os.host`).
 
 ```bash
 discord-os host status
