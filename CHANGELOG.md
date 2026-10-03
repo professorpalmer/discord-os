@@ -222,6 +222,9 @@
 ### /ask
 - `/ask prompt [realm]` starts a job like the HOST Ask modal: dispatch check, requester recorded, realm autocomplete, and an ephemeral `On it.` receipt with the job code.
 
+### Send to Discord OS
+- A message context-menu command (long-press, Apps) turns any message, with its attachments and a provenance line, into an ask in the home channel. Operator-only. Ephemeral receipt.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

@@ -80,6 +80,15 @@ discord-os interactions --register
 
 **Not registered:** `/add`. Use `discord-os add …` or in-channel `bind`.
 
+## Message context menu
+
+`Send to Discord OS` is an application command of **type 3** (MESSAGE):
+right-click a message on desktop, long-press on phone. Discord puts the
+picked message in `data.resolved.messages[target_id]`, so the host reads its
+content and attachments without a channel fetch. The ask it enqueues starts
+with a `from <author> in <#channel>` provenance line and lists the
+attachments by filename and URL. Operator-only; the receipt is ephemeral.
+
 After `pip install -U discord-os` (and host bounce), self-heal re-registers on
 the next listen when the package version / command stamp drifts. Manual
 `--register` is still fine (updates the same stamp). Skipping both leaves the

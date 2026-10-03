@@ -46,6 +46,8 @@ RESPONSE_PONG = 1
 RESPONSE_CHANNEL_MESSAGE = 4
 RESPONSE_AUTOCOMPLETE = 8
 EPHEMERAL = 64
+COMMAND_TYPE_CHAT_INPUT = 1
+COMMAND_TYPE_MESSAGE = 3
 MAX_AUTOCOMPLETE_CHOICES = 25
 
 CONNECT_COMMAND = {
@@ -155,6 +157,12 @@ ASK_COMMAND = {
         },
     ],
 }
+MESSAGE_COMMAND_NAME = "Send to Discord OS"
+MESSAGE_ASK_COMMAND = {
+    # Application command type 3 — right-click / long-press a message.
+    "name": MESSAGE_COMMAND_NAME,
+    "type": COMMAND_TYPE_MESSAGE,
+}
 CLEAR_NEEDS_COMMAND = {
     "name": "clear-needs",
     "description": "Dismiss failed Needs (same as HOST More / jobs clear-needs --failed)",
@@ -186,6 +194,7 @@ OPT_IN_COMMANDS = (
     OFF_COMMAND,
     STOP_COMMAND,
     CLEAR_NEEDS_COMMAND,
+    MESSAGE_ASK_COMMAND,
 )
 
 SLASH_REGISTRATION_STATE = "slash_registration.json"
@@ -481,6 +490,16 @@ def handle_interaction_payload(
         return _ephemeral("unsupported interaction")
     data = payload.get("data") if isinstance(payload.get("data"), Mapping) else {}
     name = str(data.get("name") or "").lower()
+    if (
+        int(data.get("type") or 0) == COMMAND_TYPE_MESSAGE
+        or name == MESSAGE_COMMAND_NAME.lower()
+    ):
+        return _handle_message_command(
+            payload,
+            workspace=workspace,
+            env=env,
+            on_ask=on_ask,
+        )
     if name in _OPERATOR_COMMANDS and not _slash_author_may_operate(
         payload, name=name, workspace=workspace, env=env
     ):
@@ -991,6 +1010,103 @@ def _handle_ask_slash(
     except Exception as exc:  # noqa: BLE001
         return _ephemeral(f"ask failed: {exc}")
     return _ephemeral(_ask_receipt(channel_id, code))
+
+
+def _handle_message_command(
+    payload: Mapping[str, Any],
+    *,
+    workspace: Path,
+    env: Optional[Mapping[str, str]] = None,
+    on_ask: Optional[Callable[[str, str, str], Optional[str]]] = None,
+) -> dict[str, Any]:
+    """'Send to Discord OS' — a picked message becomes an ask. Operator-only."""
+
+    from agent_discord.orchestration.service import author_may_dispatch
+
+    data = payload.get("data") if isinstance(payload.get("data"), Mapping) else {}
+    target_id = str(data.get("target_id") or "").strip()
+    resolved = data.get("resolved") if isinstance(data.get("resolved"), Mapping) else {}
+    messages = (
+        resolved.get("messages") if isinstance(resolved.get("messages"), Mapping) else {}
+    )
+    message = messages.get(target_id) if target_id else None
+    if not isinstance(message, Mapping):
+        return _ephemeral("Could not read that message.")
+    text = _message_ask_text(message, payload)
+    if not text:
+        return _ephemeral("That message has no content or attachments.")
+
+    channel_id = _channel_id(payload)
+    user_id = _author_id(payload)
+    role_ids = _role_ids(payload)
+    store = None
+    try:
+        store = _open_store(workspace)
+        if not author_may_dispatch(store, user_id, role_ids=role_ids, env=env):
+            return _ephemeral("Denied: only paired operators can send a message here.")
+    except Exception as exc:  # noqa: BLE001
+        return _ephemeral(f"send failed: {exc}")
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
+
+    if not channel_id:
+        return _ephemeral("missing channel_id")
+    if not callable(on_ask):
+        return _ephemeral(
+            "send needs the listen host queue — run discord-os listen with "
+            "AGENT_DISCORD_INTERACTIONS=gateway"
+        )
+    try:
+        code = on_ask(channel_id, text, user_id)
+    except Exception as exc:  # noqa: BLE001
+        return _ephemeral(f"send failed: {exc}")
+    return _ephemeral(_ask_receipt(channel_id, code))
+
+
+def _message_ask_text(
+    message: Mapping[str, Any],
+    payload: Mapping[str, Any],
+) -> str:
+    """Provenance line, the picked message's content, then its attachments."""
+
+    author = message.get("author") if isinstance(message.get("author"), Mapping) else {}
+    who = str(
+        author.get("global_name") or author.get("username") or author.get("id") or "unknown"
+    )
+    source_channel = str(message.get("channel_id") or _channel_id(payload) or "").strip()
+    where = f"<#{source_channel}>" if source_channel else "a channel"
+    lines = [f"from {who} in {where}"]
+    content = str(message.get("content") or "").strip()
+    if content:
+        lines.append("")
+        lines.append(content)
+    attachments = _attachment_lines(message.get("attachments"))
+    if attachments:
+        lines.append("")
+        lines.append("attachments:")
+        lines.extend(attachments)
+    if not content and not attachments:
+        return ""
+    return "\n".join(lines)
+
+
+def _attachment_lines(raw: Any) -> list[str]:
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        return []
+    out: list[str] = []
+    for item in raw:
+        if not isinstance(item, Mapping):
+            continue
+        name = str(item.get("filename") or item.get("name") or "").strip()
+        url = str(item.get("url") or item.get("proxy_url") or "").strip()
+        if not name and not url:
+            continue
+        out.append(f"- {name or 'attachment'}" + (f" {url}" if url else ""))
+    return out
 
 
 def _ask_receipt(channel_id: str, code: Optional[str] = None, link: str = "") -> str:
