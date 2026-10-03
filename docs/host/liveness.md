@@ -68,8 +68,42 @@ not ACKing), `run_discord_gateway` raises reconnectable `GatewayClosed` so the
 panel loop opens a fresh socket. `note_connected` clears prior READY/ACK so
 reconnect does not thrash as ACK-stale before the next READY.
 
+A socket that finishes the handshake and takes Hello but never dispatches
+**READY** is the same fault with no ACK to go stale. `run_discord_gateway`
+arms a READY deadline (30s after Hello, `ready_deadline_s`) and raises
+reconnectable `GatewayClosed`.
+
+Never-READY past grace is `ok=False, ready=False`. Doctor and the liveness
+digest read **`ok`**, not `ready` — a gateway that never came up is FAIL /
+`gateway BAD`, never a quiet OK line. Only a process that expects a panel
+gateway (`gateway_is_expected`) persists `gateway_health.json`, so the
+`doctor --notify` LaunchAgent cannot stamp its own never-READY-but-quiet
+snapshot over the host's verdict.
+
 Code: `src/agent_discord/discord/gateway_health.py` + `realtime.py` + listen
 digest / doctor.
+
+## Panel Gateway reconnect
+
+One Gateway per bot token (HARD lock 4) — this is the single panel socket
+reconnecting, not a second gateway.
+
+* **Backoff.** `gateway_backoff_delay(attempt)` is exponential with full
+  jitter, base 1s, cap 60s, floor 0.25s. The old flat 0.4s/1.0s sleep wrote
+  thousands of `gateway URL lookup failed` lines an hour on a sleeping or
+  offline Mac. A session that reaches READY/RESUMED resets the ladder.
+* **RESUME.** `GatewaySession` carries `session_id`, last `s`, and
+  `resume_gateway_url` across sockets. Reconnect dials the resume URL and
+  sends op 6; no session, or a refused resume, falls back to op 2 IDENTIFY.
+* **op 7** closes and resumes. **op 9** waits 1-5s, then resumes (`d=true`)
+  or re-identifies with a fresh session (`d=false`). op 9 is never fatal —
+  it used to disarm the channel and exit the host with code 1.
+* **Close codes.** `WebSocketError.close_code` carries the peer's RFC 6455
+  code. Fatal (disarm + `discord_down`): 4004, 4010, 4011, 4012, 4013, 4014.
+  4007 / 4009 reconnect but re-identify. Everything else resumes.
+* **Write lock.** The heartbeat thread and the dispatch thread share one
+  socket; both `WebSocketClient` and the gateway's `send` serialize behind a
+  lock so frames cannot interleave (Discord closes 4002).
 
 ## Not this
 

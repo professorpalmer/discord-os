@@ -158,6 +158,7 @@ def compute_host_digest(
     gateway_state = GATEWAY_NA
     try:
         from agent_discord.discord.gateway_health import (
+            gateway_is_expected,
             gateway_need_fragment,
             load_gateway_health,
             persist_gateway_health,
@@ -165,7 +166,10 @@ def compute_host_digest(
         )
 
         live = snapshot_gateway_health(now=checked)
-        if ws is not None:
+        # Only the process that owns the panel gateway may write the file.
+        # The doctor --notify LaunchAgent used to stamp its own never-READY
+        # ok=True snapshot over the host's verdict every two minutes.
+        if ws is not None and gateway_is_expected():
             try:
                 persist_gateway_health(ws, live)
             except Exception:
@@ -176,7 +180,7 @@ def compute_host_digest(
             cached = load_gateway_health(ws)
             if cached is not None and not cached.ok:
                 health = cached
-        if health.ready and not health.ok:
+        if not health.ok:
             gateway_state = GATEWAY_BAD
             frag = gateway_need_fragment(health)
             if frag and frag not in summary:
@@ -538,13 +542,13 @@ def resolve_digest_for_panel(
         )
 
         live = snapshot_gateway_health()
-        if live.ready and not live.ok:
+        if not live.ok:
             gateway = GATEWAY_BAD
-        elif live.ready and live.ok:
+        elif live.ready:
             gateway = GATEWAY_OK
         elif ws.exists():
             file_h = load_gateway_health(ws)
-            if file_h is not None and file_h.ready and not file_h.ok:
+            if file_h is not None and not file_h.ok:
                 gateway = GATEWAY_BAD
     except Exception:
         pass

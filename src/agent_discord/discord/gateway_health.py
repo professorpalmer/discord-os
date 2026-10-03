@@ -105,6 +105,18 @@ def note_gateway_expected(*, now: Optional[float] = None) -> None:
             _state["expected_at"] = ts
 
 
+def gateway_is_expected() -> bool:
+    """True only in a process that intends to own a panel Gateway.
+
+    ``doctor --notify`` runs in its own process that never opens the socket.
+    Its snapshot is never-READY-but-quiet, so letting it persist would erase
+    the host's real verdict. Writers check this first.
+    """
+
+    with _lock:
+        return bool(_state["expected"])
+
+
 def note_ready(*, now: Optional[float] = None) -> None:
     ts = float(now if now is not None else time.time())
     with _lock:

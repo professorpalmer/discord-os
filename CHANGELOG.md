@@ -112,6 +112,9 @@
 ### Gateway READY deadline
 - A socket that sends Hello but never READY is reconnected after 30 s.
 
+### Doctor and liveness see a never-READY gateway
+- `discord-os host doctor` FAILs and the HOST Need shows `gateway BAD` when the panel gateway never reached READY past grace. The separate `doctor --notify` process no longer overwrites the host's gateway health file with its own snapshot.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

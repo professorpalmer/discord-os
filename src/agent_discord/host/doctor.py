@@ -469,14 +469,25 @@ def _check_gateway_ws(workspace: Path, lines: list[str]) -> int:
         cached = load_gateway_health(workspace) if workspace.exists() else None
         if cached is not None:
             health = cached
-    if not health.ready:
-        lines.append("OK gateway WS not READY this process (REST intake OK; buttons need panel)")
-        return 0
     if health.ok:
+        if not health.ready:
+            lines.append(
+                "OK gateway WS not READY this process (REST intake OK; buttons need panel)"
+            )
+            return 0
         age = health.ack_age_s
         tip = f"ack_age={age:.0f}s" if age is not None else "ack fresh"
         lines.append(f"OK gateway WS READY ({tip})")
         return 0
+    # ok=False with ready=False is the never-READY verdict past grace. Reading
+    # only `ready` printed OK for a socket that never worked.
+    if not health.ready:
+        reason = health.reason or "gateway never READY"
+        lines.append(
+            f"FAIL gateway WS unhealthy — {reason} "
+            "(panel expected; On/Off buttons never came up)"
+        )
+        return 1
     reason = health.reason or "heartbeat ACK stale / socket unhealthy"
     lines.append(
         f"FAIL gateway WS unhealthy — {reason} "
