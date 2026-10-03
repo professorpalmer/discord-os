@@ -1250,6 +1250,40 @@ class SQLiteStore:
 
     # --- events ---
 
+    def compact_events(
+        self, *, older_than_days: float = 14.0, vacuum_min_rows: int = 500
+    ) -> dict[str, Any]:
+        """Drop progress events of finished runs older than the window, then VACUUM.
+
+        Progress rows are live-card token chunks. Intake, dispatch, receipt and
+        every other kind stay. VACUUM runs only when enough rows went to be
+        worth an exclusive rewrite.
+        """
+
+        conn = self._connection()
+        cutoff = f"-{float(older_than_days)} days"
+        cur = conn.execute(
+            """
+            DELETE FROM events
+            WHERE kind = 'progress'
+              AND created_at < datetime('now', ?)
+              AND run_id IN (
+                  SELECT run_id FROM runs
+                  WHERE status IN ('completed', 'failed', 'cancelled')
+              )
+            """,
+            (cutoff,),
+        )
+        deleted = int(cur.rowcount or 0)
+        conn.commit()
+        vacuumed = False
+        if deleted >= vacuum_min_rows:
+            conn.execute("VACUUM")
+            # In WAL mode the rewrite sits in the WAL until a checkpoint.
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            vacuumed = True
+        return {"deleted": deleted, "vacuumed": vacuumed}
+
     def append_event(
         self,
         *,

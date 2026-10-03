@@ -119,6 +119,10 @@
 - A host restart no longer fails parked write approvals. Their Approve button still starts the write.
 - Runs the restart did stop are failed as before, and their live cards are repainted to say so, with Retry. Before, the phone kept showing Working and Cancel. Each run's live card id is now recorded on first paint so the restart can find it.
 
+### Progress events stop bloating the database
+- Progress events store only the text each event added (`token_delta`), not the cumulative 16k-char window. Progress rows were 33 MB of the 37 MB production database.
+- On host start, progress events of finished runs older than 14 days are pruned, and the database is vacuumed when that frees enough. `discord-os db compact [--days N]` does the same on demand. On a copy of production it took the file from 37.1 MB to 0.6 MB. Intake, dispatch, receipt and other events are kept.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

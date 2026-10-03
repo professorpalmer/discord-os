@@ -472,6 +472,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_dashboard.add_argument("--once", action="store_true")
     p_dashboard.add_argument("--json", action="store_true")
 
+    p_db = sub.add_parser("db", help="SQLite maintenance")
+    db_sub = p_db.add_subparsers(dest="db_command", required=True)
+    p_compact = db_sub.add_parser(
+        "compact", help="Drop old progress events of finished runs, then VACUUM"
+    )
+    p_compact.add_argument("--days", type=float, default=14.0, help="Keep this many days")
+    p_compact.add_argument("--json", action="store_true")
+
     p_spend = sub.add_parser("spend", help="Show session spend, set a cap, or halt new jobs")
     p_spend.add_argument("--cap", type=float, default=None, help="USD halt threshold")
     p_spend.add_argument("--halt", action="store_true")
@@ -1169,6 +1177,29 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     return 0
 
 
+def cmd_db(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
+    out = out or sys.stdout
+    config = load_config()
+    store = SQLiteStore(config.database_path)
+    store.initialize()
+    try:
+        before = config.database_path.stat().st_size if config.database_path.exists() else 0
+        result = store.compact_events(older_than_days=args.days, vacuum_min_rows=1)
+        after = config.database_path.stat().st_size if config.database_path.exists() else 0
+    finally:
+        store.close()
+    result = {**result, "bytes_before": before, "bytes_after": after}
+    if args.json:
+        print(json.dumps(result, indent=2), file=out)
+    else:
+        print(
+            f"deleted {result['deleted']} progress event(s); "
+            f"{before / 1e6:.1f} MB -> {after / 1e6:.1f} MB",
+            file=out,
+        )
+    return 0
+
+
 def cmd_spend(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     out = out or sys.stdout
     from agent_discord.orchestration.service import (
@@ -1683,6 +1714,16 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     stale = store.fail_stale_runs()
     if stale:
         print(f"cleared {len(stale)} leftover running job(s)", flush=True)
+    try:
+        compacted = store.compact_events()
+        if compacted["deleted"]:
+            print(
+                f"pruned {compacted['deleted']} old progress event(s)"
+                + (" and vacuumed" if compacted["vacuumed"] else ""),
+                flush=True,
+            )
+    except Exception as exc:
+        print(f"event compaction skipped: {exc}", flush=True)
     store.seed_owner_from_env()
     from agent_discord.orchestration.service import (
         seed_spend_cap_from_env,
@@ -3185,6 +3226,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return cmd_brain(args)
     if args.command == "schedule":
         return cmd_schedule(args)
+    if args.command == "db":
+        return cmd_db(args)
     if args.command == "spend":
         return cmd_spend(args)
     if args.command == "poll":

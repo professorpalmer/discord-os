@@ -35,6 +35,7 @@ discord-os setup --channel-id ID
 discord-os add realm|memory|repo|wiki|tool|github|list
 discord-os map [QUERY]
 discord-os lineage [RUN_ID]
+discord-os db compact [--days N]
 discord-os check
 discord-os wiki query "…"
 ```

@@ -235,6 +235,35 @@ def _card_window(text: str) -> str:
     return _clip_to_limit(body, CARD_TEXT_LIMIT)
 
 
+def _stored_progress_details(
+    details: Mapping[str, Any], seen: list[str]
+) -> dict[str, Any]:
+    """What a progress event adds, not the cumulative token window.
+
+    Backends send the whole visible (or reasoning) window on every token
+    event, up to 16k chars. Storing it each time made progress rows ~90% of
+    the database. ``seen`` holds the last window of each stream for this run.
+    """
+
+    stored = dict(details)
+    window = stored.pop("token_text", None)
+    if not isinstance(window, str) or not window:
+        return stored
+    delta = window
+    for prior in seen:
+        if window.startswith(prior):
+            delta = window[len(prior):]
+            seen.remove(prior)
+            break
+    else:
+        if len(seen) >= 2:
+            seen.pop(0)
+    seen.append(window)
+    if delta:
+        stored["token_delta"] = delta
+    return stored
+
+
 STOPPED_BY_RESTART_SPOKEN = "Stopped: the host restarted while this ran. Retry to run it again."
 
 
@@ -1197,6 +1226,7 @@ class AgentOrchestrator:
                 painted_live = True
 
         receipt_payload: dict[str, Any] = {}
+        stored_windows: list[str] = []
         for event in events_iter:
             # The worker's job id arrives a few lines in; retry queued steers.
             self._deliver_steers(run_id)
@@ -1226,7 +1256,7 @@ class AgentOrchestrator:
                 {
                     "stage": summary.stage,
                     "percent": summary.percent,
-                    "details": dict(summary.details),
+                    "details": _stored_progress_details(summary.details, stored_windows),
                     **safe_payload,
                 },
                 source="backend",
