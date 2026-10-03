@@ -85,3 +85,37 @@ def test_local_timestamp_is_iso_8601_with_offset():
     assert stamp[4] == "-" and stamp[10] == "T"
     # Offset or Z suffix, never a naive stamp.
     assert stamp[-6] in {"+", "-"} or stamp.endswith("Z")
+
+
+def test_concurrent_prints_keep_lines_whole():
+    import io
+    import threading
+
+    from agent_discord.host.logstream import TimestampedStream
+
+    sink = io.StringIO()
+    stream = TimestampedStream(sink, clock=lambda: "T")
+
+    def worker(tag: str) -> None:
+        for index in range(300):
+            print(f"{tag}-{index}", file=stream)
+
+    import sys
+
+    threads = [threading.Thread(target=worker, args=(tag,)) for tag in "abcd"]
+    previous = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)  # force thread switches between print's two writes
+    try:
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    finally:
+        sys.setswitchinterval(previous)
+    lines = sink.getvalue().splitlines()
+    assert len(lines) == 1200
+    for line in lines:
+        stamp, _, body = line.partition(" ")
+        assert stamp == "T"
+        tag, _, index = body.partition("-")
+        assert tag in "abcd" and index.isdigit(), line

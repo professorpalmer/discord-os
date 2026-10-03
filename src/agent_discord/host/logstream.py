@@ -41,7 +41,11 @@ class TimestampedStream(io.TextIOBase):
     ) -> None:
         self._stream = stream
         self._clock = clock or local_timestamp
-        self._pending = ""
+        # print() writes the text and the newline as two calls, and JobPool
+        # threads print concurrently. Each thread keeps its own partial line,
+        # so one thread's text never ends up on another thread's line.
+        self._pending: dict[int, str] = {}
+        self._lock = threading.Lock()
 
     @property
     def wrapped(self) -> TextIO:
@@ -59,13 +63,17 @@ class TimestampedStream(io.TextIOBase):
     def write(self, text: str) -> int:
         if not text:
             return 0
-        buffered = self._pending + text
-        head, newline, tail = buffered.rpartition("\n")
-        self._pending = tail
+        ident = threading.get_ident()
+        with self._lock:
+            buffered = self._pending.pop(ident, "") + text
+            head, newline, tail = buffered.rpartition("\n")
+            if tail:
+                self._pending[ident] = tail
+            if newline:
+                stamp = self._clock()
+                self._stream.write("".join(f"{stamp} {line}\n" for line in head.split("\n")))
+                self.flush()
         if newline:
-            stamp = self._clock()
-            self._stream.write("".join(f"{stamp} {line}\n" for line in head.split("\n")))
-            self.flush()
             maybe_rotate_host_log()
         return len(text)
 
@@ -81,10 +89,12 @@ class TimestampedStream(io.TextIOBase):
     def drain(self) -> None:
         """Stamp and emit a trailing partial line (process exit)."""
 
-        if self._pending:
-            pending, self._pending = self._pending, ""
+        with self._lock:
+            pending = list(self._pending.values())
+            self._pending.clear()
+        for partial in pending:
             try:
-                self._stream.write(f"{self._clock()} {pending}\n")
+                self._stream.write(f"{self._clock()} {partial}\n")
             except ValueError:
                 return
         self.flush()
