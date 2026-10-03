@@ -447,6 +447,8 @@ class AgentOrchestrator:
         self._steer_lock = threading.Lock()
         self._live_threads: dict[str, str] = {}
         self._steer_inbox: dict[str, list[str]] = {}
+        # Steers accepted for a live run but not yet delivered to the worker.
+        self._steer_pending: dict[str, list[str]] = {}
         # Wave 6 P1a: last steer attribution + dual-op conflict window.
         self._last_steer: dict[str, dict[str, Any]] = {}
         self._steer_ops: dict[str, list[dict[str, Any]]] = {}
@@ -1161,6 +1163,8 @@ class AgentOrchestrator:
 
         receipt_payload: dict[str, Any] = {}
         for event in events_iter:
+            # The worker's job id arrives a few lines in; retry queued steers.
+            self._deliver_steers(run_id)
             incoming = self._take_steers(run_id)
             if incoming:
                 add = "\n".join(incoming)
@@ -1457,6 +1461,12 @@ class AgentOrchestrator:
         if stream_stage in _PROCESS_PHASES:
             _remember_process(token_text)
         safe_final_summary = spoken or "Worker finished without a written answer."
+        undelivered = self._undelivered_steers(run_id)
+        if undelivered:
+            missed = "; ".join(redact_text_markers(item)[:120] for item in undelivered)
+            safe_final_summary = (
+                f"{safe_final_summary}\n\nNot delivered to the worker: {missed}"
+            )
         safe_error = redact_text_markers(result.error) if result.error else None
         # Settle-vs-Cancel / SSH-exit-vs-settle: Cancel painted mid-stream must
         # win over a late COMPLETED receipt (no double-write Done after Cancelled).
@@ -3818,6 +3828,9 @@ class AgentOrchestrator:
             return False
         if status not in (None, TaskStatus.RUNNING, TaskStatus.PROGRESS, TaskStatus.PENDING):
             return False
+        if not callable(getattr(self._active_cook_backend(rid), "steer", None)):
+            # Honest miss: this cook cannot take follow-ups mid-run.
+            return False
         clip = clip_steer_text(body)
         now = time.time()
         with self._steer_lock:
@@ -3834,12 +3847,8 @@ class AgentOrchestrator:
             # Keep a short window of ops only.
             self._steer_ops[rid] = self._steer_ops[rid][-12:]
             self.steer_count += 1
-        hook = getattr(self.backend, "steer", None)
-        if callable(hook):
-            try:
-                hook(rid, body)
-            except Exception:
-                pass
+            self._steer_pending.setdefault(rid, []).append(body)
+        self._deliver_steers(rid)
         run = self.store.get_run(rid) or {}
         lineage_body = f"{format_steer_footer(op, clip)} | {body}" if op else body
         self._record_lineage(str(run.get("task_id") or ""), rid, "steer", lineage_body)
@@ -3946,6 +3955,7 @@ class AgentOrchestrator:
                     if value == rid:
                         self._live_threads.pop(key, None)
             self._steer_inbox.pop(rid, None)
+            self._steer_pending.pop(rid, None)
             self._last_steer.pop(rid, None)
             self._steer_ops.pop(rid, None)
             self._steer_conflict_noted.discard(rid)
@@ -3953,6 +3963,34 @@ class AgentOrchestrator:
             from agent_discord.orchestration.jobs import drop_origin_thread
 
             drop_origin_thread(tid)
+
+    def _deliver_steers(self, run_id: str) -> None:
+        """Hand queued steers to the worker in order; keep the rest for a retry."""
+
+        hook = getattr(self._active_cook_backend(run_id), "steer", None)
+        if not callable(hook):
+            return
+        while True:
+            with self._steer_lock:
+                queued = self._steer_pending.get(run_id) or []
+                if not queued:
+                    self._steer_pending.pop(run_id, None)
+                    return
+                body = queued[0]
+            try:
+                delivered = bool(hook(run_id, body))
+            except Exception:
+                delivered = False
+            if not delivered:
+                return
+            with self._steer_lock:
+                queued = self._steer_pending.get(run_id) or []
+                if queued and queued[0] == body:
+                    queued.pop(0)
+
+    def _undelivered_steers(self, run_id: str) -> list[str]:
+        with self._steer_lock:
+            return list(self._steer_pending.pop(run_id, []))
 
     def _take_steers(self, run_id: str) -> list[str]:
         rid = (run_id or "").strip()

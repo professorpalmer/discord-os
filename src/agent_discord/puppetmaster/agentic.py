@@ -42,6 +42,7 @@ from agent_discord.puppetmaster.backend import (
     iter_cli_process_events,
     prepend_early_job_id,
     request_workdir,
+    with_state_dir,
     worker_env,
     salvage_swarm_incomplete_answer,
 )
@@ -67,6 +68,8 @@ class AgenticPuppetmasterBackend:
     _statuses: dict[str, TaskStatus] = field(default_factory=dict)
     _children: dict[str, Any] = field(default_factory=dict, repr=False)
     _cancel_requested: set[str] = field(default_factory=set, repr=False)
+    # run_id -> Puppetmaster job id, known once the worker prints job_id:.
+    _job_ids: dict[str, str] = field(default_factory=dict, repr=False)
     _child_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def resolve_model(self, requested: str) -> ModelPin:
@@ -339,6 +342,7 @@ class AgenticPuppetmasterBackend:
                 model=pin.canonical,
                 cli=self.cli,
                 timeout_seconds=self.timeout_seconds,
+                on_job_id=lambda job_id: self._job_ids.__setitem__(request.run_id, job_id),
             ):
                 if request.run_id in self._cancel_requested:
                     self._statuses[request.run_id] = TaskStatus.CANCELLED
@@ -364,7 +368,30 @@ class AgenticPuppetmasterBackend:
         finally:
             self._unregister_child(request.run_id, proc)
             self._cancel_requested.discard(request.run_id)
+            self._job_ids.pop(request.run_id, None)
             handoff.cleanup()
+
+    def steer(self, run_id: str, text: str) -> bool:
+        """Deliver a follow-up to the live worker via ``puppetmaster steer``.
+
+        False until the worker's job id is known, or when the CLI refuses.
+        """
+
+        job_id = self._job_ids.get((run_id or "").strip(), "")
+        body = (text or "").strip()
+        if not job_id or not body:
+            return False
+        try:
+            proc = subprocess.run(
+                with_state_dir([self.cli, "steer", job_id, body]),
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env=worker_env(self.env),
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return proc.returncode == 0
 
     def _agentic_flags(
         self,

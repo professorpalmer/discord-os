@@ -176,14 +176,15 @@ class FakePuppetmasterBackend:
             )
         return out
 
-    def steer(self, run_id: str, text: str) -> None:
+    def steer(self, run_id: str, text: str) -> bool:
         """Append follow-up text to a live fake worker."""
 
         body = (text or "").strip()
         if not run_id or not body:
-            return
+            return False
         self.steers.append((run_id, body))
         self.steer_count += 1
+        return True
 
     def cancel(self, run_id: str) -> bool:
         self.cancelled.add(run_id)

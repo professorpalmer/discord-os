@@ -55,6 +55,11 @@
 ### A crash inside a job settles it
 - Any exception inside `run_task` after the run exists now fails the run with an `internal error` reason, finishes the live card, and frees the job thread. Before, the run stayed RUNNING, the card froze, and every later message in that thread was swallowed as a steer until restart. JobPool receipts now carry the real run id.
 
+### Live steers reach the worker
+- A thread follow-up during a local cook is handed to the worker with `puppetmaster steer <job_id> <text>`, using the job id the worker prints early. Before, steers were only appended to the card text and acked as success.
+- Steers sent before the job id is known are retried on each stream event. Any still undelivered at the end are named on the Done card.
+- A cook backend with no steer support (for example Path A SSH) is an honest miss: listen queues the follow-up or says it could not steer.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

@@ -1279,9 +1279,13 @@ def iter_cli_process_events(
     model: str,
     cli: str = "",
     timeout_seconds: float = 3600.0,
-    steer_poll: Optional[Callable[[], None]] = None,
+    on_job_id: Optional[Callable[[str], None]] = None,
 ) -> Iterator[DispatchEvent]:
-    """Read CLI stdout/stderr plus optional `deltas --follow` into live events."""
+    """Read CLI stdout/stderr plus optional `deltas --follow` into live events.
+
+    ``on_job_id`` fires once with the Puppetmaster job id from the early
+    ``job_id:`` line, so the caller can steer that job.
+    """
 
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
@@ -1315,11 +1319,6 @@ def iter_cli_process_events(
             try:
                 item = line_queue.get(timeout=0.25)
             except queue.Empty:
-                if steer_poll is not None:
-                    try:
-                        steer_poll()
-                    except Exception:
-                        pass
                 if proc.poll() is not None and main_done >= 2:
                     break
                 continue
@@ -1332,6 +1331,11 @@ def iter_cli_process_events(
             stripped = line.strip()
             if stripped.lower().startswith("job_id:") and not seen_job_id:
                 seen_job_id = stripped.split(":", 1)[1].strip()
+                if on_job_id is not None and seen_job_id:
+                    try:
+                        on_job_id(seen_job_id)
+                    except Exception:
+                        pass
                 if follower is None:
                     follower = _start_delta_follower(cli, seen_job_id, timeout_seconds)
                     if follower is not None:
