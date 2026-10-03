@@ -110,6 +110,7 @@ def run_doctor(
     _check_puppetmaster_cli(cfg, lines)
     fails += _check_host_allowlist(lines)
     _warn_voice_join(lines)
+    _report_voice_done(lines)
     _check_slash_self_heal(cfg, ws, lines)
     _check_policy_locks_tip(lines)
     _check_forum_tags_honesty(cfg, ws, lines)
@@ -782,6 +783,32 @@ def _warn_voice_join(lines: list[str]) -> None:
             f"close {VOICE_CLOSE_DAVE_REQUIRED}; no libdave / voice UDP; "
             "unset to silence this WARN)"
         )
+
+
+def _report_voice_done(lines: list[str]) -> None:
+    """Report DISCORD_OS_VOICE_DONE and whether say/espeak + ffmpeg resolve."""
+
+    from agent_discord.discord.tts import ENV_VOICE_DONE, voice_done_tools
+
+    tools = voice_done_tools()
+    if not tools["enabled"]:
+        lines.append(f"OK {ENV_VOICE_DONE} off — no voice message on Done")
+        return
+    if tools["ready"]:
+        lines.append(
+            f"OK {ENV_VOICE_DONE}=1 voice message on Done "
+            f"(tts={tools['tts_cli']}, ffmpeg={tools['ffmpeg_cli']})"
+        )
+        return
+    missing = " + ".join(
+        name
+        for name, found in (("say/espeak", tools["tts_cli"]), ("ffmpeg", tools["ffmpeg_cli"]))
+        if not found
+    )
+    lines.append(
+        f"WARN {ENV_VOICE_DONE}=1 but {missing} not on PATH — voice message "
+        "fails soft; the Done card is unaffected"
+    )
 
 
 def filter_doctor_notify_lines(

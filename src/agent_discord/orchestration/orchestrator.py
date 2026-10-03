@@ -1745,6 +1745,25 @@ class AgentOrchestrator:
             maybe_speak_done(safe_final_summary)
         except Exception:
             pass
+        # Audit I2-6: opt-in native voice message of the same Done summary, in
+        # the job thread only, off the hot path. Never for cancelled or eval
+        # runs. Fail soft — the card above already landed.
+        if (
+            result.status != TaskStatus.CANCELLED
+            and not intake.metadata.get("eval")
+            and self.discord is not None
+        ):
+            try:
+                from agent_discord.discord.tts import post_voice_done_async
+
+                post_voice_done_async(
+                    self.discord,
+                    channel_id=intake.channel_id,
+                    thread_id=str(live.thread_id or job_thread_id or ""),
+                    text=safe_final_summary,
+                )
+            except Exception:
+                pass
         self._release_live_thread(live.thread_id or job_thread_id, run_id)
         self._react_terminal(
             intake, result.status, thread_id=live.thread_id or job_thread_id

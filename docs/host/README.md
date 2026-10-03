@@ -182,6 +182,7 @@ Opt-in local spoken Done on this Mac. Discord guild voice join re-checked:
 | Default | `DISCORD_OS_TTS` unset/off — no subprocess, no sound. |
 | Opt-in | `DISCORD_OS_TTS=1` + `say` / `espeak` on PATH. Argv only; keys never in argv. |
 | Missing CLI | Spoken Deny. Host keeps running. |
+| Voice message Done | `DISCORD_OS_VOICE_DONE=1` + `ffmpeg` → native voice message in the job thread, once per run. Default off; missing tool = no send. |
 | Voice join | Always Denied (DAVE / libdave not shipped; no half-wired Opcode 4). |
 | Guild speak/listen | Parked Deny — use local TTS + voice memos. |
 | Activities | Never. |

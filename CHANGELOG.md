@@ -258,6 +258,9 @@
 ### Fork from a lineage step
 - `fork from <N>: <ask>` in a job thread opens a sibling thread whose run is parented at step N of that job, not its tip. `discord-os lineage` now numbers steps in execution order. Before, steps in the same second sorted by key hash. Operator-only.
 
+### Voice Done summaries (opt-in)
+- With `DISCORD_OS_VOICE_DONE=1`, the redacted Done summary is also posted in the job thread as a native Discord voice message, rendered locally with `say`/`espeak` and `ffmpeg`. Missing tools or a rejected upload fail soft, and the card is unaffected. No guild voice join (HARD lock 6).
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
