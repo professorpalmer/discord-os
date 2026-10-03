@@ -40,6 +40,8 @@ _PANEL_STALE_NEED_PREF = "jobs_panel_stale_need"
 _PANEL_STALE_NEED_SPOKEN = (
     "Need: HOST Jobs panel could not refresh. Tap On or open Jobs."
 )
+JOB_DENIED_SPOKEN = "Denied. Only paired operators can act on jobs."
+PANEL_DENIED_SPOKEN = "Denied. Only paired operators can use the HOST panel."
 MORE_ID = "discord-os:more"
 PAIR_ID = "discord-os:pair"
 HALT_ID = "discord-os:halt"
@@ -1117,17 +1119,12 @@ def handle_gateway_interaction(
     ):
         _ack_interaction(payload, browser_remote_modal_payload(), opener=opener)
         return action
-    _ack_interaction(payload, {"type": CALLBACK_DEFERRED_UPDATE}, opener=opener)
-
     from agent_discord.orchestration.service import (
-        author_may_operate,
         seed_owner_if_empty,
         toggle_spend_halted,
-        toggle_write_gate,
     )
 
     user_id = interaction_user_id(payload)
-    role_ids = interaction_role_ids(payload)
     if action == "on":
         # Silent first-On seed only when require flag is off (default Mac UX).
         seeded = seed_owner_if_empty(store, user_id)
@@ -1135,8 +1132,17 @@ def handle_gateway_interaction(
             f"panel {action} user={user_id or '-'} seeded={int(bool(seeded))}",
             flush=True,
         )
-    if not author_may_operate(store, user_id, action, role_ids=role_ids):
+    # Deny before the ACK: a non-operator hears Denied instead of a silent
+    # deferred update that leaves the panel unchanged. Who may act is unchanged.
+    if not _operator_may_click(
+        store,
+        payload,
+        action,
+        opener=opener,
+        content=PANEL_DENIED_SPOKEN,
+    ):
         return "denied"
+    _ack_interaction(payload, {"type": CALLBACK_DEFERRED_UPDATE}, opener=opener)
     if action == "halt":
         toggle_spend_halted(store)
         _tick_rich_presence_best_effort(store, channel_id)
@@ -1297,11 +1303,12 @@ def _operator_may_click(
     action: str,
     *,
     opener: Any,
+    content: str = JOB_DENIED_SPOKEN,
 ) -> bool:
-    """Job-card and ask-gate buttons act on runs: operators only.
+    """Job-card, ask-gate, and HOST panel taps change host state: operators only.
 
     A non-operator click gets an ephemeral Denied instead of the deferred ACK,
-    so the card never changes for them.
+    so the card never changes for them and the tap is never silently dropped.
     """
 
     from agent_discord.orchestration.service import author_may_operate
@@ -1317,7 +1324,7 @@ def _operator_may_click(
         {
             "type": CALLBACK_MESSAGE,
             "data": {
-                "content": "Denied. Only paired operators can act on jobs.",
+                "content": content or JOB_DENIED_SPOKEN,
                 "flags": FLAG_EPHEMERAL,
             },
         },

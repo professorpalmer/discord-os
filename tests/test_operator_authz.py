@@ -124,6 +124,54 @@ def test_job_card_buttons_deny_non_operator(tmp_path: Path) -> None:
     store.close()
 
 
+def _more_click(value: str, user: str) -> dict[str, Any]:
+    from agent_discord.host.panel import MORE_ID
+
+    click = _click(MORE_ID, user)
+    click["data"]["values"] = [value]
+    return click
+
+
+def test_panel_actions_deny_non_operator_out_loud(tmp_path: Path) -> None:
+    """Audit 2026-10-02 G1-4: a stranger's panel tap was silently deferred."""
+
+    from agent_discord.host.panel import (
+        GITHUB_ID,
+        HALT_ID,
+        JOBS_ID,
+        OFF_ID,
+        ON_ID,
+        PANEL_DENIED_SPOKEN,
+        POLL_ID,
+    )
+    from agent_discord.orchestration.service import is_spend_halted
+
+    store = _store(tmp_path, owner="owner-1")
+    store.set_host_control("ch", armed=True)
+    clicks = [
+        _click(ON_ID, "stranger-9"),
+        _click(OFF_ID, "stranger-9"),
+        _more_click(HALT_ID, "stranger-9"),
+        _more_click(POLL_ID, "stranger-9"),
+        _more_click(GITHUB_ID, "stranger-9"),
+    ]
+    select = _click(JOBS_ID, "stranger-9")
+    select["data"]["values"] = ["run-1"]
+    clicks.append(select)
+    for click in clicks:
+        recorder = _Recorder()
+        action = handle_gateway_interaction(store, "ch", click, opener=recorder)
+        assert action == "denied", click["data"]
+        assert recorder.bodies, click["data"]
+        assert [body["type"] for body in recorder.bodies] == [4], click["data"]
+        body = recorder.bodies[0]
+        assert body["data"]["content"] == PANEL_DENIED_SPOKEN
+        assert body["data"]["flags"] == 64
+    assert store.host_is_armed("ch") is True
+    assert is_spend_halted(store) is False
+    store.close()
+
+
 def test_job_card_buttons_allow_operator(tmp_path: Path) -> None:
     store = _store(tmp_path, owner="owner-1")
     calls: list[tuple[str, str]] = []

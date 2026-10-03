@@ -173,6 +173,9 @@
 ### Prose lines starting with `[` or `{` survive
 - A stream line counts as JSON only when the whole line parses as a JSON object. Markdown links, `[1]` citations and sentences quoting JSON stay in the live text. Oversized prompts sent by file now also get the early job id, so live steer and deltas start for them too.
 
+### Non-operator panel taps get a Denied reply
+- A non-operator tapping a HOST panel action now gets an ephemeral Denied instead of a silent no-op. Who may act is unchanged.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
