@@ -34,7 +34,6 @@ from agent_discord.redaction import (
 PHASE_TEXT_LIMIT = 16000
 RECEIPT_TEXT_LIMIT = 1800
 STREAM_PHASES = frozenset({"thinking", "plan", "code", "dispatch", "done"})
-_CLI_FLAG_CACHE: dict[tuple[str, str, str], bool] = {}
 _SUMMARY_SKIP_PREFIXES = (
     "# puppetmaster stitched summary",
     "---",
@@ -204,27 +203,6 @@ _FINDINGS_HEADING_RE = re.compile(r"(?im)^##\s+findings?\s*$")
 _MARKDOWN_HEADING_RE = re.compile(r"(?im)^##\s+")
 
 
-def cli_supports_flag(cli: str, subcommand: str, flag: str) -> bool:
-    """Probe ``cli subcommand --help`` once. Live Puppetmaster may lack --json-lines."""
-
-    key = (cli, subcommand, flag)
-    cached = _CLI_FLAG_CACHE.get(key)
-    if cached is not None:
-        return cached
-    supported = False
-    try:
-        proc = subprocess.run(
-            [cli, subcommand, "--help"],
-            capture_output=True,
-            text=True,
-            timeout=8,
-        )
-        blob = f"{proc.stdout}\n{proc.stderr}"
-        supported = flag in blob
-    except Exception:
-        supported = False
-    _CLI_FLAG_CACHE[key] = supported
-    return supported
 _TOKEN_EVENT_TYPES = frozenset({"token", "delta", "reasoning"})
 _PHASE_ALIASES = {
     "think": "thinking",

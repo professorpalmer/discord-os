@@ -570,10 +570,6 @@ def test_cli_stream_yields_token_progress_from_popen(monkeypatch, tmp_path: Path
         fake_popen,
     )
     monkeypatch.setattr(
-        "agent_discord.puppetmaster.agentic.cli_supports_flag",
-        lambda *args, **kwargs: False,
-    )
-    monkeypatch.setattr(
         "agent_discord.puppetmaster.agentic.iter_cli_process_events",
         lambda proc, **kwargs: [
             DispatchEvent(
@@ -613,7 +609,9 @@ def test_cli_stream_yields_token_progress_from_popen(monkeypatch, tmp_path: Path
     assert "chain_of_thought" not in dumped
 
 
-def test_agentic_stream_passes_json_lines_and_parses_tokens(monkeypatch, tmp_path: Path):
+def test_agentic_stream_omits_json_lines_and_parses_tokens(monkeypatch, tmp_path: Path):
+    """Audit 2026-10-02 F5: no PM release has --json-lines; never probe for it."""
+
     captured: dict[str, Any] = {}
 
     def fake_popen(cmd, **kwargs):
@@ -630,12 +628,15 @@ def test_agentic_stream_passes_json_lines_and_parses_tokens(monkeypatch, tmp_pat
         fake_popen,
     )
     monkeypatch.setattr(
-        "agent_discord.puppetmaster.agentic.cli_supports_flag",
-        lambda *args, **kwargs: False,
-    )
-    monkeypatch.setattr(
         "agent_discord.puppetmaster.backend.subprocess.Popen",
         fake_popen,
+    )
+
+    def no_subprocess_run(cmd, **kwargs):
+        raise AssertionError(f"unexpected capability probe: {cmd}")
+
+    monkeypatch.setattr(
+        "agent_discord.puppetmaster.backend.subprocess.run", no_subprocess_run
     )
     backend = AgenticPuppetmasterBackend(
         cli="puppetmaster",

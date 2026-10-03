@@ -37,7 +37,6 @@ from agent_discord.puppetmaster.backend import (
     usage_from_cli_meta,
     _parse_safe_cli_completion,
     _safe_dispatch_prompt,
-    cli_supports_flag,
     confine_worker_cwd,
     iter_cli_process_events,
     measured_job_usage,
@@ -445,8 +444,8 @@ class AgenticPuppetmasterBackend:
             flags.extend(["--allow-non-worktree", "--disable-codegraph"])
         if workdir:
             flags.extend(["--cwd", workdir])
-        if stream and cli_supports_flag(self.cli, "agentic", "--json-lines"):
-            flags.append("--json-lines")
+        # No --json-lines: no Puppetmaster release has that flag. Token events
+        # come from `deltas --follow --json` (see backend.iter_cli_process_events).
         return flags
 
     def _plan_agentic_spawn(

@@ -161,6 +161,9 @@
 - `discord-os` now depends on `puppetmaster-ai>=1.27.24,<2` (`steer` first shipped in 1.27.24). Production had been running a stale 1.22.15 with no `steer`.
 - One resolver picks the Puppetmaster CLI everywhere. `discord-os host doctor` prints its path and version and WARNs outside the range. Run usage records `pm_version`.
 
+### Dead `--json-lines` probe removed
+- The capability probe for a `--json-lines` flag that no Puppetmaster version has is gone, along with its dead branch. That saves a `--help` subprocess per cook.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
