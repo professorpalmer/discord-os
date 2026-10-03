@@ -11,6 +11,7 @@ from typing import Any, Iterable, Optional, Sequence
 
 
 FLAG_COMPONENTS_V2 = 1 << 15
+FLAG_IS_VOICE_MESSAGE = 1 << 13
 
 TYPE_ACTION_ROW = 1
 TYPE_BUTTON = 2

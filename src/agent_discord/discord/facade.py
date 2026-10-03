@@ -175,6 +175,8 @@ class DiscordFacade:
         embeds: Optional[list] = None,
         components: Optional[list] = None,
         flags: int = 0,
+        attachment_extra: Optional[Mapping[str, Any]] = None,
+        attachment_content_type: str = "",
     ) -> DiscordMessage:
         send = self.provider.send_attachment
         kwargs: dict = {}
@@ -188,6 +190,12 @@ class DiscordFacade:
             kwargs["components"] = components
         if accepts_keyword(send, "flags"):
             kwargs["flags"] = flags
+        if attachment_extra and accepts_keyword(send, "attachment_extra"):
+            kwargs["attachment_extra"] = attachment_extra
+        if attachment_content_type and accepts_keyword(
+            send, "attachment_content_type"
+        ):
+            kwargs["attachment_content_type"] = attachment_content_type
         msg = send(channel_id, filename, data, **kwargs)
         self._remember_outbound(msg)
         return msg

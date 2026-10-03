@@ -913,15 +913,24 @@ def send_channel_attachment(
     embeds: Optional[list[dict[str, Any]]] = None,
     components: Optional[list[dict[str, Any]]] = None,
     flags: int = 0,
+    attachment_extra: Optional[Mapping[str, Any]] = None,
+    attachment_content_type: str = "",
     opener: Optional[UrlOpener] = None,
 ) -> DiscordMessage:
-    """POST a file to a channel (or thread) via Discord REST multipart."""
+    """POST a file to a channel (or thread) via Discord REST multipart.
+
+    ``attachment_extra`` merges into the single ``attachments[0]`` descriptor —
+    this is how a voice message carries ``duration_secs`` + ``waveform``.
+    ``attachment_content_type`` overrides the file part's MIME type (Discord
+    requires ``audio/ogg`` for a voice message, not octet-stream).
+    """
 
     dest = thread_id or channel_id
     safe_name = _safe_filename(filename)
-    payload: dict[str, Any] = {
-        "attachments": [{"id": 0, "filename": safe_name}],
-    }
+    descriptor: dict[str, Any] = {"id": 0, "filename": safe_name}
+    if attachment_extra:
+        descriptor.update({str(k): v for k, v in attachment_extra.items()})
+    payload: dict[str, Any] = {"attachments": [descriptor]}
     if flags:
         payload["flags"] = int(flags)
     if flags & FLAG_COMPONENTS_V2:
@@ -933,7 +942,9 @@ def send_channel_attachment(
             payload["embeds"] = list(embeds)
         if components:
             payload["components"] = list(components)
-    body, content_type = _multipart_message(payload, safe_name, data)
+    body, content_type = _multipart_message(
+        payload, safe_name, data, file_content_type=attachment_content_type
+    )
     raw = _discord_request(
         token,
         "POST",
@@ -1228,9 +1239,25 @@ def _safe_filename(filename: str) -> str:
     return name or "object.bin"
 
 
+def _safe_mimetype(value: str) -> str:
+    """Keep a MIME type header-safe. Reject anything but token/token chars."""
+
+    raw = (value or "").strip()
+    if not raw or "/" not in raw:
+        return ""
+    allowed = set("abcdefghijklmnopqrstuvwxyz0123456789/+-.")
+    lowered = raw.lower()
+    return lowered if set(lowered) <= allowed else ""
+
+
 def _multipart_message(
-    payload: dict[str, Any], filename: str, data: bytes
+    payload: dict[str, Any],
+    filename: str,
+    data: bytes,
+    *,
+    file_content_type: str = "",
 ) -> tuple[bytes, str]:
+    part_type = _safe_mimetype(file_content_type) or "application/octet-stream"
     boundary = f"----agentdiscord{uuid.uuid4().hex}"
     crlf = b"\r\n"
     chunks: list[bytes] = []
@@ -1252,7 +1279,7 @@ def _multipart_message(
                 f'filename="{filename}"'
             ).encode("utf-8"),
             crlf,
-            b"Content-Type: application/octet-stream",
+            f"Content-Type: {part_type}".encode("ascii"),
             crlf,
             crlf,
             data,

@@ -103,6 +103,8 @@ class RestDiscordProvider:
         embeds: Optional[list] = None,
         components: Optional[list] = None,
         flags: int = 0,
+        attachment_extra: Optional[Mapping[str, Any]] = None,
+        attachment_content_type: str = "",
     ) -> DiscordMessage:
         return send_channel_attachment(
             token=self._bot_token,
@@ -114,6 +116,8 @@ class RestDiscordProvider:
             embeds=embeds,
             components=components,
             flags=flags,
+            attachment_extra=attachment_extra,
+            attachment_content_type=attachment_content_type,
             opener=self._opener,
         )
 
