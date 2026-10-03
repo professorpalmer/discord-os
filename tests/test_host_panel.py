@@ -460,7 +460,7 @@ def test_launchd_plist_contains_channel_and_service_env(tmp_path: Path):
         log=tmp_path / "host.log",
     )
     assert "99" in plist
-    assert "DISCORD_OS_SERVICE" in plist
+    assert "DISCORD_OS_SERVICE" not in plist  # dead flag, never read
     assert "PYTHONUNBUFFERED" in plist
     assert "KeepAlive" in plist
     # Audit 2026-10-02 G2-3: KeepAlive without a throttle is a 10 s respawn loop.

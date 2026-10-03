@@ -126,6 +126,9 @@
 ### Rich Presence is opt-in
 - Mac Rich Presence (`pypresence`) now defaults off. Set `DISCORD_OS_PRESENCE=1` to enable it. The bot's Gateway presence already shows host state on the phone.
 
+### Dead `DISCORD_OS_SERVICE` flag removed
+- The LaunchAgent plist and systemd unit no longer set `DISCORD_OS_SERVICE`, which nothing read.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

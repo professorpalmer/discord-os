@@ -11,7 +11,6 @@ from typing import Optional
 
 SERVICE_LABEL = "com.discord-os.host"
 DOCTOR_NOTIFY_LABEL = "com.discord-os.doctor-notify"
-SERVICE_ENV = "DISCORD_OS_SERVICE"
 # KeepAlive alone respawns a crash-at-startup host every 10 s forever. Floor the
 # gap so a bad token / ConfigError / sqlite lock is a readable log, not a loop.
 SERVICE_THROTTLE_INTERVAL_S = 30
@@ -66,8 +65,6 @@ def render_launchd_plist(
         f"  <string>{_xml(str(cwd))}</string>\n"
         "  <key>EnvironmentVariables</key>\n"
         "  <dict>\n"
-        f"    <key>{SERVICE_ENV}</key>\n"
-        "    <string>1</string>\n"
         "    <key>PYTHONUNBUFFERED</key>\n"
         "    <string>1</string>\n"
         "    <key>AGENT_DISCORD_WORKSPACE</key>\n"
@@ -99,7 +96,6 @@ def render_systemd_unit(
         "Description=Discord OS host\n"
         "[Service]\n"
         f"WorkingDirectory={cwd}\n"
-        f"Environment={SERVICE_ENV}=1\n"
         f"Environment=AGENT_DISCORD_WORKSPACE={workspace}\n"
         f"ExecStart={exec_start}\n"
         "Restart=always\n"
