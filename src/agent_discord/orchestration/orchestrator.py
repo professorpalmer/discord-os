@@ -2789,11 +2789,14 @@ class AgentOrchestrator:
         spoken: str = "",
     ) -> dict[str, Any]:
         from agent_discord.orchestration.ask_gate import (
+            ALLOWED_ONCE_SHELL_SPOKEN,
             ALLOWED_TOOL_SPOKEN,
             ALWAYS_TOOL_SPOKEN,
             DENIED_ASK_SPOKEN,
             DENIED_TOOL_SPOKEN,
             GATE_KIND_ASK,
+            normalize_tool_class,
+            shell_always_scope,
         )
         from agent_discord.orchestration.service import (
             set_tool_class_session_allow,
@@ -2814,6 +2817,25 @@ class AgentOrchestrator:
             str(task.get("thread_id") or meta.get("thread_id") or "").strip()
             or str(task.get("channel_id") or meta.get("channel_id") or "").strip()
         )
+        if verb == "always" and normalize_tool_class(klass or exact) == "shell":
+            prefix = shell_always_scope(exact, str(meta.get("gate_detail") or ""))
+            if not (prefix and scope and set_tool_exact_session_allow(self.store, prefix, scope)):
+                # Compound commands and interpreters are never remembered.
+                return self._finish_gate(
+                    run_id,
+                    result="allow",
+                    answer="",
+                    spoken=ALLOWED_ONCE_SHELL_SPOKEN,
+                    action="approve",
+                )
+            return self._finish_gate(
+                run_id,
+                result="always",
+                answer="",
+                spoken=spoken or f"Always allowed: {prefix.split(' ', 1)[-1]} (this session).",
+                action="always",
+                session_allow=scope,
+            )
         if verb == "always":
             # Exact-tool Always: remember the concrete tool, never a wildcard.
             remembered = False

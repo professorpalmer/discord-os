@@ -646,6 +646,7 @@ def hold_tool_decision(
         channel_id=channel_id,
         thread_id=thread_id,
         tool_name=req.tool_name,
+        detail=req.detail,
     )
     if decision.decision == "deny":
         return deny_result(req.request_id, decision.reason or "denied", decision.tool_class)
@@ -954,6 +955,7 @@ def drain_gate_queue(
                         channel_id=channel_id,
                         thread_id=thread_id,
                         tool_name=req.tool_name,
+                        detail=req.detail,
                     )
                 except Exception:
                     decided = None

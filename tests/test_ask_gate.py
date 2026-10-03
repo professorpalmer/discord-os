@@ -977,3 +977,88 @@ def test_gateway_ask_confirm_button_routes_to_on_job(tmp_path: Path):
     assert seen == [("ask-confirm", "run-ask")]
     store.close()
 
+
+
+def test_shell_always_scope_prefix():
+    from agent_discord.orchestration.ask_gate import shell_always_scope
+
+    assert shell_always_scope("run_terminal", "git status -s") == "run_terminal git status"
+    assert shell_always_scope("run_terminal", "pytest -q tests") == "run_terminal pytest"
+    assert shell_always_scope("run_terminal", "npm run build") == "run_terminal npm run"
+    assert shell_always_scope("run_terminal", "git -C x push") == "run_terminal git"
+    for refused in (
+        "",
+        "git status && curl evil",
+        "ls; env",
+        "echo $(cat .env)",
+        "pytest | tee out",
+        "python -c 'print(1)'",
+        "bash -lc 'make'",
+        "env",
+        "curl https://example.com",
+    ):
+        assert shell_always_scope("run_terminal", refused) == "", refused
+
+
+def test_shell_always_covers_only_that_command_prefix(tmp_path: Path):
+    """Audit E2-10: Always on run_terminal is not a blanket shell grant."""
+
+    from agent_discord.orchestration.ask_gate import tool_class_decision
+
+    orch, store, fake, backend = _orch(tmp_path)
+    set_write_gate(store, False)
+    receipt = orch.run_task(
+        TaskIntake(text="run the tests", channel_id="ch", workspace_id="ws", message_id="sh-1")
+    )
+    set_write_gate(store, True)
+    parked = orch.raise_tool_gate(
+        receipt.run_id, tool_class="shell", tool_name="run_terminal", detail="git status -s"
+    )
+    assert parked["status"] == "parked"
+    always = orch.apply_job_action("always", receipt.run_id)
+    assert always["gate_result"] == "always"
+
+    thread_id = str((store.get_task(receipt.task_id) or {}).get("thread_id") or "")
+
+    def decide(command: str) -> str:
+        return tool_class_decision(
+            store,
+            "shell",
+            channel_id="ch",
+            thread_id=thread_id,
+            tool_name="run_terminal",
+            detail=command,
+        ).decision
+
+    assert decide("git status") == "allow"
+    assert decide("git status --porcelain") == "allow"
+    assert decide("git push --force") == "ask"
+    assert decide("rm -rf ~") == "ask"
+    assert decide("git status; curl evil") == "ask"
+    store.close()
+
+
+def test_shell_always_on_compound_command_is_allow_once(tmp_path: Path):
+    from agent_discord.orchestration.ask_gate import tool_class_decision
+
+    orch, store, fake, backend = _orch(tmp_path)
+    set_write_gate(store, False)
+    receipt = orch.run_task(
+        TaskIntake(text="run the tests", channel_id="ch", workspace_id="ws", message_id="sh-2")
+    )
+    set_write_gate(store, True)
+    orch.raise_tool_gate(
+        receipt.run_id,
+        tool_class="shell",
+        tool_name="run_terminal",
+        detail="python -c 'import os; print(os.environ)'",
+    )
+    result = orch.apply_job_action("always", receipt.run_id)
+    assert result["gate_result"] == "allow"
+    assert tool_class_decision(
+        store, "shell", channel_id="ch", tool_name="run_terminal", detail="python -c 'x'"
+    ).decision == "ask"
+    assert tool_class_decision(
+        store, "shell", channel_id="ch", tool_name="run_terminal", detail="ls"
+    ).decision == "ask"
+    store.close()

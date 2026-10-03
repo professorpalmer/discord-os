@@ -15,6 +15,7 @@ timeout self-denies. Docs: ``docs/cards/ask-gate.md``.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional, Sequence
 
@@ -101,6 +102,9 @@ DENIED_ASK_SPOKEN = "Denied. Question was not answered."
 EXPIRED_ASK_SPOKEN = "Expired. Question was not answered."
 ALLOWED_TOOL_SPOKEN = "Allowed."
 ALWAYS_TOOL_SPOKEN = "Always allowed for this tool this session."
+ALLOWED_ONCE_SHELL_SPOKEN = (
+    "Allowed once. Always needs one simple command, not a script or interpreter."
+)
 
 _SPOKEN_ALLOW = frozenset({"allow", "allowed", "approve", "yes", "y", "ok", "okay"})
 _SPOKEN_DENY = frozenset({"deny", "denied", "no", "n", "reject", "block", "cancel", "cancelled", "canceled"})
@@ -169,6 +173,41 @@ def normalize_tool_class(raw: str) -> Optional[str]:
     return None
 
 
+_SHELL_COMPOUND = re.compile(r"[;&|`<>\n]|\$\(")
+# Commands whose second word picks the action (git status vs git push).
+_TWO_WORD_COMMANDS = frozenset(
+    {"git", "gh", "npm", "pnpm", "yarn", "bun", "uv", "poetry", "pip", "cargo", "go", "make", "docker"}
+)
+# Run arbitrary code. Always on these would be a blanket shell grant.
+_NO_ALWAYS_COMMANDS = frozenset(
+    {
+        "bash", "sh", "zsh", "fish", "python", "python3", "node", "deno", "perl",
+        "ruby", "php", "osascript", "eval", "exec", "env", "sudo", "xargs", "npx",
+        "curl", "wget", "ssh", "scp",
+    }
+)
+
+
+def shell_always_scope(tool_name: str, command: str) -> str:
+    """Exact-Always key for one shell call: the tool name plus its command prefix.
+
+    ``run_terminal`` + ``git status -s`` -> ``run_terminal git status``. Returns
+    "" when Always must not be remembered: empty, compound, or an interpreter.
+    """
+
+    text = (command or "").strip()
+    name = (tool_name or "").strip()
+    if not text or not name or _SHELL_COMPOUND.search(text):
+        return ""
+    words = text.split()
+    if words[0] in _NO_ALWAYS_COMMANDS:
+        return ""
+    head = words[:2] if words[0] in _TWO_WORD_COMMANDS and len(words) > 1 else words[:1]
+    if any(word.startswith("-") for word in head[1:]):
+        head = head[:1]
+    return f"{name} {' '.join(head)}"
+
+
 def tool_class_decision(
     store: Any,
     tool_class: str,
@@ -177,6 +216,7 @@ def tool_class_decision(
     thread_id: str = "",
     write_gate_on: Optional[bool] = None,
     tool_name: str = "",
+    detail: str = "",
 ) -> ToolClassDecision:
     """Decide allow / ask / deny for a tool class / exact tool.
 
@@ -194,6 +234,9 @@ def tool_class_decision(
     )
 
     exact = (tool_name or "").strip() or (tool_class or "").strip()
+    if normalize_tool_class(tool_class) == "shell":
+        # Shell Always is scoped to the command prefix, never the whole tool.
+        exact = shell_always_scope(exact, detail)
     # Exact Always wins — and never treats wildcards as a match.
     if exact and (
         tool_exact_session_allows(store, exact, thread_id)

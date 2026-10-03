@@ -48,6 +48,10 @@
 ### File tools never write inside `.git`
 - The gate hook refuses write, edit, hashline and delete tools on any path inside `.git`. A written `.git/hooks/*` or `.git/config` would run later, outside any gate. Git commands still change `.git` as usual.
 
+### Shell Always is scoped to the command
+- Always on a shell tool remembers the command prefix (`git status`, `pytest`, `npm run`), not the whole tool. Other shell commands still park a card.
+- Compound commands (`;`, `&&`, pipes, redirects, `$(...)`) and interpreters (`bash`, `python -c`, `env`, `curl`, ...) are allowed once and never remembered.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
