@@ -157,7 +157,7 @@ DISCORD_OS_STATUS_DIGEST_INTERVAL_S=120
 | Rule | Behavior |
 |---|---|
 | Read-only | Digest path never calls `set_host_control` / On / Off / Halt. |
-| Snapshot | Reuses `build_status_snapshot`. `readonly: false` payloads are refused. |
+| Snapshot | Reuses `build_status_snapshot` (same module). `readonly: false` payloads are refused. |
 | Secrets | Allowlist ids / labels / kinds only — never `target` / ssh user@host. |
 
 ### Spend honesty

@@ -81,7 +81,6 @@ discord-os host status
 discord-os host doctor          # LaunchAgent / workspace / pid / gateway
 discord-os host doctor --fix   # clear dead-pid gateway locks only
 discord-os host doctor --notify # refresh Need state; never posts to Discord
-discord-os host dashboard       # read-only companion at http://127.0.0.1:8765/
 discord-os host stop
 discord-os host start --channel-id ID
 ```
@@ -142,26 +141,6 @@ Desk doctor stays on the Mac. A thin digest (`power` / `pid` / `doctor` /
 `gateway`) ranks as a HOST **Need** line. It does **not** post to the host
 channel (0.5.87). See [status.md](status.md).
 
-## Companion dashboard (read-only)
-
-Local HTTP glance at host status — version, power/armed, spend, recent jobs, doctor summary, and multi-host allowlist **ids** (no secrets). Mutating controls stay on the Discord HOST panel.
-
-```bash
-discord-os host dashboard          # http://127.0.0.1:8765/
-discord-os dashboard               # same (alias)
-discord-os host dashboard --once   # print JSON snapshot, no server
-```
-
-| Rule | Behavior |
-|---|---|
-| Bind | **Fail closed** to `127.0.0.1` (or `DISCORD_OS_DASHBOARD_HOST` if loopback). |
-| Non-loopback | Refused unless `--allow-non-loopback` (not recommended; no auth). |
-| Methods | GET / HEAD only. POST/PUT/PATCH/DELETE → 405. |
-| Secrets | No bot tokens, env dumps, SSH targets, or credentials in responses. |
-| Allowlist | Ids / labels / kinds only — never `target` / ssh user@host. |
-
-JSON: `GET /api/status`. HTML: `GET /`. Code: `src/agent_discord/host/dashboard.py`.
-
 ## Discord RO status digest (P2.7)
 
 Phone-visible read-only facts (power / spend / jobs / allowlist ids). Posts to
@@ -214,8 +193,7 @@ Not a product feature. Optional extra `discord-os[debug]`. Default **off.** `DIS
 - `src/agent_discord/host/runners.py` — multi-host allowlist (fail-closed)
 - `src/agent_discord/orchestration/service.py` — operators / REQUIRE_OPERATORS
 - `src/agent_discord/host/doctor.py` — operators require check
-- `src/agent_discord/host/dashboard.py` — read-only companion web dashboard
-- `src/agent_discord/host/status.py` — HOST Need digest (P0.2) + Discord RO status digest (P2.7)
+- `src/agent_discord/host/status.py` — RO snapshot, HOST Need digest (P0.2), Discord RO status digest (P2.7)
 - `src/agent_discord/discord/tts.py` — local TTS + voice join/leave honesty (DAVE Deny)
 - `src/agent_discord/host/install.py` — login item
 - `src/agent_discord/host/logstream.py` — timestamped host.log lines + copy-truncate rotation

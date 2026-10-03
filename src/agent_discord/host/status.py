@@ -1,7 +1,9 @@
 """Host status: liveness Need line and the read-only status digest.
 
-Both halves are reachable only through the HOST panel repaint and the desk
-``doctor`` verb, so they live in one module with one digest type:
+``build_status_snapshot`` is the one read-only fact set — version, power, pid,
+spend, recent jobs, and multi-host allowlist **ids**. Everything above it is
+reachable only through the HOST panel repaint and the desk ``doctor`` verb, so
+it lives in one module with one digest type:
 
 * **Liveness** — a thin ``HostDigest`` (power / pid / doctor / gateway) that
   ranks as a HOST **Need** row. It never posts to Discord (0.5.87); the listen
@@ -23,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
+from agent_discord import PRODUCT_NAME, __version__
 from agent_discord.host.doctor import run_doctor
 from agent_discord.host.service import read_host_meta, running_host_pid
 from agent_discord.redaction import redact_text_markers
@@ -122,6 +125,124 @@ class HostDigest:
             "signature": self.signature,
             "checked_at": self.checked_at,
         }
+
+
+def build_status_snapshot(
+    *,
+    workspace: Optional[Path] = None,
+    config: Any = None,
+    store: Any = None,
+    jobs_limit: int = 8,
+    env: Optional[Mapping[str, str]] = None,
+) -> dict[str, Any]:
+    """Assemble the read-only host facts (no secrets / no SSH targets)."""
+
+    from agent_discord.config import apply_runtime_secrets, load_config
+    from agent_discord.host.cross_host import cross_host_ro_status
+    from agent_discord.orchestration.service import (
+        is_spend_halted,
+        seed_spend_cap_from_env,
+        session_spend_usd,
+        spend_cap_usd,
+        spend_cost_known,
+    )
+    from agent_discord.persistence.sqlite import SQLiteStore
+
+    cfg = config or apply_runtime_secrets(load_config())
+    ws = Path(workspace) if workspace is not None else Path(cfg.workspace)
+    owns_store = store is None
+    db = store
+    if db is None:
+        db = SQLiteStore(
+            cfg.database_path
+            if ws == Path(cfg.workspace)
+            else ws / "agent_discord.sqlite3"
+        )
+        db.initialize()
+    try:
+        meta = read_host_meta(ws) if ws.exists() else {}
+        pid = running_host_pid(ws) if ws.exists() else None
+        channel_id = str(meta.get("channel_id") or "")
+        armed = db.host_is_armed(channel_id, default=True) if channel_id else None
+        seed_spend_cap_from_env(db, env=env)
+        payload: dict[str, Any] = {
+            "product": PRODUCT_NAME,
+            "version": __version__,
+            "readonly": True,
+            "host": {
+                "running": pid is not None,
+                "pid": pid,
+                "channel_id": channel_id or None,
+                "armed": armed,
+                "workspace": str(ws),
+            },
+            "spend": {
+                "spend_usd": session_spend_usd(db),
+                "cap_usd": spend_cap_usd(db),
+                "halted": is_spend_halted(db),
+                "spend_known": spend_cost_known(db),
+            },
+            "jobs": _safe_jobs(db, channel_id, limit=jobs_limit),
+            # Probing SSH on a panel repaint is not worth the stall.
+            "hosts": cross_host_ro_status(env=env, probe=False),
+        }
+        return _strip_secrets(payload)
+    finally:
+        if owns_store and db is not None:
+            db.close()
+
+
+def _safe_jobs(store: Any, channel_id: str, *, limit: int) -> list[dict[str, Any]]:
+    try:
+        rows = store.list_recent_jobs(channel_id, limit=limit)
+    except Exception:
+        return []
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        intake = str(row.get("intake_text") or "")
+        if len(intake) > 160:
+            intake = intake[:157] + "..."
+        summary = str(row.get("summary") or "")
+        if len(summary) > 240:
+            summary = summary[:237] + "..."
+        out.append(
+            {
+                "job_code": str(row.get("job_code") or ""),
+                "run_id": str(row.get("run_id") or ""),
+                "status": str(row.get("status") or ""),
+                "summary": summary,
+                "attention": bool(row.get("attention")),
+                "intake_text": intake,
+            }
+        )
+    return out
+
+
+def _strip_secrets(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        out: dict[str, Any] = {}
+        for key, item in value.items():
+            key_l = str(key).lower()
+            if any(
+                marker in key_l
+                for marker in ("token", "password", "secret", "api_key", "private_key")
+            ):
+                continue
+            if key_l in {"target", "ssh", "workdir", "argv"}:
+                continue
+            out[str(key)] = _strip_secrets(item)
+        return out
+    if isinstance(value, list):
+        return [_strip_secrets(item) for item in value]
+    if isinstance(value, str):
+        lowered = value.lower()
+        if any(
+            marker in lowered
+            for marker in ("begin private", "password=", "api_key=", "authorization:")
+        ):
+            return "[redacted]"
+        return value
+    return value
 
 
 def _state_path(workspace: Path, name: str) -> Path:
@@ -824,15 +945,7 @@ def _tick_status_digest(
     if snapshot is not None:
         snap = snapshot
     else:
-        from agent_discord.host.dashboard import build_status_snapshot
-
-        snap = build_status_snapshot(
-            workspace=ws,
-            store=store,
-            config=config,
-            env=env,
-            include_doctor=False,
-        )
+        snap = build_status_snapshot(workspace=ws, store=store, config=config, env=env)
 
     # Fail closed: refuse to proceed if the payload claims writable.
     if snap.get("readonly") is False:

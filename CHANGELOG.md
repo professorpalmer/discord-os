@@ -213,6 +213,9 @@
 ### Liveness and status digest are one module
 - `host/liveness.py` and `host/status_digest.py` became `host/status.py`, with one snapshot type and no duplicated helpers (about 200 fewer lines). The HOST Need lines, the digest the panel shows, `host doctor`, and the never-post-to-Discord rule are unchanged.
 
+### Loopback web dashboard removed
+- `discord-os host dashboard`, the `discord-os dashboard` alias, the `127.0.0.1:8765` page and its JSON endpoints, and `DISCORD_OS_DASHBOARD_HOST` / `_PORT` are gone. The HOST card shows the same facts. `/status` no longer runs doctor or probes SSH hosts on the repaint path.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

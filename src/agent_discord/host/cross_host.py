@@ -21,7 +21,7 @@ def public_host_fields(
     reachable: Optional[bool] = None,
     detail: str = "",
 ) -> dict[str, Any]:
-    """Phone/dashboard-safe host row (no target)."""
+    """Phone-safe host row (no target)."""
 
     row: dict[str, Any] = {
         "id": host.id,

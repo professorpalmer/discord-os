@@ -1323,7 +1323,7 @@ def _tick_status_digest_best_effort(
     workspace: Optional[Path],
     force: bool = False,
 ) -> None:
-    """P2.7 RO dashboard snapshot → Discord (debounced). Never mutates power."""
+    """P2.7 RO status snapshot → Discord (debounced). Never mutates power."""
 
     if workspace is None:
         return
@@ -1761,7 +1761,7 @@ def _absorb_power(
     if parsed.action in {"on", "off"} and store is not None:
         set_host_armed(store, channel_id, parsed.action == "on")
     publish_host_card(discord, store, channel_id, thread_id=thread_id)
-    # P2.7: /status and On push RO dashboard facts to Discord (phone). Read-only.
+    # P2.7: /status and On push RO host facts to Discord (phone). Read-only.
     if parsed.action in {"on", "status"}:
         ws = _workspace_from_store_or_meta(store, discord)
         _tick_status_digest_best_effort(

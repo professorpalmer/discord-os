@@ -1466,7 +1466,7 @@ def _post_status_digest_on_arm(
     token: str = "",
     opener: Any = None,
 ) -> None:
-    """P2.7: push RO dashboard digest when HOST On. Never mutates power."""
+    """P2.7: push the RO status digest when HOST On. Never mutates power."""
 
     if not (token or "").strip():
         return

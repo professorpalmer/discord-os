@@ -54,7 +54,7 @@ Use a supervisor OS when you want fleet orchestration as the core. Use Discord O
 
 ## Wave 2 shareability (still no fleet)
 
-- **Cross-host RO** — `discord-os host hosts` (+ dashboard/digest reach bits). Allowlist fail-closed; probes never cook; `kind=ssh` unreachable is spoken honestly (no silent local fallback).
+- **Cross-host RO** — `discord-os host hosts` (+ status digest reach bits). Allowlist fail-closed; probes never cook; `kind=ssh` unreachable is spoken honestly (no silent local fallback).
 - **Forum-tags lock** — tags-as-tickets only maps **existing** `available_tags`; `modify_channel` refuses creating guild tags. Soft-skip when status tags are missing.
 - **Mailbox** — external agent inbox stays **parked** (job threads + handoff only).
 

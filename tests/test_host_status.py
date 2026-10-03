@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
+import pytest
+
+from agent_discord import __version__
 from agent_discord.discord.facade import DiscordFacade
 from agent_discord.discord.providers.fake import FakeDiscordMCPProvider
-from agent_discord.host.dashboard import build_status_snapshot
 from agent_discord.host.service import write_host_meta
 from agent_discord.host.status import (
     DIGEST_MIN_CHECK_INTERVAL_S,
@@ -20,6 +23,7 @@ from agent_discord.host.status import (
     POWER_OK,
     TERMINAL_JOB_STATUSES,
     HostDigest,
+    build_status_snapshot,
     compute_host_digest,
     digest_signature,
     format_status_digest,
@@ -162,6 +166,73 @@ def test_cli_exposes_doctor_notify() -> None:
     assert args.notify is True
 
 
+def test_cli_has_no_dashboard_verb() -> None:
+    """The loopback companion web page is gone — no verb, no alias."""
+
+    from agent_discord.cli import build_parser
+
+    parser = build_parser()
+    assert "dashboard" not in parser.format_help().lower()
+    for argv in (["dashboard", "--once"], ["host", "dashboard", "--once"]):
+        with pytest.raises(SystemExit):
+            parser.parse_args(argv)
+
+
+# --- snapshot ---------------------------------------------------------------
+
+
+def test_snapshot_shape_and_allowlist_no_secrets(tmp_path: Path, monkeypatch) -> None:
+    ws = _ws(tmp_path, monkeypatch)
+    store = SQLiteStore(ws / "agent_discord.sqlite3")
+    store.initialize()
+    store.set_host_control("chan-1", armed=True)
+    store.create_task(
+        task_id="t1",
+        workspace_id="default",
+        channel_id="chan-1",
+        intake_text="planted password=supersecret and token=leakme",
+    )
+    store.create_run(run_id="r1", task_id="t1", model="fake", adapter_name="fake")
+    write_host_meta(ws, pid=1, channel_id="chan-1")
+    monkeypatch.setenv(
+        "DISCORD_OS_HOSTS",
+        json.dumps(
+            [
+                {
+                    "id": "lab",
+                    "label": "Lab Mac",
+                    "ssh": "cary@lab.local",
+                    "workdir": "/Users/cary/secret-path",
+                }
+            ]
+        ),
+    )
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-planted-should-not-appear")
+    snap = build_status_snapshot(workspace=ws, store=store, env=dict(os.environ))
+    store.close()
+    assert snap["version"] == __version__
+    assert snap["readonly"] is True
+    # The dashboard page owned these; nothing reads them now.
+    assert "doctor" not in snap
+    assert "liveness" not in snap
+    assert snap["host"]["channel_id"] == "chan-1"
+    assert snap["host"]["armed"] is True
+    assert "spend_usd" in snap["spend"]
+    assert isinstance(snap["jobs"], list)
+    assert snap["hosts"] == [{"id": "lab", "label": "Lab Mac", "kind": "ssh"}]
+    blob = json.dumps(snap)
+    for planted in (
+        "cary@lab.local",
+        "secret-path",
+        "sk-planted",
+        "test-token-should-not-leak",
+        "supersecret",
+        "leakme",
+        "target",
+    ):
+        assert planted not in blob
+
+
 # --- status digest ----------------------------------------------------------
 
 
@@ -182,12 +253,7 @@ def test_format_reuses_snapshot_fields_no_secrets(tmp_path: Path, monkeypatch) -
         "DISCORD_OS_HOSTS",
         '[{"id":"lab","label":"Lab","ssh":"cary@lab.local"}]',
     )
-    snap = build_status_snapshot(
-        workspace=ws,
-        store=store,
-        include_doctor=False,
-        env=dict(os.environ),
-    )
+    snap = build_status_snapshot(workspace=ws, store=store, env=dict(os.environ))
     body = format_status_digest(snap)
     assert "Discord OS status" in body
     assert "power on" in body
