@@ -622,6 +622,66 @@ def test_poll_opens_the_modal_as_the_only_response(tmp_path: Path):
     store.close()
 
 
+def test_jobs_pick_answers_ephemerally_without_a_channel_post(tmp_path: Path):
+    """Audit 2026-10-02 G1-10: each pick posted a second copy of the job card."""
+
+    store = SQLiteStore(tmp_path / "pick.sqlite3")
+    store.initialize()
+    store.set_host_control("ch", armed=True)
+    store.add_operator("owner-7", role="owner")
+    store.create_task(
+        task_id="t-1",
+        workspace_id="ws",
+        channel_id="ch",
+        thread_id="thread-1",
+        intake_text="ship the fix",
+    )
+    store.create_run(
+        run_id="run-1",
+        task_id="t-1",
+        model="openrouter/auto",
+        adapter_name="openrouter/auto",
+        status=TaskStatus.COMPLETED,
+    )
+    store.update_run("run-1", status=TaskStatus.COMPLETED, summary="Done. Fix shipped.")
+    calls: list[tuple[str, dict]] = []
+
+    def opener(request, timeout=10):
+        body = {}
+        if getattr(request, "data", None):
+            body = json.loads(request.data.decode("utf-8"))
+        calls.append((str(request.full_url), body))
+        return _FakeResponse(b"{}")
+
+    action = handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix",
+            "token": "tok",
+            "application_id": "app-1",
+            "guild_id": "guild-1",
+            "user": {"id": "owner-7"},
+            "data": {"custom_id": JOBS_ID, "values": ["run-1"]},
+            "message": {"id": "panel-1"},
+        },
+        token="bot-token",
+        opener=opener,
+    )
+    assert action == "job"
+    assert len(calls) == 1
+    url, body = calls[0]
+    assert "/interactions/ix/tok/callback" in url
+    assert not any("/channels/ch/messages" in u for u, _ in calls)
+    assert body["type"] == 4
+    assert body["data"]["flags"] == 64
+    content = body["data"]["content"]
+    assert "run-1" in content or "Last:" in content
+    assert "channels/guild-1/thread-1" in content
+    store.close()
+
+
 def test_panel_last_job_names_need_live_or_last(tmp_path: Path):
     store = SQLiteStore(tmp_path / "focus.sqlite3")
     store.initialize()

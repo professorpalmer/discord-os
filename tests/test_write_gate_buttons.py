@@ -10,7 +10,7 @@ from agent_discord.discord.providers.fake import FakeDiscordMCPProvider
 from agent_discord.host.actions import job_action_from_custom_id, job_custom_id
 from agent_discord.host.panel import (
     JOBS_ID,
-    _publish_job_card,
+    _answer_job_pick,
     handle_gateway_interaction,
 )
 from agent_discord.orchestration.cards import job_action_row, receipt_card, working_card
@@ -198,7 +198,7 @@ def test_continue_uses_ask_prompt_when_provided(tmp_path: Path):
     store.close()
 
 
-def test_publish_job_card_idle_includes_continue(tmp_path: Path):
+def test_job_pick_answers_ephemerally_with_continue(tmp_path: Path):
     store = SQLiteStore(tmp_path / "panel.sqlite3")
     store.initialize()
     store.create_task(
@@ -241,24 +241,24 @@ def test_publish_job_card_idle_includes_continue(tmp_path: Path):
         return _Resp()
 
     payload = {
+        "id": "ix-1",
         "application_id": "app",
         "token": "ix",
+        "guild_id": "999",
         "data": {"custom_id": JOBS_ID, "values": ["run-idle"]},
     }
-    _publish_job_card(
-        store,
-        "ch",
-        payload,
-        token="bot-token",
-        opener=opener,
-    )
-    assert sent
+    _answer_job_pick(store, payload, opener=opener)
+    assert len(sent) == 1
+    # Audit 2026-10-02 G1-10: the pick is an ephemeral answer, not a channel post.
+    assert "/interactions/ix-1/ix/callback" in str(sent[-1].get("url") or "")
     blob = str(sent[-1].get("body") or "")
     assert ("discord-os:job:continue:run-idle" in blob) or (
         "dos:continue:" in blob and "run-idle" in blob
     )
-    pending = store.get_preference("_host", "pending_continue:ch")
-    assert pending == "run-idle"
+    assert '"flags": 64' in blob or '"flags":64' in blob
+    assert "thread-idle" in blob
+    # Audit 2026-10-02 G1-15: viewing a job must not arm the next HOST Ask.
+    assert not store.get_preference("_host", "pending_continue:ch")
     store.close()
 
 

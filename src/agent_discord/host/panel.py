@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Callable, Mapping, Optional
 
@@ -1146,6 +1147,13 @@ def handle_gateway_interaction(
         # A modal must be the first and only response to this interaction.
         _ack_interaction(payload, poll_modal_payload(), opener=opener)
         return action
+    if action == "job":
+        # Ephemeral read-only answer: the one live card stays in the job thread.
+        try:
+            _answer_job_pick(store, payload, opener=opener)
+        except Exception as exc:
+            print(f"panel job pick failed: {exc}", flush=True)
+        return action
     _ack_interaction(payload, {"type": CALLBACK_DEFERRED_UPDATE}, opener=opener)
     if action == "halt":
         toggle_spend_halted(store)
@@ -1162,13 +1170,6 @@ def handle_gateway_interaction(
                 runner=host_runner,
                 browser_open=browser_open,
             )
-    if action == "job":
-        try:
-            _publish_job_card(store, channel_id, payload, token=token, opener=opener)
-        except Exception as exc:
-            print(f"panel job card failed: {exc}", flush=True)
-        return action
-
     if action == "clear-needs":
         matched = _count_dismissable_needs(store, channel_id)
         if matched <= 0:
@@ -2154,35 +2155,55 @@ def _paint_host_panel(
     )
 
 
-def _publish_job_card(
+def _answer_job_pick(
     store: Any,
-    channel_id: str,
     payload: Mapping[str, Any],
     *,
-    token: str,
     opener: Any,
 ) -> None:
-    run_id = selected_job_id(payload)
-    if not run_id or not token.strip():
-        return
-    getter = getattr(store, "get_run", None)
-    if not callable(getter):
-        return
-    run = getter(run_id)
-    if not isinstance(run, dict):
-        return
-    from agent_discord.contracts import RunReceipt, TaskStatus
-    from agent_discord.discord.rest import send_channel_message
-    from agent_discord.orchestration.cards import receipt_card
-    from agent_discord.orchestration.job_briefing import briefing_line
-    from agent_discord.orchestration.reactive import reactive_for_job
+    """Answer a HOST Jobs pick ephemerally.
 
-    status_raw = str(run.get("status") or "completed")
-    try:
-        status = TaskStatus(status_raw)
-    except ValueError:
-        status = TaskStatus.COMPLETED
-    task = {}
+    One live card per job: that card lives in the job thread. A pick here is a
+    read, so it never posts a second copy into the HOST channel.
+    """
+
+    run_id = selected_job_id(payload)
+    if not run_id:
+        return
+    content, rows = _job_pick_summary(
+        store, run_id, guild_id=str(payload.get("guild_id") or "")
+    )
+    data: dict[str, Any] = {
+        "content": content[:2000],
+        "flags": FLAG_EPHEMERAL,
+    }
+    if rows:
+        data["components"] = rows
+    _ack_interaction(
+        payload,
+        {"type": CALLBACK_MESSAGE, "data": data},
+        opener=opener,
+    )
+
+
+def _job_pick_summary(
+    store: Any,
+    run_id: str,
+    *,
+    guild_id: str = "",
+) -> tuple[str, list[dict[str, Any]]]:
+    """Spoken job summary + the same job buttons the thread card carries."""
+
+    getter = getattr(store, "get_run", None)
+    run = None
+    if callable(getter):
+        try:
+            run = getter(run_id)
+        except Exception:
+            run = None
+    if not isinstance(run, dict):
+        return f"Job `{run_id}` is not in this host's SQLite.", []
+    task: Mapping[str, Any] = {}
     task_getter = getattr(store, "get_task", None)
     task_id = str(run.get("task_id") or "")
     if callable(task_getter) and task_id:
@@ -2190,70 +2211,53 @@ def _publish_job_card(
             task = task_getter(task_id) or {}
         except Exception:
             task = {}
+    code = str(task.get("job_code") or "")
+    status = str(run.get("status") or "")
     job_row = {
         "run_id": run_id,
-        "status": status.value,
+        "status": status,
         "summary": str(run.get("summary") or ""),
         "intake_text": str(task.get("intake_text") or ""),
-        "job_code": str(task.get("job_code") or ""),
+        "job_code": code,
         "thread_id": str(task.get("thread_id") or ""),
     }
-    summary = str(run.get("summary") or "No summary.")
-    line = briefing_line(job_row)
-    if line and line not in summary:
-        summary = f"{line}\n{summary}"
-    paint = reactive_for_job(job_row)
-    code = str(task.get("job_code") or "")
-    card = receipt_card(
-        RunReceipt(
-            task_id=task_id,
-            run_id=run_id,
-            status=status,
-            summary=summary,
-            error=str(run.get("error") or "") or None,
-        ),
-        actions=paint.actions,
-        job_code=code,
-    )
-    # Align Section chrome + accent from the reactive seam.
-    from agent_discord.orchestration.cards import CardMessage
+    from agent_discord.orchestration.cards import job_action_row
+    from agent_discord.orchestration.job_briefing import briefing_line
+    from agent_discord.orchestration.reactive import reactive_for_job
 
-    card = CardMessage(
-        kind=card.kind,
-        title=card.title,
-        description=card.description,
-        color=paint.accent,
-        fields=card.fields,
-        percent=card.percent,
-        file_name=card.file_name,
-        file_data=card.file_data,
-        link_url=card.link_url,
-        updated_ts=card.updated_ts,
-        avatar_url=card.avatar_url,
-        rows=card.rows,
-        thinking=card.thinking,
-        chrome=paint.chrome,
-        job_code=code,
-    )
-    if paint.actions in {"idle", "failed", "failed_done"}:
+    lines = [briefing_line(job_row) or f"{status or 'unknown'} · {run_id}"]
+    lines.append(f"`{code or run_id}` · {status or 'unknown'}")
+    link = _job_card_link(task, guild_id=guild_id)
+    lines.append(link or "No job thread yet — this job has no card to open.")
+    summary = str(run.get("summary") or "").strip()
+    if summary:
+        lines.append(summary)
+    paint = reactive_for_job(job_row)
+    rows = [job_action_row(run_id, actions=paint.actions, job_code=code)]
+    return "\n".join(lines), rows
+
+
+def _job_card_link(task: Mapping[str, Any], *, guild_id: str = "") -> str:
+    """Jump link to the job thread's live card, else to the thread itself."""
+
+    thread_id = str(task.get("thread_id") or "").strip()
+    if not thread_id:
+        return ""
+    card_message_id = ""
+    raw = task.get("metadata_json")
+    if isinstance(raw, str) and raw.strip():
         try:
-            from agent_discord.orchestration.service import set_preference_safe
-        except Exception:
-            set_preference_safe = None
-        writer = getattr(store, "set_preference", None)
-        if callable(writer):
-            try:
-                writer("_host", f"pending_continue:{channel_id}", run_id)
-            except Exception:
-                pass
-    send_channel_message(
-        token=token,
-        channel_id=channel_id,
-        content="",
-        components=card.v2_payload()["components"],
-        flags=card.v2_payload()["flags"],
-        opener=opener,
-    )
+            meta = json.loads(raw)
+        except ValueError:
+            meta = {}
+        if isinstance(meta, dict):
+            card_message_id = str(meta.get("card_message_id") or "").strip()
+    guild = (guild_id or "").strip() or "@me"
+    if card_message_id:
+        from agent_discord.contracts import discord_jump_url
+
+        return discord_jump_url(guild, thread_id, card_message_id)
+    return f"https://discord.com/channels/{guild}/{thread_id}"
 
 
 def _handle_poll_modal(

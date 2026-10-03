@@ -179,6 +179,9 @@
 ### Preference poll form opens
 - More > Post preference poll opens its form as the only response. Before, it acknowledged the tap first, then tried to open the form as a second response, which Discord rejected.
 
+### HOST Jobs pick answers ephemerally
+- Picking a job from the HOST Jobs select shows an ephemeral summary with a link to the job's card, plus its buttons. Before, each pick posted another copy of the job card into the HOST channel.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
