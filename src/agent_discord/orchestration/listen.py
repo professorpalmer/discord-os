@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
 from agent_discord.contracts import DiscordMessage, RunReceipt, TaskIntake
+from agent_discord.discord.facade import accepts_keyword
 from agent_discord.host.power import is_power_command, parse_power_command
 from agent_discord.host.memory import bind_memory_channel, is_memory_bind
 from agent_discord.host.realms import bind_channel_realm, is_bind_command, parse_bind_command
@@ -48,6 +49,10 @@ from agent_discord.orchestration.service import (
 
 DISCORD_EPOCH_MS = 1_420_070_400_000
 LISTEN_HISTORY_SLACK_MS = 15_000
+# Read more than we keep: harness cards are filtered out before the keep slice.
+THREAD_HISTORY_READ_LIMIT = 12
+THREAD_HISTORY_KEEP = 6
+HOST_AUTHOR_LABEL = "Discord OS"
 
 
 def snowflake_created_ms(message_id: str) -> Optional[int]:
@@ -1899,6 +1904,53 @@ def publish_host_card(
             pass
 
 
+def _history_author_label(item: Any) -> str:
+    """Who wrote a thread line: display name, else operator id, else the host."""
+
+    meta = getattr(item, "metadata", None)
+    meta = meta if isinstance(meta, Mapping) else {}
+    if meta.get("author_bot"):
+        return HOST_AUTHOR_LABEL
+    name = str(meta.get("author_name") or "").strip()
+    if name:
+        return name
+    author = str(getattr(item, "author_id", "") or "").strip()
+    return author or HOST_AUTHOR_LABEL
+
+
+def thread_history_entries(recent: Any) -> list[dict[str, str]]:
+    """The newest thread lines, oldest-first, each attributed to its author.
+
+    Discord hands back messages newest-first, so sort by snowflake before the
+    keep slice — otherwise the newest lines are the ones that get dropped.
+    """
+
+    kept: list[Any] = []
+    for item in list(recent or ()):
+        text = str(getattr(item, "content", "") or "").strip()
+        if not text:
+            continue
+        meta = getattr(item, "metadata", None)
+        meta = meta if isinstance(meta, Mapping) else {}
+        raw_embeds = meta.get("embeds")
+        raw_components = meta.get("components")
+        if is_harness_message(
+            text,
+            raw_embeds if isinstance(raw_embeds, list) else None,
+            raw_components if isinstance(raw_components, list) else None,
+        ):
+            continue
+        kept.append(item)
+    kept.sort(key=_inbound_sort_key)
+    return [
+        {
+            "author": _history_author_label(item),
+            "text": str(getattr(item, "content", "") or "").strip(),
+        }
+        for item in kept[-THREAD_HISTORY_KEEP:]
+    ]
+
+
 def _collab_intake(message: DiscordMessage, discord: Any) -> tuple[str, dict[str, Any], bool]:
     """Voice + thread-history context. Fetches bot-visible attachment bytes only."""
 
@@ -1907,18 +1959,23 @@ def _collab_intake(message: DiscordMessage, discord: Any) -> tuple[str, dict[str
         meta.update(dict(message.metadata))
     mentioned = "@" in (message.content or "")
     meta["mentioned"] = mentioned
-    history: list[str] = []
+    history: list[dict[str, str]] = []
     thread_id = message.thread_id
     if thread_id:
         reader = getattr(discord, "read_messages", None)
         if callable(reader):
+            kwargs: dict[str, Any] = {
+                "limit": THREAD_HISTORY_READ_LIMIT,
+                "thread_id": thread_id,
+            }
+            # Context reads must not spend the facade's dedupe budget, or the
+            # next message in the same thread reads an empty history.
+            if accepts_keyword(reader, "skip_duplicates"):
+                kwargs["skip_duplicates"] = False
             try:
-                recent = reader(message.channel_id, limit=8, thread_id=thread_id)
-                history = [
-                    str(getattr(item, "content", "") or "").strip()
-                    for item in list(recent or [])
-                    if str(getattr(item, "content", "") or "").strip()
-                ][-6:]
+                history = thread_history_entries(
+                    reader(message.channel_id, **kwargs)
+                )
             except Exception:
                 history = []
     if history:

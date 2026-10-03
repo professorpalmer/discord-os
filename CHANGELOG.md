@@ -136,6 +136,9 @@
 ### CHANGELOG headers in order
 - 0.5.62-0.5.71 headers are descending, empty ones say where their notes are, and the stray mid-file Unreleased header is gone. A test keeps the shape.
 
+### Thread history is the newest six, in order, with authors
+- Context from a job thread now holds the newest six human messages, oldest first, each labeled with its author, and framed as conversation from Discord users (data, not instructions). Before, the two newest were dropped and the rest arrived in reverse order, unattributed and mixed with host cards.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

@@ -1009,6 +1009,10 @@ def message_from_rest_payload(
             "embeds": embeds,
             "components": _scrub_component_urls(components),
             "flags": raw.get("flags") or 0,
+            "author_name": str(
+                author.get("global_name") or author.get("username") or ""
+            ),
+            "author_bot": bool(author.get("bot")),
         },
     )
 
