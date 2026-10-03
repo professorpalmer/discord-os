@@ -1596,6 +1596,32 @@ class SQLiteStore:
         ).fetchall()
         return [_memory_row(r) for r in rows]
 
+    def list_memory_by_source(
+        self,
+        *,
+        workspace_id: str,
+        source: str,
+        since: str = "",
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Every entry of one source, newest first, across channels.
+
+        ``recall`` is per-channel and query-shaped. The capture digest needs
+        the week across every capture-first channel, so it reads by source.
+        """
+
+        sql = [
+            "SELECT * FROM memory_entries WHERE workspace_id=? AND source=?",
+        ]
+        params: list[Any] = [workspace_id, source]
+        if since:
+            sql.append("AND created_at >= ?")
+            params.append(since)
+        sql.append("ORDER BY created_at DESC, rowid DESC LIMIT ?")
+        params.append(int(limit))
+        rows = self._connection().execute(" ".join(sql), tuple(params)).fetchall()
+        return [_memory_row(r) for r in rows]
+
     # --- preferences / style / failure memory ---
 
     def set_preference(

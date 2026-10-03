@@ -1050,6 +1050,14 @@ def drain_inbound(
                 workspace_id=workspace_id,
                 env=env,
             )
+            # One capture card a week on the same channel, same hour.
+            _tick_capture_digest_best_effort(
+                discord,
+                store,
+                channel_id=channel_id,
+                workspace_id=workspace_id,
+                env=env,
+            )
         _tick_pm_inbox_best_effort(discord, store, env=env)
         _tick_host_liveness_best_effort(
             discord,
@@ -1466,6 +1474,30 @@ def _absorb_capture(
         guild_id=str(guild_id or ""),
     )
     acknowledge_capture(discord, channel_id, message.message_id or "")
+
+
+def _tick_capture_digest_best_effort(
+    discord: Any,
+    store: Any,
+    *,
+    channel_id: str,
+    workspace_id: str,
+    env: Optional[Mapping[str, str]],
+) -> None:
+    """One weekly capture card on the HOST channel. Silent when empty."""
+
+    try:
+        from agent_discord.orchestration.capture_digest import tick_capture_digest
+
+        tick_capture_digest(
+            store,
+            discord,
+            channel_id=channel_id,
+            workspace_id=workspace_id,
+            env=env,
+        )
+    except Exception:
+        pass
 
 
 def _tick_pm_inbox_best_effort(

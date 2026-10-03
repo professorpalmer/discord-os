@@ -153,7 +153,8 @@ listen on-change. Debounced. Never mutates power. See
 Short declarative messages become host memory instead of paid cooks. OFF by
 default. `discord-os add capture --channel-id ID` or
 `DISCORD_OS_CAPTURE_FIRST=1`. `do:` / `cook:` always cooks; job threads are
-never captured. See [capture.md](capture.md).
+never captured. One weekly digest card carries a **Cook this** button per
+capture. See [capture.md](capture.md).
 
 ## Morning summary
 
@@ -204,6 +205,7 @@ Not a product feature. Optional extra `discord-os[debug]`. Default **off.** `DIS
 - `src/agent_discord/host/webhook.py` — optional discord-webhook ops side-channel
 - `src/agent_discord/host/jishaku.py` — optional jishaku tip-debug gate (default off; owner only)
 - `src/agent_discord/orchestration/capture.py` — capture-first classifier and memory write (opt-in)
+- `src/agent_discord/orchestration/capture_digest.py` — weekly capture card
 - `src/agent_discord/host/power.py` — armed / pid
 - `src/agent_discord/host/runners.py` — multi-host allowlist (fail-closed)
 - `src/agent_discord/orchestration/service.py` — operators / REQUIRE_OPERATORS

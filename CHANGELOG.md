@@ -246,6 +246,9 @@
 ### Capture-first intake (opt-in)
 - With capture-first on for a channel (`discord-os add capture --channel-id ID` or `DISCORD_OS_CAPTURE_FIRST=1`), a short top-level message that is not an instruction is saved to memory, redacted and cited by message link, and acknowledged with a reaction. No card, no job, no spend. `do:` or `cook:` always cooks. Commands, imperatives, long messages, repo-status questions and job-thread replies cook as before.
 
+### Weekly capture digest
+- Once a week (default Monday at the morning hour, `DISCORD_OS_CAPTURE_DIGEST_DAY`), the HOST channel gets one card listing the week's captures, with a Cook this button on up to five. Operator-only, through JobPool. Silent when there were none.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
