@@ -1980,6 +1980,7 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                                 else ()
                             ),
                             job_pool=job_pool,
+                            host_channel_id=args.channel_id,
                         )
                     )
                 except Exception as exc:

@@ -148,6 +148,13 @@ the host channel (or `DISCORD_OS_STATUS_THREAD_ID`) on **On**, `/status`, and
 listen on-change. Debounced. Never mutates power. See
 [status.md](status.md).
 
+## Morning summary
+
+One HOST card per local day at 07:30 (`DISCORD_OS_MORNING_AT`), built from
+overnight settles, open Needs, and bound-repo PR/CI state. Silent when there
+is nothing to report. `DISCORD_OS_MORNING=0` disables. See
+[morning.md](morning.md).
+
 
 ## Other host verbs
 

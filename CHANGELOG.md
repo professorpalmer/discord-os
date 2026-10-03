@@ -237,6 +237,9 @@
 ### CI watcher with Fix CI
 - A red check on an open PR to main/dev, or a red default branch, on a bound realm's repo posts one card per failing commit with a Fix CI button. The button is operator-only and starts an implement job through JobPool and the write gate, not pre-approved. Default on. `DISCORD_OS_CI_WATCH=0` disables it.
 
+### Morning summary
+- Once a day (default 07:30 local, `DISCORD_OS_MORNING_AT=HH:MM`), an armed host posts one card with up to five work items: overnight results, open Needs, and red CI or PRs, with a Cook button per actionable line. Silent when there is nothing to report. `DISCORD_OS_MORNING=0` disables it.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

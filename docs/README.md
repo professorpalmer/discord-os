@@ -12,6 +12,7 @@ Surface README is first run plus this map. Feature pages live in their own folde
 | [recipes](recipes/README.md) | Versioned playbooks / skills cadence |
 | [co-work/overnight-brief](co-work/overnight-brief.md) | Schedule + Catch-up overnight brief |
 | [host](host/README.md) | On/Off/Ask, watchdogs, status digest, TTS, REQUIRE_OPERATORS, LaunchAgent |
+| [host/morning](host/morning.md) | One HOST card a day at 07:30, silent when empty |
 | [host/policy](host/policy.md) | **HARD locks** (SSH OPT-IN, forum tags, Path A, gateway, Update, voice, spend, desk, slash, CU PARKED) |
 | [realms](realms/README.md) | Channel = checkout |
 | [realms/repo-status](realms/repo-status.md) | "Open PRs on X?" answered from gh + git, no cook |

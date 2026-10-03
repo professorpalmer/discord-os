@@ -13,10 +13,12 @@ from agent_discord.orchestration.ci_watch import (
     CiFailure,
     ci_watch_enabled,
     collect_ci_failures,
-    fix_ci_custom_id,
     fix_ci_prompt,
-    parse_fix_ci_custom_id,
     tick_ci_watch,
+)
+from agent_discord.orchestration.cook_button import (
+    cook_custom_id,
+    parse_cook_custom_id,
 )
 from agent_discord.persistence.sqlite import SQLiteStore
 
@@ -111,7 +113,7 @@ def test_wake_is_posted_once_per_head_sha(tmp_path: Path):
     assert "CI red" in blob
     assert "PR #68" in blob
     assert "tests 3.11" in blob
-    assert fix_ci_custom_id("ws", "abc123def456") in blob
+    assert cook_custom_id("ws", "abc123def456") in blob
 
     # A new head SHA on the same PR is a new wake.
     third = tick_ci_watch(
@@ -198,7 +200,7 @@ def test_fix_ci_button_is_operator_only_and_lands_in_jobpool(tmp_path: Path):
         collector=lambda slug, *, path=None, env=None: (_failure(),),
         slug_reader=lambda path: (SLUG,),
     )
-    custom_id = fix_ci_custom_id("ws", "abc123def456")
+    custom_id = cook_custom_id("ws", "abc123def456")
     store.add_operator("owner-1", role="owner")
 
     asks: list[tuple[str, str]] = []
@@ -229,7 +231,7 @@ def test_fix_ci_button_is_operator_only_and_lands_in_jobpool(tmp_path: Path):
         },
         on_ask=lambda text, uid: asks.append((text, uid)),
     )
-    assert taken == "fix-ci"
+    assert taken == "cook"
     assert len(asks) == 1
     prompt, user_id = asks[0]
     assert user_id == "owner-1"
@@ -237,7 +239,7 @@ def test_fix_ci_button_is_operator_only_and_lands_in_jobpool(tmp_path: Path):
     store.close()
 
 
-def test_unknown_fix_ci_token_does_not_cook(tmp_path: Path):
+def test_unknown_cook_token_does_not_cook(tmp_path: Path):
     store = _store(tmp_path)
     asks: list[str] = []
     result = handle_gateway_interaction(
@@ -248,21 +250,21 @@ def test_unknown_fix_ci_token_does_not_cook(tmp_path: Path):
             "token": "tok",
             "channel_id": CHANNEL,
             "member": {"user": {"id": "anyone"}},
-            "data": {"custom_id": fix_ci_custom_id("ws", "deadbeef0000")},
+            "data": {"custom_id": cook_custom_id("ws", "deadbeef0000")},
         },
         on_ask=lambda text, uid: asks.append(text),
     )
-    assert result == "fix-ci-expired"
+    assert result == "cook-expired"
     assert asks == []
     store.close()
 
 
 def test_custom_id_round_trips():
-    action = parse_fix_ci_custom_id(fix_ci_custom_id("ws", "abc123def456"))
+    action = parse_cook_custom_id(cook_custom_id("ws", "abc123def456"))
     assert action is not None
     assert (action.workspace_id, action.token) == ("ws", "abc123def456")
-    assert parse_fix_ci_custom_id("discord-os:job:cancel:run-1") is None
-    assert parse_fix_ci_custom_id("") is None
+    assert parse_cook_custom_id("discord-os:job:cancel:run-1") is None
+    assert parse_cook_custom_id("") is None
 
 
 def test_collector_reads_canned_gh_json(tmp_path: Path):

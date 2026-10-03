@@ -488,6 +488,7 @@ def drain_inbound(
     host_runner: Optional[Any] = None,
     browser_open: Optional[Any] = None,
     job_pool: Optional[Any] = None,
+    host_channel_id: str = "",
 ) -> Sequence[RunReceipt]:
     """Read recent channel messages and dispatch each new human task once.
 
@@ -1015,6 +1016,16 @@ def drain_inbound(
             workspace_id=workspace_id,
             env=env,
         )
+        if str(host_channel_id or "").strip() == str(channel_id or "").strip():
+            # One summary a day on the HOST channel, not one per bound realm.
+            _tick_morning_summary_best_effort(
+                orchestrator,
+                discord,
+                store,
+                channel_id=channel_id,
+                workspace_id=workspace_id,
+                env=env,
+            )
         _tick_host_liveness_best_effort(
             discord,
             store,
@@ -1308,6 +1319,33 @@ def _tick_ci_watch_best_effort(
             repos=getattr(orchestrator, "host_repos", None) or (),
             env=env,
             collector=getattr(orchestrator, "ci_failure_collector", None),
+        )
+    except Exception:
+        pass
+
+
+def _tick_morning_summary_best_effort(
+    orchestrator: Any,
+    discord: Any,
+    store: Any,
+    *,
+    channel_id: str,
+    workspace_id: str,
+    env: Optional[Mapping[str, str]],
+) -> None:
+    """One HOST card per local day at the morning hour. Best-effort, silent."""
+
+    try:
+        from agent_discord.orchestration.morning import tick_morning_summary
+
+        tick_morning_summary(
+            store,
+            discord,
+            channel_id=channel_id,
+            workspace_id=workspace_id,
+            repos=getattr(orchestrator, "host_repos", None) or (),
+            env=env,
+            repo_status=getattr(orchestrator, "repo_status_collector", None),
         )
     except Exception:
         pass

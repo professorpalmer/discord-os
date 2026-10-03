@@ -851,6 +851,35 @@ class SQLiteStore:
         ).fetchone()
         return str(row["run_id"] or "") if row else ""
 
+    def count_settled_since(
+        self, *, hours: float = 16.0, channel_id: str = ""
+    ) -> dict[str, int]:
+        """Completed / failed latest runs whose task moved inside the window."""
+
+        window = f"-{max(0.0, float(hours))} hours"
+        channel = (channel_id or "").strip()
+        rows = self._connection().execute(
+            """
+            SELECT r.status AS run_status, t.status AS task_status
+            FROM tasks t
+            LEFT JOIN runs r ON r.run_id = (
+                SELECT run_id FROM runs
+                WHERE task_id = t.task_id
+                ORDER BY created_at DESC, run_id DESC
+                LIMIT 1
+            )
+            WHERE (? = '' OR t.channel_id=?)
+              AND t.updated_at >= datetime('now', ?)
+            """,
+            (channel, channel, window),
+        ).fetchall()
+        counts = {"completed": 0, "failed": 0}
+        for row in rows:
+            status = str(row["run_status"] or row["task_status"] or "").lower()
+            if status in counts:
+                counts[status] += 1
+        return counts
+
     def list_recent_jobs(
         self, channel_id: str, *, limit: int = 5
     ) -> list[dict[str, Any]]:

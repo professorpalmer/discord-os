@@ -923,11 +923,11 @@ def handle_gateway_interaction(
     custom_id = ""
     if isinstance(data, dict):
         custom_id = str(data.get("custom_id") or "")
-    fix_ci = _handle_fix_ci_click(
+    cooked = _handle_cook_click(
         store, payload, custom_id, opener=opener, on_ask=on_ask
     )
-    if fix_ci is not None:
-        return fix_ci
+    if cooked is not None:
+        return cooked
     confirm = ask_confirm_action_from_custom_id(custom_id)
     if confirm is not None:
         if not _operator_may_click(store, payload, "ask-confirm", opener=opener):
@@ -1417,7 +1417,7 @@ def _job_code_for_run(store: Any, run_id: str) -> str:
     return str(task.get("job_code") or "").strip()
 
 
-def _handle_fix_ci_click(
+def _handle_cook_click(
     store: Any,
     payload: Mapping[str, Any],
     custom_id: str,
@@ -1431,15 +1431,15 @@ def _handle_fix_ci_click(
     ask, so the write gate holds it exactly as it holds any other cook.
     """
 
-    from agent_discord.orchestration.ci_watch import (
-        parse_fix_ci_custom_id,
-        stored_fix_ci_prompt,
+    from agent_discord.orchestration.cook_button import (
+        parse_cook_custom_id,
+        stored_cook_prompt,
     )
 
-    action = parse_fix_ci_custom_id(custom_id)
+    action = parse_cook_custom_id(custom_id)
     if action is None:
         return None
-    if not _operator_may_click(store, payload, "fix-ci", opener=opener):
+    if not _operator_may_click(store, payload, "cook", opener=opener):
         return "denied"
     interaction_id, ix_token = interaction_ids(payload)
     if interaction_id and ix_token:
@@ -1454,15 +1454,15 @@ def _handle_fix_ci_click(
             )
         except Exception:
             pass
-    prompt = stored_fix_ci_prompt(store, action)
+    prompt = stored_cook_prompt(store, action)
     if not prompt:
-        return "fix-ci-expired"
+        return "cook-expired"
     if callable(on_ask):
         try:
             on_ask(prompt, interaction_user_id(payload))
         except Exception:
             pass
-    return "fix-ci"
+    return "cook"
 
 
 def _operator_may_click(

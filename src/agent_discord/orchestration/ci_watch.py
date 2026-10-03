@@ -22,14 +22,13 @@ from typing import Any, Callable, Mapping, Optional, Sequence
 
 from agent_discord.discord.layout import STYLE_DANGER, action_row, button
 from agent_discord.orchestration.cards import COLOR_FAIL, CardMessage, send_card
+from agent_discord.orchestration.cook_button import cook_custom_id, remember_cook_prompt
 from agent_discord.orchestration.github_wake import _check_label
 
-FIX_CI_ID_PREFIX = "discord-os:fix-ci:"
 CI_WATCH_ENV = "DISCORD_OS_CI_WATCH"
 WATCH_BASES = ("main", "dev")
 _FAIL_CONCLUSIONS = frozenset({"failure", "cancelled", "timed_out", "action_required"})
 _SHA_LEN = 12
-_PROMPT_KEY = "fix_ci"
 _MAX_CHECKS = 4
 
 
@@ -56,33 +55,10 @@ class CiFailure:
         return (self.head_sha or "")[:_SHA_LEN]
 
 
-@dataclass(frozen=True)
-class FixCiAction:
-    """Parsed Fix CI button intent. Carries no prompt of its own."""
-
-    workspace_id: str
-    token: str
-
-
 def ci_watch_enabled(*, env: Optional[Mapping[str, str]] = None) -> bool:
     source = os.environ if env is None else env
     raw = str(source.get(CI_WATCH_ENV) or "").strip().lower()
     return raw not in {"0", "off", "false", "no"}
-
-
-def fix_ci_custom_id(workspace_id: str, token: str) -> str:
-    space = (workspace_id or "default").strip()[:32] or "default"
-    return f"{FIX_CI_ID_PREFIX}{space}:{(token or '').strip()[:_SHA_LEN]}"
-
-
-def parse_fix_ci_custom_id(custom_id: str) -> Optional[FixCiAction]:
-    raw = (custom_id or "").strip()
-    if not raw.startswith(FIX_CI_ID_PREFIX):
-        return None
-    space, _, token = raw[len(FIX_CI_ID_PREFIX) :].partition(":")
-    if not space or not token:
-        return None
-    return FixCiAction(workspace_id=space, token=token)
 
 
 def fix_ci_prompt(failure: CiFailure) -> str:
@@ -130,7 +106,7 @@ def ci_wake_card(failure: CiFailure, *, workspace_id: str) -> CardMessage:
                 [
                     button(
                         "Fix CI",
-                        fix_ci_custom_id(workspace_id, failure.token),
+                        cook_custom_id(workspace_id, failure.token),
                         style=STYLE_DANGER,
                     )
                 ]
@@ -183,7 +159,9 @@ def tick_ci_watch(
                 continue
             if not _claim(store, failure, channel_id):
                 continue
-            _remember_prompt(store, workspace_id, failure)
+            remember_cook_prompt(
+                store, workspace_id, failure.token, fix_ci_prompt(failure)
+            )
             if _post(discord, channel_id, failure, workspace_id):
                 posted.append(
                     {
@@ -195,17 +173,6 @@ def tick_ci_watch(
                     }
                 )
     return posted
-
-
-def stored_fix_ci_prompt(store: Any, action: FixCiAction) -> str:
-    reader = getattr(store, "get_preference", None)
-    if not callable(reader):
-        return ""
-    try:
-        raw = reader(action.workspace_id, f"{_PROMPT_KEY}:{action.token}")
-    except Exception:
-        return ""
-    return str(raw or "").strip()
 
 
 def collect_ci_failures(
@@ -379,20 +346,6 @@ def _claim(store: Any, failure: CiFailure, channel_id: str) -> bool:
         return False
 
 
-def _remember_prompt(store: Any, workspace_id: str, failure: CiFailure) -> None:
-    writer = getattr(store, "set_preference", None)
-    if not callable(writer):
-        return
-    try:
-        writer(
-            workspace_id or "default",
-            f"{_PROMPT_KEY}:{failure.token}",
-            fix_ci_prompt(failure),
-        )
-    except Exception:
-        return
-
-
 def _post(discord: Any, channel_id: str, failure: CiFailure, workspace_id: str) -> bool:
     if discord is None:
         return False
@@ -432,14 +385,9 @@ def _gh_json(
 __all__ = [
     "CI_WATCH_ENV",
     "CiFailure",
-    "FIX_CI_ID_PREFIX",
-    "FixCiAction",
     "ci_wake_card",
     "ci_watch_enabled",
     "collect_ci_failures",
-    "fix_ci_custom_id",
     "fix_ci_prompt",
-    "parse_fix_ci_custom_id",
-    "stored_fix_ci_prompt",
     "tick_ci_watch",
 ]
