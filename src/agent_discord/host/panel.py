@@ -41,6 +41,9 @@ _PANEL_STALE_NEED_PREF = "jobs_panel_stale_need"
 _PANEL_STALE_NEED_SPOKEN = (
     "Need: HOST Jobs panel could not refresh. Tap On or open Jobs."
 )
+HOST_PREFS = "_host"
+PENDING_CONTINUE_PREF = "pending_continue"
+PENDING_CONTINUE_SPOKEN = "Next Ask continues this job."
 JOB_DENIED_SPOKEN = "Denied. Only paired operators can act on jobs."
 PANEL_DENIED_SPOKEN = "Denied. Only paired operators can use the HOST panel."
 MORE_ID = "discord-os:more"
@@ -307,7 +310,19 @@ def _job_select_options(jobs: list[dict[str, Any]] | tuple[dict[str, Any], ...])
 
 
 
-def ask_modal_payload() -> dict[str, Any]:
+def ask_modal_payload(*, continue_job: str = "") -> dict[str, Any]:
+    """HOST Ask form. Names the job when the next Ask continues one."""
+
+    job = (continue_job or "").strip()
+    if job:
+        return _text_modal_payload(
+            ASK_MODAL_ID,
+            "Ask Discord OS",
+            ASK_TEXT_ID,
+            f"Continues {job}"[:45],
+            f"This Ask continues {job}, not a new job."[:100],
+            max_length=4000,
+        )
     return _text_modal_payload(
         ASK_MODAL_ID,
         "Ask Discord OS",
@@ -959,6 +974,9 @@ def handle_gateway_interaction(
             except Exception:
                 pass
         rid = resolve_job_run_id(store, job) or job.run_id
+        if job.action == "continue":
+            # Explicit Continue is the only thing that may aim the next Ask.
+            set_pending_continue(store, channel_id, rid)
         if callable(on_job):
             try:
                 on_job(job.action, rid)
@@ -990,7 +1008,13 @@ def handle_gateway_interaction(
     if action is None:
         return None
     if action == "ask":
-        _ack_interaction(payload, ask_modal_payload(), opener=opener)
+        _ack_interaction(
+            payload,
+            ask_modal_payload(
+                continue_job=_pending_continue_label(store, channel_id)
+            ),
+            opener=opener,
+        )
         return action
     if action == "roles":
         # Roles stays modal (snowflake id). Not an ephemeral Pair/Gate-style menu.
@@ -1150,7 +1174,9 @@ def handle_gateway_interaction(
     if action == "job":
         # Ephemeral read-only answer: the one live card stays in the job thread.
         try:
-            _answer_job_pick(store, payload, opener=opener)
+            _answer_job_pick(
+                store, payload, opener=opener, channel_id=channel_id
+            )
         except Exception as exc:
             print(f"panel job pick failed: {exc}", flush=True)
         return action
@@ -1296,6 +1322,62 @@ def handle_gateway_interaction(
         print(f"panel paint failed: {exc}", flush=True)
     return action
 
+
+
+def pending_continue_run_id(store: Any, channel_id: str) -> str:
+    """Run the next HOST Ask in this channel continues, or "" for a new job.
+
+    Only an explicit Continue tap arms this. Reading a job never does — a
+    hidden continue mode is how an Ask silently landed on an old job.
+    """
+
+    reader = getattr(store, "get_preference", None)
+    if not callable(reader) or not (channel_id or "").strip():
+        return ""
+    try:
+        return str(reader(HOST_PREFS, _pending_continue_key(channel_id)) or "").strip()
+    except Exception:
+        return ""
+
+
+def set_pending_continue(store: Any, channel_id: str, run_id: str) -> None:
+    writer = getattr(store, "set_preference", None)
+    if not callable(writer) or not (channel_id or "").strip():
+        return
+    try:
+        writer(HOST_PREFS, _pending_continue_key(channel_id), str(run_id or "").strip())
+    except Exception:
+        return
+
+
+def clear_pending_continue(store: Any, channel_id: str) -> None:
+    set_pending_continue(store, channel_id, "")
+
+
+def _pending_continue_key(channel_id: str) -> str:
+    return f"{PENDING_CONTINUE_PREF}:{channel_id}"
+
+
+def _pending_continue_label(store: Any, channel_id: str) -> str:
+    """Job code (else short run id) of the armed continue. "" when none."""
+
+    run_id = pending_continue_run_id(store, channel_id)
+    if not run_id:
+        return ""
+    return _job_code_for_run(store, run_id) or run_id[:16]
+
+
+def _job_code_for_run(store: Any, run_id: str) -> str:
+    getter = getattr(store, "get_run", None)
+    task_getter = getattr(store, "get_task", None)
+    if not callable(getter) or not callable(task_getter):
+        return ""
+    try:
+        run = getter(run_id) or {}
+        task = task_getter(str(run.get("task_id") or "")) or {}
+    except Exception:
+        return ""
+    return str(task.get("job_code") or "").strip()
 
 
 def _operator_may_click(
@@ -2160,6 +2242,7 @@ def _answer_job_pick(
     payload: Mapping[str, Any],
     *,
     opener: Any,
+    channel_id: str = "",
 ) -> None:
     """Answer a HOST Jobs pick ephemerally.
 
@@ -2173,6 +2256,8 @@ def _answer_job_pick(
     content, rows = _job_pick_summary(
         store, run_id, guild_id=str(payload.get("guild_id") or "")
     )
+    if pending_continue_run_id(store, channel_id) == run_id:
+        content = f"{content}\n{PENDING_CONTINUE_SPOKEN}"
     data: dict[str, Any] = {
         "content": content[:2000],
         "flags": FLAG_EPHEMERAL,

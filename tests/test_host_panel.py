@@ -682,6 +682,131 @@ def test_jobs_pick_answers_ephemerally_without_a_channel_post(tmp_path: Path):
     store.close()
 
 
+def _continue_job_store(tmp_path: Path, name: str) -> SQLiteStore:
+    store = SQLiteStore(tmp_path / name)
+    store.initialize()
+    store.set_host_control("ch", armed=True)
+    store.add_operator("owner-7", role="owner")
+    store.create_task(
+        task_id="t-9",
+        workspace_id="ws",
+        channel_id="ch",
+        thread_id="thread-9",
+        intake_text="ship the fix",
+    )
+    store.create_run(
+        run_id="run-9",
+        task_id="t-9",
+        model="openrouter/auto",
+        adapter_name="openrouter/auto",
+        status=TaskStatus.COMPLETED,
+    )
+    store.update_run("run-9", status=TaskStatus.COMPLETED, summary="Done.")
+    return store
+
+
+def test_only_an_explicit_continue_arms_the_next_ask(tmp_path: Path):
+    """Audit 2026-10-02 G1-15: viewing a job armed a hidden continue mode."""
+
+    from agent_discord.host.actions import job_custom_id
+    from agent_discord.host.panel import pending_continue_run_id
+
+    store = _continue_job_store(tmp_path, "continue.sqlite3")
+
+    def opener(request, timeout=10):
+        return _FakeResponse(b"{}")
+
+    viewed = handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix-view",
+            "token": "tok",
+            "application_id": "app-1",
+            "user": {"id": "owner-7"},
+            "data": {"custom_id": JOBS_ID, "values": ["run-9"]},
+        },
+        token="bot-token",
+        opener=opener,
+    )
+    assert viewed == "job"
+    assert pending_continue_run_id(store, "ch") == ""
+
+    tapped = handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix-cont",
+            "token": "tok",
+            "application_id": "app-1",
+            "user": {"id": "owner-7"},
+            "data": {"custom_id": job_custom_id("continue", "run-9")},
+        },
+        token="bot-token",
+        opener=opener,
+        on_job=lambda a, r: None,
+    )
+    assert tapped == "continue"
+    assert pending_continue_run_id(store, "ch") == "run-9"
+    store.close()
+
+
+def test_armed_continue_is_named_on_the_ask_modal_and_the_pick(tmp_path: Path):
+    """Audit 2026-10-02 G1-15: an armed continue must never be invisible."""
+
+    from agent_discord.host.panel import (
+        PENDING_CONTINUE_SPOKEN,
+        set_pending_continue,
+    )
+
+    store = _continue_job_store(tmp_path, "named.sqlite3")
+    set_pending_continue(store, "ch", "run-9")
+    bodies: list[dict] = []
+
+    def opener(request, timeout=10):
+        if getattr(request, "data", None):
+            bodies.append(json.loads(request.data.decode("utf-8")))
+        return _FakeResponse(b"{}")
+
+    handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix-ask",
+            "token": "tok",
+            "application_id": "app-1",
+            "user": {"id": "owner-7"},
+            "data": {"custom_id": ASK_ID},
+        },
+        token="bot-token",
+        opener=opener,
+    )
+    modal = json.dumps(bodies[-1])
+    assert bodies[-1]["type"] == 9
+    assert store.task_job_code("t-9") in modal
+    assert "continues" in modal.lower()
+
+    handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix-pick",
+            "token": "tok",
+            "application_id": "app-1",
+            "user": {"id": "owner-7"},
+            "data": {"custom_id": JOBS_ID, "values": ["run-9"]},
+        },
+        token="bot-token",
+        opener=opener,
+    )
+    assert PENDING_CONTINUE_SPOKEN in bodies[-1]["data"]["content"]
+    store.close()
+
+
 def test_panel_last_job_names_need_live_or_last(tmp_path: Path):
     store = SQLiteStore(tmp_path / "focus.sqlite3")
     store.initialize()

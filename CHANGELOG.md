@@ -182,6 +182,9 @@
 ### HOST Jobs pick answers ephemerally
 - Picking a job from the HOST Jobs select shows an ephemeral summary with a link to the job's card, plus its buttons. Before, each pick posted another copy of the job card into the HOST channel.
 
+### Only Continue arms a continue
+- Viewing a failed or idle job no longer makes the next HOST Ask continue it. Only the Continue button does, and the Ask form names the job it will continue.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

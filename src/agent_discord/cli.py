@@ -2161,18 +2161,14 @@ def _start_panel_gateway(
             prompt = (text or "").strip()
             if not prompt:
                 return
-            pending = ""
-            try:
-                pending = str(
-                    store.get_preference("_host", f"pending_continue:{ask_channel}") or ""
-                ).strip()
-            except Exception:
-                pending = ""
+            from agent_discord.host.panel import (
+                clear_pending_continue,
+                pending_continue_run_id,
+            )
+
+            pending = pending_continue_run_id(store, ask_channel)
             if pending and orch is not None:
-                try:
-                    store.set_preference("_host", f"pending_continue:{ask_channel}", "")
-                except Exception:
-                    pass
+                clear_pending_continue(store, ask_channel)
                 try:
                     orch.apply_job_action("continue", pending, prompt=prompt)
                     return
