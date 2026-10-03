@@ -68,6 +68,7 @@ discord-os interactions --register
 | Slash | Same as text | Notes |
 |---|---|---|
 | `/bind` | `bind` / `/bind` | Optional `name` with **autocomplete** (realms, `memory`, `host <id>`) |
+| `/ask` | HOST Ask modal | Required `prompt`; optional `realm` with **autocomplete**. Dispatch rule + `requester_id` match the modal. Ephemeral `On it.` receipt |
 | `/job` | (read-only) | Required `code` with **DOS-*** autocomplete; richer ephemeral (task/run/intake/settle/dest) |
 | `/clear-needs` | HOST More / `jobs clear-needs --failed` | Requires `failed=True` (fail-closed); optional `dry_run` |
 | `/status` | `/status` | Read-only digest; never mutates power |
@@ -89,7 +90,12 @@ phone on the old command set until the next successful heal.
 Discord type-4 focus events return up to 25 choices:
 
 - `/bind name` — host repos + aliases, `memory`, allowlisted `host <id>`
+- `/ask realm` — same source as `/bind name`
 - `/job code` — recent `DOS-*` codes from workspace SQLite (channel-scoped when known)
+
+`/ask` needs the listen host: the enqueue hook is the listen process's ask
+queue, so a bare `discord-os interactions --serve` answers with an honest
+"needs the listen host queue" instead of pretending to cook.
 
 Self-heal (or `discord-os interactions --register`) after upgrading so Discord
 sees `autocomplete: true` on those options.

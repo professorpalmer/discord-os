@@ -2138,12 +2138,25 @@ def _start_panel_gateway(
         if workspace is not None and int(payload.get("type") or 0) in {2, 4}:
             from agent_discord.discord.interactions import route_gateway_interaction
 
+            def on_slash_ask(target: str, text: str, requester_id: str):
+                prompt = (text or "").strip()
+                if not prompt:
+                    return None
+                if target and target != ask_channel:
+                    if asks is not None:
+                        asks.put((target, prompt, "", requester_id))
+                    return None
+                # Same channel as the panel: keep the Continue aiming rule.
+                on_ask_here(prompt, requester_id)
+                return None
+
             try:
                 label = route_gateway_interaction(
                     payload,
                     workspace=workspace,
                     roots=list(host_roots),
                     interactions=interactions,
+                    on_ask=on_slash_ask,
                 )
             except Exception as exc:  # noqa: BLE001 — listen must keep running
                 print(f"slash route failed: {exc}", flush=True)

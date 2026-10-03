@@ -219,6 +219,9 @@
 ### Slash commands over the Gateway
 - `AGENT_DISCORD_INTERACTIONS=gateway` routes slash commands and autocomplete through the existing Gateway. No public HTTPS endpoint or `DISCORD_PUBLIC_KEY` needed. Still one Gateway (HARD lock 4). Default stays `off`. Gateway mode counts as exposed, so the operator allowlist is required like `http`.
 
+### /ask
+- `/ask prompt [realm]` starts a job like the HOST Ask modal: dispatch check, requester recorded, realm autocomplete, and an ephemeral `On it.` receipt with the job code.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

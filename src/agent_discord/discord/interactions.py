@@ -135,6 +135,26 @@ STOP_COMMAND = {
     "description": "Disarm this channel (alias of /off)",
     "type": 1,
 }
+ASK_COMMAND = {
+    "name": "ask",
+    "description": "Start a cook here (same as the HOST Ask modal)",
+    "type": 1,
+    "options": [
+        {
+            "name": "prompt",
+            "description": "What to cook",
+            "type": 3,
+            "required": True,
+        },
+        {
+            "name": "realm",
+            "description": "Bound realm to cook in (default: this channel)",
+            "type": 3,
+            "required": False,
+            "autocomplete": True,
+        },
+    ],
+}
 CLEAR_NEEDS_COMMAND = {
     "name": "clear-needs",
     "description": "Dismiss failed Needs (same as HOST More / jobs clear-needs --failed)",
@@ -159,6 +179,7 @@ OPT_IN_COMMANDS = (
     CONNECT_COMMAND,
     OPEN_COMMAND,
     BIND_COMMAND,
+    ASK_COMMAND,
     JOB_COMMAND,
     STATUS_COMMAND,
     ON_COMMAND,
@@ -449,6 +470,7 @@ def handle_interaction_payload(
     env: Optional[Mapping[str, str]] = None,
     runner: Optional[Callable[..., object]] = None,
     browser_open: Optional[Callable[[str], object]] = None,
+    on_ask: Optional[Callable[[str, str, str], Optional[str]]] = None,
 ) -> dict[str, Any]:
     kind = int(payload.get("type") or 0)
     if kind == INTERACTION_PING:
@@ -489,6 +511,16 @@ def handle_interaction_payload(
             workspace=workspace,
             env=env,
         )
+    if name == "ask":
+        options = _option_map(data.get("options"))
+        return _handle_ask_slash(
+            payload,
+            prompt=str(options.get("prompt") or "").strip(),
+            realm=str(options.get("realm") or "").strip(),
+            workspace=workspace,
+            env=env,
+            on_ask=on_ask,
+        )
     if name == "job":
         options = _option_map(data.get("options"))
         return _handle_job_slash(
@@ -511,6 +543,7 @@ def route_gateway_interaction(
     opener: Optional[Callable[..., Any]] = None,
     runner: Optional[Callable[..., object]] = None,
     browser_open: Optional[Callable[[str], object]] = None,
+    on_ask: Optional[Callable[[str, str, str], Optional[str]]] = None,
 ) -> Optional[str]:
     """Answer a slash / autocomplete interaction that arrived on the Gateway.
 
@@ -537,6 +570,7 @@ def route_gateway_interaction(
         env=env,
         runner=runner,
         browser_open=browser_open,
+        on_ask=on_ask,
     )
     interaction_id = str(payload.get("id") or "").strip()
     interaction_token = str(payload.get("token") or "").strip()
@@ -673,7 +707,7 @@ def _option_map(raw: Any) -> dict[str, str]:
 # Every slash command except read-only /status changes host state or shows
 # job content, so it needs an operator.
 _OPERATOR_COMMANDS = frozenset(
-    {"connect", "open", "on", "off", "stop", "bind", "job", "clear-needs"}
+    {"connect", "open", "on", "off", "stop", "bind", "ask", "job", "clear-needs"}
 )
 
 
@@ -690,9 +724,7 @@ def _slash_author_may_operate(
     )
 
     user_id = _author_id(payload)
-    member = payload.get("member")
-    roles = member.get("roles") if isinstance(member, Mapping) else None
-    role_ids = [str(r) for r in roles or () if str(r).strip()]
+    role_ids = _role_ids(payload)
     store = None
     try:
         store = _open_store(workspace)
@@ -737,6 +769,12 @@ def _author_id(payload: Mapping[str, Any]) -> str:
     if isinstance(user, Mapping) and user.get("id"):
         return str(user.get("id")).strip()
     return ""
+
+
+def _role_ids(payload: Mapping[str, Any]) -> list[str]:
+    member = payload.get("member")
+    roles = member.get("roles") if isinstance(member, Mapping) else None
+    return [str(r) for r in roles or () if str(r).strip()]
 
 
 def _open_store(workspace: Path):
@@ -895,6 +933,77 @@ def _handle_bind_slash(
                 pass
 
 
+def _handle_ask_slash(
+    payload: Mapping[str, Any],
+    *,
+    prompt: str,
+    realm: str,
+    workspace: Path,
+    env: Optional[Mapping[str, str]] = None,
+    on_ask: Optional[Callable[[str, str, str], Optional[str]]] = None,
+) -> dict[str, Any]:
+    """Enqueue a cook the same way the HOST Ask modal does.
+
+    Dispatch rule, requester, and channel match the modal: starting a cook is
+    a dispatch, not a panel click, and the realm option only picks which bound
+    channel it lands in.
+    """
+
+    from agent_discord.host.realms import channel_for_realm
+    from agent_discord.host.repos import load_host_repos
+    from agent_discord.orchestration.service import author_may_dispatch
+
+    text = (prompt or "").strip()
+    if not text:
+        return _ephemeral("ask needs a prompt")
+    channel_id = _channel_id(payload)
+    user_id = _author_id(payload)
+    role_ids = _role_ids(payload)
+    store = None
+    try:
+        store = _open_store(workspace)
+        if realm:
+            repos = list(load_host_repos(env=env) if env is not None else load_host_repos())
+            bound = channel_for_realm(store, realm, repos=repos)
+            if not bound:
+                return _ephemeral(f"No channel bound to {realm}. Use /bind first.")
+            channel_id = bound
+        if not channel_id:
+            return _ephemeral("missing channel_id")
+        if not author_may_dispatch(store, user_id, role_ids=role_ids, env=env):
+            return _ephemeral("Denied: only paired operators can start a cook.")
+    except Exception as exc:  # noqa: BLE001 — ephemeral fail-closed
+        return _ephemeral(f"ask failed: {exc}")
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
+
+    if not callable(on_ask):
+        return _ephemeral(
+            "ask needs the listen host queue — run discord-os listen with "
+            "AGENT_DISCORD_INTERACTIONS=gateway"
+        )
+    try:
+        code = on_ask(channel_id, text, user_id)
+    except Exception as exc:  # noqa: BLE001
+        return _ephemeral(f"ask failed: {exc}")
+    return _ephemeral(_ask_receipt(channel_id, code))
+
+
+def _ask_receipt(channel_id: str, code: Optional[str] = None, link: str = "") -> str:
+    bits = ["On it."]
+    if code:
+        bits.append(str(code))
+    if link:
+        bits.append(link)
+    elif channel_id:
+        bits.append(f"<#{channel_id}>")
+    return " ".join(bits)
+
+
 def _handle_autocomplete(
     payload: Mapping[str, Any],
     *,
@@ -907,6 +1016,9 @@ def _handle_autocomplete(
     name = str(data.get("name") or "").lower()
     focused = _focused_option(data.get("options"))
     needle = str(focused.get("value") or "").strip().lower()
+    if name == "ask" and focused.get("name") == "realm":
+        choices = _bind_autocomplete_choices(needle, workspace=workspace, env=env)
+        return {"type": RESPONSE_AUTOCOMPLETE, "data": {"choices": choices}}
     if name == "bind" and focused.get("name") == "name":
         choices = _bind_autocomplete_choices(needle, workspace=workspace, env=env)
         return {"type": RESPONSE_AUTOCOMPLETE, "data": {"choices": choices}}
