@@ -60,6 +60,9 @@
 - Steers sent before the job id is known are retried on each stream event. Any still undelivered at the end are named on the Done card.
 - A cook backend with no steer support (for example Path A SSH) is an honest miss: listen queues the follow-up or says it could not steer.
 
+### Approve cooks in JobPool
+- Approve and Always on a parked write now submit the cook to the host JobPool (realm write lock, live slot, live-thread tracking). Before, the whole implement ran on the Gateway reader thread, which stalled heartbeat ACKs and bypassed the write lock.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

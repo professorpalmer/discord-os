@@ -315,3 +315,42 @@ def test_session_allow_helper_round_trip(tmp_path: Path):
     assert write_session_allows_writes(store, "th")
     assert not writes_need_approval_for(store, channel_id="ch", thread_id="th")
     store.close()
+
+
+def test_approve_cooks_in_jobpool_not_on_caller_thread(tmp_path: Path):
+    """Audit A3: a button click must not run the write on the Gateway thread."""
+
+    import threading
+
+    from agent_discord.orchestration.jobs import JobPool
+
+    orch, store, fake, backend = _orch(tmp_path)
+    pool = JobPool(max_live=2)
+    orch.job_pool = pool
+    set_write_gate(store, True)
+    parked = orch.run_task(
+        TaskIntake(
+            text="implement the pool path",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="ask-pool",
+        )
+    )
+    assert parked.status == TaskStatus.PENDING
+    cook_threads: list[int] = []
+    original = backend.dispatch
+
+    def dispatch(request):
+        cook_threads.append(threading.get_ident())
+        return original(request)
+
+    backend.dispatch = dispatch
+    if hasattr(backend, "stream"):
+        backend.stream = None
+    result = orch.apply_job_action("approve", parked.run_id)
+    assert result["status"] == "queued"
+    receipts = pool.wait()
+    assert len(receipts) == 1
+    assert receipts[0].status == TaskStatus.COMPLETED
+    assert cook_threads and cook_threads[0] != threading.get_ident()
+    store.close()

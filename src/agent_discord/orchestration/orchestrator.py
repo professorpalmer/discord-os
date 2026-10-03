@@ -442,6 +442,9 @@ class AgentOrchestrator:
         self.presence = presence
         # Injectable SSH runner for Path A remote cook tests (argv, *, timeout_seconds).
         self.ssh_exec = ssh_exec
+        # Live host JobPool. Approved writes cook there, never on the caller's
+        # thread (the Gateway reader, for button clicks).
+        self.job_pool: Any = None
         self._run_status: dict[str, TaskStatus] = {}
         self._checkpoints: dict[str, dict[str, Any]] = {}
         self._steer_lock = threading.Lock()
@@ -1852,6 +1855,13 @@ class AgentOrchestrator:
             pass
         if not intake.text.strip() or not intake.channel_id:
             return {"action": "approve", "run_id": run_id, "status": "missing"}
+        if self.job_pool is not None:
+            from agent_discord.orchestration.jobs import resolved_write_key
+
+            self.job_pool.submit(
+                self.run_task, intake, write_key=resolved_write_key(intake, self)
+            )
+            return {"action": "approve", "parked_run_id": run_id, "status": "queued"}
         receipt = self.run_task(intake)
         return {
             "action": "approve",

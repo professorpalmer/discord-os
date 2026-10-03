@@ -1743,6 +1743,7 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         repos=host_repos,
     )
     job_pool = JobPool(max_live=resolve_max_live())
+    orch.job_pool = job_pool
     try:
         try:
             from agent_discord.host.webhook import notify_host_start
