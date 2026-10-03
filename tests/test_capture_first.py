@@ -238,6 +238,25 @@ def test_do_prefix_cooks_the_stripped_text_on_a_capture_channel(tmp_path: Path):
     store.close()
 
 
+def test_add_capture_arms_the_channel_and_writes_the_env(tmp_path: Path):
+    from agent_discord.host.add import add_capture, list_added, read_dotenv
+
+    store = _store(tmp_path)
+    env_file = tmp_path / ".env"
+    payload = add_capture(
+        store,
+        channel_id=CHANNEL,
+        workspace_id="default",
+        env_file=env_file,
+    )
+    assert payload["kind"] == "capture"
+    assert read_dotenv(env_file)[CAPTURE_CHANNELS_ENV] == CHANNEL
+    assert capture_first_enabled(store, CHANNEL, env={})
+    listing = list_added(store, workspace_id="default", env_file=env_file)
+    assert listing["capture"] == [CHANNEL]
+    store.close()
+
+
 def test_capture_is_recallable_as_context(tmp_path: Path):
     store = _store(tmp_path)
     record_capture(
