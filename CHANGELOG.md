@@ -133,6 +133,9 @@
 - Tests that asserted wording in `docs/co-work` delivery logs or the CHANGELOG are gone. The exact-version pin is now a check that `__version__` matches `pyproject.toml`. A release no longer needs test edits.
 - One repo-wide test keeps the old internal name out of product text (src, product docs, READMEs) instead of nine per-doc checks.
 
+### CHANGELOG headers in order
+- 0.5.62-0.5.71 headers are descending, empty ones say where their notes are, and the stray mid-file Unreleased header is gone. A test keeps the shape.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
@@ -252,8 +255,6 @@ Wave 5 P2 stretch (board + brain lakes):
 
 Still parked: mailbox/IRC, multi-host DO lakes, CU/docker, phone companion, auto forum tags, second JobPool, multi-gateway, silent ssh.
 
-## Unreleased
-
 ## 0.5.75
 
 Wave 5 P1 — compact brain recall pack (`brain show`), progress ledger strip,
@@ -294,14 +295,6 @@ multi-host brain lakes / Durable Objects clones; CU/docker/mailbox parked.
 Docs: [board-catchup](docs/co-work/board-catchup.md), [brain-lake](docs/co-work/brain-lake.md).
 Tests: `tests/test_wave4_board_brain.py`.
 
-## 0.5.67
-
-## 0.5.68
-
-## 0.5.69
-
-## 0.5.70
-
 ## 0.5.71
 
 - README / PyPI: show the three phone screenshots side-by-side in one row (table), not stacked.
@@ -316,6 +309,22 @@ Wave 3 shareability polish (docs-first): overnight brief recipe (schedule +
 Catch-up honesty), versioned [recipes](docs/recipes/README.md) cadence index,
 shared-desk demo &lt;15 min (handoff + overnight brief), COMPARISON Wave 2 bump
 (cross-host RO + forum-tags lock). Mailbox/CU/auto-tags stay parked.
+
+## 0.5.70
+
+- No separate notes. These changes are listed under 0.5.71.
+
+## 0.5.69
+
+- No separate notes. These changes are listed under 0.5.71.
+
+## 0.5.68
+
+- No separate notes. These changes are listed under 0.5.71.
+
+## 0.5.67
+
+- No separate notes. These changes are listed under 0.5.71.
 
 ## 0.5.66
 
@@ -332,8 +341,6 @@ crhq.ai ranked notes under `docs/co-work/`.
 
 - Fix `UnboundLocalError` on `resolved_write_key` in listen (handoff branch local import shadowed the module binding) — restores JobPool dispatch / CI greens from 0.5.62+.
 
-## 0.5.62
-
 ## 0.5.63
 
 - Refresh README / cards screenshots from current phone UI (HOST More, parallel job threads, Done card).
@@ -343,6 +350,9 @@ Co-work P1: JobPool-only `handoff`/`peer` tasks, operator/lane fields on receipt
 cards, `discord-os add desk-pack`, `schedule --list` (+ `schedule --every`).
 Docs under `docs/co-work/`.
 
+## 0.5.62
+
+- No separate notes. These changes are listed under 0.5.63.
 
 ## 0.5.61
 
