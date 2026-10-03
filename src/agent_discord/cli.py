@@ -2180,13 +2180,20 @@ def _start_panel_gateway(
         )
 
     def loop() -> None:
-        from agent_discord.discord.realtime import GatewayClosed, run_discord_gateway
+        from agent_discord.discord.realtime import (
+            GatewayClosed,
+            GatewaySession,
+            gateway_backoff_delay,
+            run_discord_gateway,
+        )
 
         armed = False
         try:
             armed = bool(store.host_is_armed(channel_id))
         except Exception:
             armed = False
+        session = GatewaySession()
+        attempt = 0
         while not stop.is_set():
             try:
                 run_discord_gateway(
@@ -2196,6 +2203,7 @@ def _start_panel_gateway(
                     on_connected=on_connected,
                     presence_status="dnd" if armed else "idle",
                     presence_name="the harness" if armed else "Discord OS",
+                    session=session,
                 )
             except GatewayClosed as exc:
                 print(f"panel gateway closed: {exc}", flush=True)
@@ -2208,12 +2216,22 @@ def _start_panel_gateway(
                         pass
                     discord_down.set()
                     return
-                time.sleep(0.4)
             except Exception as exc:
                 print(f"panel gateway error: {exc}", flush=True)
-                time.sleep(1.0)
             else:
                 return
+            # A session that reached READY earns a fresh backoff ladder;
+            # offline/DNS-failing retries keep climbing to the cap instead of
+            # writing thousands of lookup-failed lines an hour.
+            if session.consume_ready():
+                attempt = 0
+            attempt += 1
+            delay = gateway_backoff_delay(attempt)
+            print(
+                f"panel gateway retry in {delay:.1f}s (attempt {attempt})",
+                flush=True,
+            )
+            stop.wait(delay)
 
     threading.Thread(target=loop, name="discord-os-panel", daemon=True).start()
 

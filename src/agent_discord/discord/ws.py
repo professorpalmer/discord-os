@@ -13,7 +13,16 @@ from urllib.parse import urlparse
 
 
 class WebSocketError(RuntimeError):
-    """Handshake or framing failed."""
+    """Handshake or framing failed.
+
+    ``close_code`` carries the peer's RFC 6455 close code when the peer sent a
+    close frame. Discord's reconnect policy is keyed on that code, so dropping
+    it turns a fatal 4004 and a resumable 4000 into the same event.
+    """
+
+    def __init__(self, message: str, *, close_code: Optional[int] = None) -> None:
+        super().__init__(message)
+        self.close_code = close_code
 
 
 def encode_frame(payload: bytes, *, opcode: int = 1) -> bytes:
@@ -68,6 +77,19 @@ def decode_frame(buffer: bytearray) -> Optional[tuple[int, bytes]]:
         payload = bytes(buffer[index : index + length])
     del buffer[: index + length]
     return opcode, payload
+
+
+def _closed_error(payload: bytes) -> WebSocketError:
+    """Build the close error, keeping the peer's close code and reason."""
+
+    if len(payload) < 2:
+        return WebSocketError("websocket closed")
+    code = int.from_bytes(payload[:2], "big")
+    reason = payload[2:].decode("utf-8", "replace").strip()
+    text = f"websocket closed code={code}"
+    if reason:
+        text = f"{text} {reason}"
+    return WebSocketError(text, close_code=code)
 
 
 class WebSocketClient:
@@ -157,7 +179,7 @@ class WebSocketClient:
                 continue
             opcode, payload = frame
             if opcode == 8:
-                raise WebSocketError("websocket closed")
+                raise _closed_error(payload)
             if opcode == 9:
                 self.send_pong(payload)
                 continue

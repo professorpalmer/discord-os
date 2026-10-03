@@ -104,6 +104,11 @@
 ### Gateway socket writes are serialized
 - The heartbeat thread and the main thread share one send lock, so frames no longer interleave (Discord closed with 4002).
 
+### Panel Gateway resumes and backs off
+- Reconnects use exponential backoff with full jitter (1 s base, 60 s cap), reset after READY, instead of a flat 0.4 s loop that flooded `host.log` while offline.
+- The gateway RESUMEs (op 6) with session id, sequence and `resume_gateway_url`, honors op 7 Reconnect, and treats op 9 as resumable or a fresh IDENTIFY per its payload. Before, op 9 disarmed the host and exited.
+- Close codes surface. Only 4004 and 4010-4014 are fatal. 4007/4009 re-identify.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import random
 import threading
 import time
+from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 from urllib.request import Request, urlopen
 
@@ -19,15 +21,106 @@ PresenceSender = Callable[[str, str], None]
 JsonSocket = Any
 
 INTENTS_GUILDS = 1
-FATAL_CLOSE_CODES = frozenset({4004, 4010, 4011, 4013, 4014})
+# Nothing a reconnect can fix: bad token, bad intents, bad shard/API version.
+FATAL_CLOSE_CODES = frozenset({4004, 4010, 4011, 4012, 4013, 4014})
+# Reconnectable, but the session is gone — re-IDENTIFY instead of RESUME.
+REIDENTIFY_CLOSE_CODES = frozenset({4007, 4009})
+
+# Reconnect pacing. Full jitter so a fleet of hosts does not sync up, and a
+# floor so an offline Mac cannot spin on fast-failing DNS.
+BACKOFF_BASE_S = 1.0
+BACKOFF_CAP_S = 60.0
+BACKOFF_FLOOR_S = 0.25
+# op 9 Invalid Session: Discord asks for a 1-5s pause before re-auth.
+INVALID_SESSION_MIN_S = 1.0
+INVALID_SESSION_MAX_S = 5.0
 
 
 class GatewayClosed(RuntimeError):
     """Gateway session ended. Fatal closes should stop work."""
 
-    def __init__(self, reason: str, *, fatal: bool = False) -> None:
+    def __init__(
+        self,
+        reason: str,
+        *,
+        fatal: bool = False,
+        close_code: Optional[int] = None,
+    ) -> None:
         super().__init__(reason)
         self.fatal = fatal
+        self.close_code = close_code
+
+
+@dataclass
+class GatewaySession:
+    """RESUME state carried across reconnects by the panel loop.
+
+    One instance lives longer than one socket: ``run_discord_gateway`` fills
+    it from READY and reads it back on the next connect.
+    """
+
+    session_id: str = ""
+    seq: Optional[int] = None
+    resume_url: str = ""
+    _ready_seen: bool = field(default=False, repr=False)
+
+    def can_resume(self) -> bool:
+        return bool(self.session_id and self.seq is not None)
+
+    def note_ready(self, *, session_id: str, resume_url: str) -> None:
+        if session_id:
+            self.session_id = session_id
+        if resume_url:
+            self.resume_url = resume_url
+        self._ready_seen = True
+
+    def note_resumed(self) -> None:
+        self._ready_seen = True
+
+    def consume_ready(self) -> bool:
+        """True once per session that reached READY/RESUMED. Resets backoff."""
+
+        seen = self._ready_seen
+        self._ready_seen = False
+        return seen
+
+    def invalidate(self) -> None:
+        self.session_id = ""
+        self.seq = None
+        self.resume_url = ""
+
+
+def gateway_backoff_delay(
+    attempt: int,
+    *,
+    base_s: float = BACKOFF_BASE_S,
+    cap_s: float = BACKOFF_CAP_S,
+    rand: Optional[Callable[[], float]] = None,
+) -> float:
+    """Exponential backoff with full jitter. ``attempt`` is 1-based."""
+
+    steps = max(0, int(attempt) - 1)
+    ceiling = min(float(cap_s), float(base_s) * (2.0**steps))
+    draw = (rand or random.random)()
+    return max(BACKOFF_FLOOR_S, draw * ceiling)
+
+
+def close_code_is_fatal(close_code: Optional[int]) -> bool:
+    """Only the listed codes stop work. An unknown close reconnects."""
+
+    return close_code in FATAL_CLOSE_CODES
+
+
+def _invalid_session_delay() -> float:
+    return random.uniform(INVALID_SESSION_MIN_S, INVALID_SESSION_MAX_S)
+
+
+def _with_gateway_query(url: str) -> str:
+    text = str(url or "").strip()
+    if "encoding=" in text:
+        return text
+    sep = "&" if "?" in text else "?"
+    return f"{text}{sep}v=10&encoding=json"
 
 
 def fetch_gateway_url(*, opener: Optional[Callable[..., Any]] = None) -> str:
@@ -62,16 +155,26 @@ def run_discord_gateway(
     presence_name: str = "Discord OS",
     ack_stale_s: Optional[float] = None,
     ready_grace_s: Optional[float] = None,
+    session: Optional[GatewaySession] = None,
 ) -> None:
-    """Identify, heartbeat, and forward DISPATCH events until stop or fatal close.
+    """Identify or resume, heartbeat, and forward DISPATCH events.
+
+    Returns on ``stop``; otherwise raises ``GatewayClosed``. Only a fatal
+    close code means stop trying — everything else is the caller's cue to
+    reconnect with backoff, resuming when ``session`` still holds a session.
 
     Message intake stays on REST. This socket exists so On/Off buttons work
     without a public Interactions URL.
     """
 
     halt = stop or threading.Event()
+    state = session if session is not None else GatewaySession()
+    resuming = state.can_resume()
     try:
-        url = gateway_url or fetch_gateway_url()
+        if resuming and state.resume_url:
+            url = _with_gateway_query(state.resume_url)
+        else:
+            url = gateway_url or fetch_gateway_url()
         opener = connect or WebSocketClient.connect
         sock = opener(url)
     except GatewayClosed:
@@ -84,7 +187,7 @@ def run_discord_gateway(
         note_connected()
     except Exception:
         pass
-    seq: Optional[int] = None
+    seq: Optional[int] = state.seq
     beat_stop = threading.Event()
     beater: Optional[threading.Thread] = None
     send_lock = threading.Lock()
@@ -151,6 +254,7 @@ def run_discord_gateway(
             if message.get("s") is not None:
                 try:
                     seq = int(message["s"])
+                    state.seq = seq
                 except (TypeError, ValueError):
                     pass
             if op == 10:
@@ -175,6 +279,18 @@ def run_discord_gateway(
                         daemon=True,
                     )
                     beater.start()
+                if resuming:
+                    send(
+                        {
+                            "op": 6,
+                            "d": {
+                                "token": token,
+                                "session_id": state.session_id,
+                                "seq": state.seq,
+                            },
+                        }
+                    )
+                    continue
                 send(
                     {
                         "op": 2,
@@ -194,8 +310,22 @@ def run_discord_gateway(
                     }
                 )
                 continue
+            if op == 7:
+                # Discord asks us to move. Keep the session so we resume.
+                raise GatewayClosed("gateway asked for reconnect", fatal=False)
             if op == 9:
-                raise GatewayClosed("identify rejected", fatal=True)
+                resumable = data is True
+                if not resumable:
+                    state.invalidate()
+                reason = (
+                    "invalid session — resuming"
+                    if resumable
+                    else "invalid session — re-identifying"
+                )
+                print(f"panel gateway {reason}", flush=True)
+                # Discord requires a 1-5s pause before re-auth.
+                halt.wait(_invalid_session_delay())
+                raise GatewayClosed(reason, fatal=False)
             if op == 11:
                 try:
                     from agent_discord.discord.gateway_health import note_heartbeat_ack
@@ -207,8 +337,16 @@ def run_discord_gateway(
             if op == 0:
                 event = str(message.get("t") or "")
                 payload = data if isinstance(data, dict) else {}
-                if event == "READY":
-                    print("panel gateway ready", flush=True)
+                if event in {"READY", "RESUMED"}:
+                    if event == "READY":
+                        state.note_ready(
+                            session_id=str(payload.get("session_id") or ""),
+                            resume_url=str(payload.get("resume_gateway_url") or ""),
+                        )
+                        print("panel gateway ready", flush=True)
+                    else:
+                        state.note_resumed()
+                        print("panel gateway resumed", flush=True)
                     try:
                         from agent_discord.discord.gateway_health import note_ready
 
@@ -231,13 +369,17 @@ def run_discord_gateway(
                 except Exception as exc:
                     print(f"panel dispatch failed: {exc}", flush=True)
     except WebSocketError as exc:
+        close_code = getattr(exc, "close_code", None)
+        fatal = close_code_is_fatal(close_code)
+        if fatal or close_code in REIDENTIFY_CLOSE_CODES:
+            state.invalidate()
         try:
             from agent_discord.discord.gateway_health import note_closed
 
             note_closed(str(exc))
         except Exception:
             pass
-        raise GatewayClosed(str(exc), fatal=False) from exc
+        raise GatewayClosed(str(exc), fatal=fatal, close_code=close_code) from exc
     except (ConnectionResetError, BrokenPipeError, TimeoutError, OSError) as exc:
         try:
             from agent_discord.discord.gateway_health import note_closed
