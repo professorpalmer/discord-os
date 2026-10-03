@@ -22,6 +22,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import shlex
 import textwrap
 import time
@@ -90,13 +91,14 @@ def write_gate_blocks_ssh(*, store: Any = None) -> bool:
         return False
 
 
-def remote_gate_dir_for_run(run_id: str) -> str:
-    """Deterministic remote temp queue path for one Path A run."""
+# The remote wrapper makes its queue with mktemp -d (0700, unpredictable) and
+# reports the path back on every pending line. Writeback accepts only that shape.
+REMOTE_GATE_DIR_TEMPLATE = "/tmp/discord-os-ssh-gate.XXXXXXXX"
+_REMOTE_GATE_DIR_RE = re.compile(r"^/tmp/discord-os-ssh-gate\.[A-Za-z0-9]{8,}$")
 
-    text = (run_id or "").strip() or "unknown"
-    cleaned = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in text)
-    safe = (cleaned[:80] or "unknown")
-    return f"/tmp/discord-os-ssh-gate-{safe}"
+
+def is_remote_gate_dir(path: str) -> bool:
+    return bool(_REMOTE_GATE_DIR_RE.match((path or "").strip()))
 
 
 def bridge_control_path(
@@ -505,7 +507,6 @@ def wrap_remote_argv_with_ssh_gate_bridge(
     remote_argv: Sequence[str],
     *,
     run_id: str,
-    remote_gate_dir: str = "",
     timeout_seconds: float = 20 * 60,
 ) -> list[str]:
     """Wrap remote argv for live Discord Allow/Deny bridge across SSH.
@@ -516,20 +517,19 @@ def wrap_remote_argv_with_ssh_gate_bridge(
     rid = (run_id or "").strip()
     if not remote_argv or not rid:
         return []
-    gate_dir = (remote_gate_dir or "").strip() or remote_gate_dir_for_run(rid)
     raw = remote_gate_bridge_inject_script().encode("utf-8")
     b64 = base64.b64encode(raw).decode("ascii")
     inner = " ".join(shlex.quote(str(p)) for p in remote_argv)
     timeout = max(1.0, float(timeout_seconds))
     script = (
         "set -e; "
-        f"d={shlex.quote(gate_dir)}; "
-        "mkdir -p \"$d/pending\" \"$d/results\"; "
+        f"d=$(mktemp -d {REMOTE_GATE_DIR_TEMPLATE}); "
+        "mkdir \"$d/pending\" \"$d/results\"; "
         "inj=$(mktemp -d /tmp/discord-os-ssh-bridge-inj.XXXXXX); "
         f"echo {shlex.quote(b64)} | base64 -d > \"$inj/sitecustomize.py\"; "
         "export PYTHONPATH=\"$inj${PYTHONPATH:+:$PYTHONPATH}\"; "
         "export DISCORD_OS_SSH_GATE_BRIDGE=1; "
-        f"export DISCORD_OS_SSH_GATE_DIR={shlex.quote(gate_dir)}; "
+        "export DISCORD_OS_SSH_GATE_DIR=\"$d\"; "
         f"export DISCORD_OS_RUN_ID={shlex.quote(rid)}; "
         f"export DISCORD_OS_GATE_TIMEOUT_SECONDS={shlex.quote(str(timeout))}; "
         f"exec {inner}"
@@ -664,11 +664,9 @@ def ssh_write_gate_result(
     request_id = str(result.get("request_id") or "").strip()
     if not tgt or not remote_dir or not request_id:
         return False
-    # Refuse path traversal / shell metacharacters in remote path pieces.
-    if any(ch in remote_dir for ch in ("\n", "\r", ";", "|", "&", "`", "$", " ", "\t")):
-        # Allow only simple /tmp/... paths
-        if not remote_dir.startswith("/tmp/discord-os-ssh-gate-"):
-            return False
+    # The dir comes back from the remote; accept only the mktemp shape.
+    if not is_remote_gate_dir(remote_dir):
+        return False
     if any(ch in request_id for ch in ("/", "\\", "\n", "\r", ";", " ", "\t")):
         return False
     payload = dict(result)
@@ -676,10 +674,13 @@ def ssh_write_gate_result(
     payload.setdefault("gate_result", payload["decision"])
     raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     b64 = base64.b64encode(raw).decode("ascii")
-    results_dir = f"{remote_dir.rstrip('/')}/results"
+    results_dir = f"{remote_dir}/results"
     out_path = f"{results_dir}/{request_id}.json"
+    # Write only into a queue this SSH user owns, never through a symlink.
     remote_cmd = (
-        f"mkdir -p {shlex.quote(results_dir)} && "
+        f"test -d {shlex.quote(remote_dir)} -a ! -L {shlex.quote(remote_dir)} "
+        f"-a -O {shlex.quote(remote_dir)} -a -d {shlex.quote(results_dir)} "
+        f"-a ! -L {shlex.quote(results_dir)} && "
         f"echo {shlex.quote(b64)} | base64 -d > {shlex.quote(out_path)}"
     )
     argv = ["ssh", "-o", "BatchMode=yes"]

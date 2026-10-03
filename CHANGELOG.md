@@ -38,6 +38,10 @@
 ### Gate knows every Puppetmaster tool
 - `apply_hashline` maps to edit and `browser_*` tools map to browser. Before, the gate denied them as an unknown class on every local cook.
 
+### Path A bridge queue is private
+- The remote gate queue is a fresh `mktemp -d` directory (0700), not a predictable `/tmp/discord-os-ssh-gate-<run_id>` made with `mkdir -p`. Pending lines already report the real path back.
+- Writeback accepts only that path shape, and writes only into a queue the SSH user owns and that is not a symlink.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

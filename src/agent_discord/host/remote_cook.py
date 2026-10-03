@@ -659,7 +659,6 @@ class SshRemoteCookBackend:
             return
         from agent_discord.orchestration.ssh_gate import (
             bridge_control_path,
-            remote_gate_dir_for_run,
             ssh_gates_cross,
             wrap_remote_argv_with_ssh_gate,
             wrap_remote_argv_with_ssh_gate_bridge,
@@ -699,9 +698,6 @@ class SshRemoteCookBackend:
                     "control_path",
                     bridge_control_path(env=os.environ),
                 )
-            remote_dir = str(meta.get("ssh_gate_remote_dir") or "").strip() or remote_gate_dir_for_run(
-                rid
-            )
             # Ensure local gate queue exists so listen can park Discord cards.
             root = self.gate_root
             if root is None:
@@ -714,7 +710,6 @@ class SshRemoteCookBackend:
             remote_argv = wrap_remote_argv_with_ssh_gate_bridge(
                 remote_argv,
                 run_id=rid,
-                remote_gate_dir=remote_dir,
                 timeout_seconds=timeout_s,
             )
             if not remote_argv:

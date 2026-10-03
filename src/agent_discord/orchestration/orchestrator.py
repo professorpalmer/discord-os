@@ -843,10 +843,7 @@ class AgentOrchestrator:
             if (remote_host.kind or "").strip().lower() == "ssh":
                 try:
                     from agent_discord.orchestration.service import writes_need_approval
-                    from agent_discord.orchestration.ssh_gate import (
-                        remote_gate_dir_for_run,
-                        ssh_gates_cross,
-                    )
+                    from agent_discord.orchestration.ssh_gate import ssh_gates_cross
                     from agent_discord.orchestration.gate_hook import (
                         ensure_run_gate_dir,
                         resolve_gate_root,
@@ -855,9 +852,6 @@ class AgentOrchestrator:
 
                     if ssh_gates_cross():
                         extra_meta["ssh_gate_bridge"] = True
-                        extra_meta["ssh_gate_remote_dir"] = remote_gate_dir_for_run(
-                            run_id
-                        )
                         root = resolve_gate_root(
                             workspace=self.workspace, store=self.store
                         )

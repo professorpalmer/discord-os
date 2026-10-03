@@ -267,3 +267,122 @@ def test_installed_puppetmaster_tools_are_all_mapped() -> None:
 
     for name in getattr(agentic, "_BROWSER_TOOL_NAMES", ()):
         assert normalize_tool_class(name) == "browser", name
+
+
+def test_ssh_bridge_queue_is_private_mktemp_dir() -> None:
+    """Audit E2-7: run the bridge wrapper in a real shell as the remote."""
+
+    import os
+    import shutil
+    import stat
+    import subprocess
+    import sys
+
+    from agent_discord.orchestration.ssh_gate import (
+        is_remote_gate_dir,
+        wrap_remote_argv_with_ssh_gate_bridge,
+    )
+
+    probe = (
+        "import os, stat; d = os.environ['DISCORD_OS_SSH_GATE_DIR']; "
+        "print(d); print(oct(stat.S_IMODE(os.stat(d).st_mode))); "
+        "print(os.path.isdir(os.path.join(d, 'results')))"
+    )
+    argv = wrap_remote_argv_with_ssh_gate_bridge(
+        [sys.executable, "-c", probe], run_id="run-1", timeout_seconds=5
+    )
+    proc = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    gate_dir, mode, has_results = proc.stdout.split()[:3]
+    try:
+        assert is_remote_gate_dir(gate_dir), gate_dir
+        assert mode == "0o700"
+        assert has_results == "True"
+        assert stat.S_IMODE(os.stat(gate_dir).st_mode) == 0o700
+    finally:
+        shutil.rmtree(gate_dir, ignore_errors=True)
+
+
+def test_ssh_writeback_refuses_untrusted_queue(tmp_path: Path) -> None:
+    import os
+    import shutil
+    import secrets
+    import subprocess
+
+    from agent_discord.orchestration.ssh_gate import ssh_write_gate_result
+
+    sent: list[str] = []
+
+    class _Proc:
+        returncode = 0
+
+    def capture(argv, timeout_seconds=15.0):
+        sent.append(argv[-1])
+        return _Proc()
+
+    result = {"request_id": "req1", "decision": "allow"}
+    for bad in ("/tmp/discord-os-ssh-gate-run-1", "/tmp/discord-os-ssh-gate.ab;rm -rf ~", "/etc"):
+        assert ssh_write_gate_result("lab", bad, result, exec_fn=capture) is False
+    assert sent == []
+
+    # A queue whose results/ is a symlink: run the real remote command locally.
+    gate_dir = f"/tmp/discord-os-ssh-gate.{secrets.token_hex(6)}"
+    os.mkdir(gate_dir, 0o700)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    os.symlink(elsewhere, os.path.join(gate_dir, "results"))
+    try:
+        assert ssh_write_gate_result("lab", gate_dir, result, exec_fn=capture) is True
+        subprocess.run(["bash", "-c", sent[-1]], capture_output=True, timeout=10)
+        assert list(elsewhere.iterdir()) == []
+    finally:
+        shutil.rmtree(gate_dir, ignore_errors=True)
+
+
+def test_orchestrator_stamps_ssh_gate_mode(tmp_path: Path, monkeypatch) -> None:
+    """Path A cooks carry ssh_write_gate (gap) or ssh_gate_bridge in metadata."""
+
+    import agent_discord.host.remote_cook as remote_cook
+    from agent_discord.contracts import TaskIntake
+    from agent_discord.host.runners import bind_channel_host, load_host_allowlist
+    from agent_discord.orchestration.orchestrator import AgentOrchestrator
+    from agent_discord.orchestration.service import toggle_write_gate, writes_need_approval
+    from agent_discord.persistence.sqlite import SQLiteStore
+    from agent_discord.puppetmaster.fake import FakePuppetmasterBackend
+
+    monkeypatch.setenv("DISCORD_OS_HOSTS", "lab:ssh:cary@lab.local")
+    monkeypatch.delenv("DISCORD_OS_SSH_GATES", raising=False)
+    store = SQLiteStore(tmp_path / "agent_discord.sqlite3")
+    store.initialize()
+    bind_channel_host(
+        store, workspace_id="ws", channel_id="ch", host_id="lab", allowlist=load_host_allowlist()
+    )
+    if not writes_need_approval(store):
+        toggle_write_gate(store)
+    remote = FakePuppetmasterBackend()
+    monkeypatch.setattr(remote_cook, "assert_ssh_remote_cook_ready", lambda *a, **k: None)
+    monkeypatch.setattr(remote_cook, "make_ssh_cook_backend", lambda *a, **k: remote)
+    orch = AgentOrchestrator(
+        store=store,
+        backend=FakePuppetmasterBackend(),
+        discord=None,
+        workspace=tmp_path,
+        host_repos=(),
+    )
+
+    def cook() -> dict:
+        orch.run_task(
+            TaskIntake(
+                text="summarize",
+                channel_id="ch",
+                workspace_id="ws",
+                metadata={"approved": True, "compute_mode": "analyze"},
+            )
+        )
+        assert remote.last_request is not None
+        return dict(remote.last_request.metadata or {})
+
+    assert cook().get("ssh_write_gate") is True
+    monkeypatch.setenv("DISCORD_OS_SSH_GATES", "bridge")
+    assert cook().get("ssh_gate_bridge") is True
+    store.close()

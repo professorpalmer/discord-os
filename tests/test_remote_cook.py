@@ -369,7 +369,6 @@ def test_ssh_gates_bridge_wrap_and_parse(monkeypatch, tmp_path):
     wrapped = wrap_remote_argv_with_ssh_gate_bridge(
         ["puppetmaster", "agentic", "hi"],
         run_id="run-bridge-1",
-        remote_gate_dir="/tmp/discord-os-ssh-gate-run-bridge-1",
         timeout_seconds=30,
     )
     assert wrapped[0] == "bash"
@@ -392,7 +391,7 @@ def test_ssh_gates_bridge_wrap_and_parse(monkeypatch, tmp_path):
         "options": [],
         "allow_multiple": False,
         "created_at_ms": 1,
-        "remote_gate_dir": "/tmp/discord-os-ssh-gate-run-bridge-1",
+        "remote_gate_dir": "/tmp/discord-os-ssh-gate.Ab3dE9xQ",
         "ssh_bridge": True,
     }
     line = encode_gate_pending_line(payload)
@@ -419,7 +418,7 @@ def test_ssh_gates_bridge_wrap_and_parse(monkeypatch, tmp_path):
 
     ok = ssh_write_gate_result(
         "lab.example",
-        "/tmp/discord-os-ssh-gate-run-bridge-1",
+        "/tmp/discord-os-ssh-gate.Ab3dE9xQ",
         {"request_id": "abc123", "decision": "allow", "gate_result": "allow"},
         exec_fn=_exec,
     )
@@ -466,7 +465,7 @@ def test_ssh_stream_bridge_mirrors_pending_and_writeback(monkeypatch, tmp_path):
         "options": [],
         "allow_multiple": False,
         "created_at_ms": 1,
-        "remote_gate_dir": "/tmp/discord-os-ssh-gate-r-bridge",
+        "remote_gate_dir": "/tmp/discord-os-ssh-gate.Ab3dE9xQ",
         "ssh_bridge": True,
     }
 
@@ -643,7 +642,7 @@ def test_ssh_cancel_skips_allow_writeback_and_denies_pending(monkeypatch, tmp_pa
         "options": [],
         "allow_multiple": False,
         "created_at_ms": 1,
-        "remote_gate_dir": "/tmp/discord-os-ssh-gate-r-cancel-bridge",
+        "remote_gate_dir": "/tmp/discord-os-ssh-gate.Ab3dE9xQ",
         "ssh_bridge": True,
     }
 
