@@ -228,6 +228,9 @@
 ### Forwarded messages become asks
 - A message forwarded into a bound channel is read from its snapshot (content, attachments, embeds) behind a `forwarded` line. Before, forwards landed as empty asks.
 
+### User-installable commands
+- `/ask` and Send to Discord OS can be user-installed, so they work in DMs and servers without the bot. These calls answer through the interaction webhook, land in the home channel, and require a paired operator even on an unpaired desk. Setup steps are in `docs/host/slash.md`.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

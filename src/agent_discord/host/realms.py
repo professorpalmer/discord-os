@@ -216,6 +216,31 @@ def channel_for_realm(
     return ""
 
 
+def home_channel(
+    store: Any,
+    *,
+    workspace_id: str = "default",
+) -> tuple[str, str]:
+    """``(channel_id, guild_id)`` of the first bound channel, or ``("", "")``.
+
+    An interaction can arrive from outside the operator's server (user-install
+    reaches any guild and any DM). There is no channel to cook in there, so
+    the ask lands in a channel the store already knows.
+    """
+
+    lister = getattr(store, "list_bindings", None)
+    if not callable(lister):
+        return "", ""
+    for row in lister(workspace_id) or ():
+        channel = str(row.get("channel_id") or "").strip()
+        if not channel:
+            continue
+        meta = binding_metadata(row)
+        if meta.get("repo") or meta.get("memory"):
+            return channel, str(row.get("guild_id") or "").strip()
+    return "", ""
+
+
 def is_bind_command(text: str) -> bool:
     first = (text or "").strip().split(None, 1)[0].lower() if (text or "").strip() else ""
     return first in BIND_PREFIXES

@@ -46,8 +46,23 @@ RESPONSE_PONG = 1
 RESPONSE_CHANNEL_MESSAGE = 4
 RESPONSE_AUTOCOMPLETE = 8
 EPHEMERAL = 64
-COMMAND_TYPE_CHAT_INPUT = 1
 COMMAND_TYPE_MESSAGE = 3
+GUILD_INSTALL = 0
+USER_INSTALL = 1
+# Guild / bot DM / private channel (group DM or a DM with someone else).
+INSTALL_CONTEXT_GUILD = 0
+INSTALL_CONTEXT_BOT_DM = 1
+INSTALL_CONTEXT_PRIVATE = 2
+INSTALL_CONTEXTS = [
+    INSTALL_CONTEXT_GUILD,
+    INSTALL_CONTEXT_BOT_DM,
+    INSTALL_CONTEXT_PRIVATE,
+]
+INTEGRATION_TYPES = [GUILD_INSTALL, USER_INSTALL]
+_INSTALL_FIELDS = {
+    "integration_types": INTEGRATION_TYPES,
+    "contexts": INSTALL_CONTEXTS,
+}
 MAX_AUTOCOMPLETE_CHOICES = 25
 
 CONNECT_COMMAND = {
@@ -196,6 +211,13 @@ OPT_IN_COMMANDS = (
     CLEAR_NEEDS_COMMAND,
     MESSAGE_ASK_COMMAND,
 )
+
+# Every opt-in command is guild- and user-installable in all three contexts.
+# One source of truth: the command literals above carry the same dicts the
+# registration POSTs and the command-set stamp read.
+for _command in OPT_IN_COMMANDS:
+    _command.update(_INSTALL_FIELDS)
+del _command
 
 SLASH_REGISTRATION_STATE = "slash_registration.json"
 _INTERACTIONS_GATEWAY = frozenset({"gateway", "gw"})
@@ -738,6 +760,7 @@ def _slash_author_may_operate(
     env: Optional[Mapping[str, str]],
 ) -> bool:
     from agent_discord.orchestration.service import (
+        author_is_operator,
         author_may_operate,
         seed_owner_if_empty,
     )
@@ -747,6 +770,10 @@ def _slash_author_may_operate(
     store = None
     try:
         store = _open_store(workspace)
+        if is_user_install_context(payload):
+            # Outside our server the soft first-armed-human seed does not
+            # apply: only a paired operator, even on an unpaired desk.
+            return author_is_operator(store, user_id, role_ids=role_ids)
         if name == "on":
             # Same first-armed-human seed as the panel On button.
             seed_owner_if_empty(store, user_id or None, env=env)
@@ -788,6 +815,35 @@ def _author_id(payload: Mapping[str, Any]) -> str:
     if isinstance(user, Mapping) and user.get("id"):
         return str(user.get("id")).strip()
     return ""
+
+
+def authorizing_owners(payload: Mapping[str, Any]) -> dict[str, str]:
+    """``authorizing_integration_owners`` keyed by integration type as a string."""
+
+    raw = payload.get("authorizing_integration_owners")
+    if not isinstance(raw, Mapping):
+        return {}
+    return {str(key): str(value) for key, value in raw.items()}
+
+
+def is_user_install_context(payload: Mapping[str, Any]) -> bool:
+    """True when the bot is not installed where this interaction came from.
+
+    A user-install command reaches guilds the bot was never added to and DMs
+    with third parties. Discord names the authorizing installs: key ``"0"`` is
+    the guild install, ``"1"`` the user install. No guild install means there
+    is no channel of ours to answer in — only the interaction webhook.
+    ``context`` 2 (PRIVATE_CHANNEL) is a group DM or someone else's DM, which
+    is never ours either.
+    """
+
+    owners = authorizing_owners(payload)
+    if owners and str(GUILD_INSTALL) not in owners:
+        return True
+    try:
+        return int(payload.get("context")) == INSTALL_CONTEXT_PRIVATE
+    except (TypeError, ValueError):
+        return False
 
 
 def _role_ids(payload: Mapping[str, Any]) -> list[str]:
@@ -970,14 +1026,15 @@ def _handle_ask_slash(
 
     from agent_discord.host.realms import channel_for_realm
     from agent_discord.host.repos import load_host_repos
-    from agent_discord.orchestration.service import author_may_dispatch
 
     text = (prompt or "").strip()
     if not text:
         return _ephemeral("ask needs a prompt")
     channel_id = _channel_id(payload)
+    outside = is_user_install_context(payload)
     user_id = _author_id(payload)
     role_ids = _role_ids(payload)
+    link = ""
     store = None
     try:
         store = _open_store(workspace)
@@ -987,9 +1044,19 @@ def _handle_ask_slash(
             if not bound:
                 return _ephemeral(f"No channel bound to {realm}. Use /bind first.")
             channel_id = bound
+        elif outside:
+            channel_id = _home_channel(store)
+            if not channel_id:
+                return _ephemeral(
+                    "No bound channel to cook in. Run bind in the host channel first."
+                )
         if not channel_id:
             return _ephemeral("missing channel_id")
-        if not author_may_dispatch(store, user_id, role_ids=role_ids, env=env):
+        if outside:
+            link = _channel_link(store, channel_id)
+        if not _may_dispatch(
+            store, user_id=user_id, role_ids=role_ids, env=env, outside=outside
+        ):
             return _ephemeral("Denied: only paired operators can start a cook.")
     except Exception as exc:  # noqa: BLE001 — ephemeral fail-closed
         return _ephemeral(f"ask failed: {exc}")
@@ -1009,7 +1076,7 @@ def _handle_ask_slash(
         code = on_ask(channel_id, text, user_id)
     except Exception as exc:  # noqa: BLE001
         return _ephemeral(f"ask failed: {exc}")
-    return _ephemeral(_ask_receipt(channel_id, code))
+    return _ephemeral(_ask_receipt(channel_id, code, link))
 
 
 def _handle_message_command(
@@ -1020,8 +1087,6 @@ def _handle_message_command(
     on_ask: Optional[Callable[[str, str, str], Optional[str]]] = None,
 ) -> dict[str, Any]:
     """'Send to Discord OS' — a picked message becomes an ask. Operator-only."""
-
-    from agent_discord.orchestration.service import author_may_dispatch
 
     data = payload.get("data") if isinstance(payload.get("data"), Mapping) else {}
     target_id = str(data.get("target_id") or "").strip()
@@ -1037,12 +1102,23 @@ def _handle_message_command(
         return _ephemeral("That message has no content or attachments.")
 
     channel_id = _channel_id(payload)
+    outside = is_user_install_context(payload)
     user_id = _author_id(payload)
     role_ids = _role_ids(payload)
+    link = ""
     store = None
     try:
         store = _open_store(workspace)
-        if not author_may_dispatch(store, user_id, role_ids=role_ids, env=env):
+        if outside:
+            channel_id = _home_channel(store)
+            if not channel_id:
+                return _ephemeral(
+                    "No bound channel to send to. Run bind in the host channel first."
+                )
+            link = _channel_link(store, channel_id)
+        if not _may_dispatch(
+            store, user_id=user_id, role_ids=role_ids, env=env, outside=outside
+        ):
             return _ephemeral("Denied: only paired operators can send a message here.")
     except Exception as exc:  # noqa: BLE001
         return _ephemeral(f"send failed: {exc}")
@@ -1064,7 +1140,49 @@ def _handle_message_command(
         code = on_ask(channel_id, text, user_id)
     except Exception as exc:  # noqa: BLE001
         return _ephemeral(f"send failed: {exc}")
-    return _ephemeral(_ask_receipt(channel_id, code))
+    return _ephemeral(_ask_receipt(channel_id, code, link))
+
+
+def _may_dispatch(
+    store: Any,
+    *,
+    user_id: str,
+    role_ids: Sequence[str],
+    env: Optional[Mapping[str, str]],
+    outside: bool,
+) -> bool:
+    """Dispatch rule for an ask. Fails closed outside our own server."""
+
+    from agent_discord.orchestration.service import author_is_operator, author_may_dispatch
+
+    if outside:
+        # User-install reaches outside the operator's server, so the soft
+        # first-armed-human seed is not enough — pair first.
+        return author_is_operator(store, user_id, role_ids=list(role_ids))
+    return author_may_dispatch(store, user_id, role_ids=list(role_ids), env=env)
+
+
+def _home_channel(store: Any) -> str:
+    from agent_discord.host.realms import home_channel
+
+    channel, _guild = home_channel(store)
+    return channel
+
+
+def _channel_link(store: Any, channel_id: str) -> str:
+    """Jump link for a bound channel, when the binding knows its guild."""
+
+    reader = getattr(store, "get_binding", None)
+    if not callable(reader):
+        return ""
+    try:
+        row = reader("default", channel_id) or {}
+    except Exception:
+        return ""
+    guild = str(row.get("guild_id") or "").strip()
+    if not guild or not channel_id:
+        return ""
+    return f"https://discord.com/channels/{guild}/{channel_id}"
 
 
 def _message_ask_text(

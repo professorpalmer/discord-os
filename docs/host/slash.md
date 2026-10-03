@@ -94,6 +94,39 @@ the next listen when the package version / command stamp drifts. Manual
 `--register` is still fine (updates the same stamp). Skipping both leaves the
 phone on the old command set until the next successful heal.
 
+## User-install (commands that follow you)
+
+Registered commands declare `integration_types [0, 1]` (GUILD_INSTALL,
+USER_INSTALL) and `contexts [0, 1, 2]` (GUILD, BOT_DM, PRIVATE_CHANNEL), so
+`/ask` and `Send to Discord OS` work in a guild the bot was never added to,
+in the bot DM, and in a group DM.
+
+Developer Portal steps (once per app):
+
+1. **Installation** → **Installation Contexts**: tick **User Install** (keep
+   **Guild Install** for the host server).
+2. **Install Link**: choose **Discord Provided Link**. Copy it.
+3. **Default Install Settings** → **User Install** → scopes:
+   `applications.commands`. Guild Install keeps `bot` + `applications.commands`
+   and the bot permissions the host channel needs.
+4. Open the copied link yourself and **Add to my apps**.
+5. Re-register so Discord sees the new fields: bounce `discord-os listen`
+   (self-heal is stamp-aware) or run `discord-os interactions --register`.
+
+How Discord OS answers one of these:
+
+- The interaction carries `authorizing_integration_owners`. No guild-install
+  key (or `context` 2) means the bot is not where the command was typed, so
+  the reply goes out on the **interaction webhook** — never channel REST.
+- There is no channel of ours to cook in, so the ask lands in the **home
+  channel** from the store's bindings (first bound realm / memory channel).
+  `/ask realm:<name>` still picks a specific bound channel.
+- The gate is the **operator allowlist, fail closed**: only a paired operator,
+  even on an unpaired desk where the in-server panel is still open (lock 8).
+  No first-armed-human seed from outside the server.
+- The ephemeral receipt carries a jump link to the channel the job thread
+  opens in, when the binding knows its guild.
+
 ## Autocomplete
 
 Discord type-4 focus events return up to 25 choices:

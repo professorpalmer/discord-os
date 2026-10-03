@@ -202,7 +202,7 @@ Not a product feature. Optional extra `discord-os[debug]`. Default **off.** `DIS
 
 ## Slash (opt-in)
 
-Text binds and the HOST panel are the default. Slash is optional (default off) and mirrors the same verbs when registered — `/bind` (name autocomplete), `/job` (DOS-* autocomplete), `/status`, `/on`, `/off`, `/stop`, `/open`, `/connect`. When interactions are exposed, the host self-heals registration (version-aware; fail soft). Not required for doctor, binds, or jobs. No `/add`. See [slash.md](slash.md). Code: `src/agent_discord/discord/interactions.py`.
+Text binds and the HOST panel are the default. Slash is optional (default off) and mirrors the same verbs when registered — `/bind` (name autocomplete), `/ask` (prompt + realm autocomplete), `/job` (DOS-* autocomplete), `/status`, `/on`, `/off`, `/stop`, `/open`, `/connect`, plus the `Send to Discord OS` message context menu. `AGENT_DISCORD_INTERACTIONS=gateway` carries them on the Gateway the host already owns (no public URL, no public key); `=http` keeps the HTTPS endpoint. Commands are guild- and user-installable; an interaction from outside the host server is answered on the interaction webhook and needs a paired operator. When interactions are exposed, the host self-heals registration (version-aware; fail soft). Not required for doctor, binds, or jobs. No `/add`. See [slash.md](slash.md). Code: `src/agent_discord/discord/interactions.py`.
 
 ## Forwarded messages
 
