@@ -24,9 +24,8 @@ from agent_discord.host.forum_realm import (
     merge_applied_tags_for_status,
     parse_applied_tag_ids,
     parse_available_tags,
-    resolve_status_from_applied_tags,
+    status_tag_state,
     status_value,
-    tags_as_tickets_enabled,
     validate_and_mark_forum_bind,
 )
 from agent_discord.persistence.sqlite import SQLiteStore
@@ -60,9 +59,6 @@ def test_parse_and_map_status_tags() -> None:
     assert smap["failed"] == "t-f"
     assert smap["cancelled"] == "t-c"
     assert status_value(TaskStatus.PROGRESS) == "running"
-    assert (
-        resolve_status_from_applied_tags(("t-x", "t-r"), smap) == "running"
-    )
 
 
 def test_merge_preserves_non_status_tags() -> None:
@@ -127,8 +123,9 @@ def test_validate_bind_caches_tags_as_tickets(tmp_path: Path) -> None:
     assert meta[TAGS_AS_TICKETS_FLAG] is True
     assert meta["status_tag_ids"]["pending"] == "1"
     assert meta["status_tag_ids"]["completed"] == "3"
-    row = store.get_binding("ws", "forum")
-    assert tags_as_tickets_enabled(row)
+    enabled, tag_ids = status_tag_state(store, "forum", workspace_id="ws")
+    assert enabled
+    assert tag_ids["pending"] == "1"
     store.close()
 
 

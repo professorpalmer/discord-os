@@ -71,7 +71,7 @@ Use a supervisor OS when you want fleet orchestration as the core. Use Discord O
 |---|---|
 | **Goose recipes** | Discord OS ships markdown playbooks under `docs/recipes/` — not a Goose YAML runtime. |
 | **Cloud Agents (vendor VM)** | Cloud Agents run in a vendor VM; Discord OS cooks on **your Mac** JobPool + Discord HOST. |
-| **Spec Kit / Linear boards** | Catch-up + claim + lanes are Discord-native; Spec Kit lifecycle tags stay **manual** forum tags (never auto-create). |
+| **Spec Kit / Linear boards** | Catch-up + claim are Discord-native; the only forum tag map is JobPool status onto **existing** tags (never auto-create). |
 | **Ledger / SpendGuard** | HOST phone **spend meter** + Halt honesty — we meter, we don’t sell a firewall. Unknown ≠ $0. |
 
 **Shareability bar:** filmable HOST spend glance + Wave 6 board+brain phone demo (`docs/co-work/wave6-board-brain-demo.md`) — Discord-native only, no companion terminal/files strip.

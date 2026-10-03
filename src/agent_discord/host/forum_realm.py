@@ -1,21 +1,23 @@
-"""Forum-as-realm + tags-as-tickets experiment (Discord-half EXTRAS).
+"""Forum-as-realm: bind a forum channel, map JobPool status onto existing tags.
 
-Scoped: bind a Discord **forum** channel (type 15) as a normal realm checkout
-and route **new forum posts** into the existing JobPool with
-``thread_id = post thread``. Not a second job system.
+Two paths only:
 
-Tags-as-tickets (deepen): when the forum already has ``available_tags`` whose
-names match conventional JobPool statuses (queued / running / done / failed /
-cancelled), map those tags onto ticket status and ``PATCH`` the post thread's
-``applied_tags`` on status change. Does **not** invent guild tags or a fantasy
-ticket UI. Soft-skip when no status tags exist; fail closed (spoken Need) on
-ACL miss when sync is attempted.
+1. **Bind.** A Discord **forum** channel (type 15) binds as a normal realm
+   checkout; its posts become job threads with ``thread_id = post thread``.
+   Not a second job system.
+2. **Tag map.** When the forum already has ``available_tags`` whose names match
+   conventional JobPool statuses (queued / running / done / failed /
+   cancelled), map those names onto ticket status and ``PATCH`` the post
+   thread's ``applied_tags`` on status change. Soft-skip when no status tags
+   exist; fail closed (spoken Need) on ACL miss when sync is attempted.
+
+HARD lock 2: this module never invents or POSTs guild tags.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional, Sequence, Union
+from typing import Any, Mapping, Sequence, Union
 
 from agent_discord.host.realms import binding_metadata
 
@@ -50,27 +52,7 @@ FORUM_NEED_TAGS_MISSING = (
 # Binding metadata: tags-as-tickets deepen (still JobPool — not a second system).
 TAGS_AS_TICKETS_FLAG = "tags_as_tickets"
 STATUS_TAG_IDS_KEY = "status_tag_ids"
-LIFECYCLE_TAG_IDS_KEY = "lifecycle_tag_ids"
 APPLIED_TAGS_KEY = "applied_tags"
-
-# Spec Kit-ish lifecycle labels (normalized) → phase key.
-# Optional manual map only — matched against existing available_tags; never create.
-_LIFECYCLE_NAME_ALIASES: dict[str, str] = {
-    "specify": "specify",
-    "spec": "specify",
-    "specification": "specify",
-    "plan": "plan",
-    "planning": "plan",
-    "tasks": "tasks",
-    "task": "tasks",
-    "breakdown": "tasks",
-    "implement": "implement",
-    "implementation": "implement",
-    "impl": "implement",
-    "coding": "implement",
-    "review": "review",
-    "revise": "review",
-}
 
 # Discord hard limit on thread applied_tags.
 MAX_APPLIED_TAGS = 5
@@ -117,14 +99,6 @@ class ForumRealmError(ValueError):
 
 
 @dataclass(frozen=True)
-class ForumChannelInfo:
-    channel_id: str
-    channel_type: int
-    name: str = ""
-    guild_id: str = ""
-
-
-@dataclass(frozen=True)
 class ForumTag:
     tag_id: str
     name: str
@@ -138,56 +112,7 @@ def spoken_forum_need(reason: str) -> str:
     return f"Need: forum-as-realm — {why}"
 
 
-def is_forum_binding(row_or_meta: Optional[Mapping[str, Any]]) -> bool:
-    """True when binding metadata marks this channel as a forum realm."""
-
-    if not row_or_meta:
-        return False
-    meta = (
-        binding_metadata(row_or_meta)
-        if "metadata_json" in row_or_meta or "metadata" in row_or_meta
-        else dict(row_or_meta)
-    )
-    if bool(meta.get(FORUM_META_FLAG)):
-        return True
-    return str(meta.get("kind") or "").strip().lower() == FORUM_META_KIND
-
-
-def forum_binding_updates() -> dict[str, Any]:
-    return {FORUM_META_FLAG: True, "kind": FORUM_META_KIND}
-
-
-def clear_forum_binding_updates() -> dict[str, Any]:
-    """Remove forum markers (text realm)."""
-
-    return {FORUM_META_FLAG: False, "kind": ""}
-
-
-def channel_is_forum(payload: Mapping[str, Any]) -> bool:
-    try:
-        return int(payload.get("type") or 0) == GUILD_FORUM
-    except (TypeError, ValueError):
-        return False
-
-
-def parse_channel_info(payload: Mapping[str, Any]) -> ForumChannelInfo:
-    return ForumChannelInfo(
-        channel_id=str(payload.get("id") or "").strip(),
-        channel_type=int(payload.get("type") or 0),
-        name=str(payload.get("name") or "").strip(),
-        guild_id=str(payload.get("guild_id") or "").strip(),
-    )
-
-
-def assert_forum_channel(payload: Mapping[str, Any]) -> ForumChannelInfo:
-    """Fail closed unless payload is GUILD_FORUM."""
-
-    info = parse_channel_info(payload)
-    if info.channel_type != GUILD_FORUM:
-        raise ForumRealmError(FORUM_NEED_NOT_FORUM)
-    if not info.channel_id:
-        raise ForumRealmError(spoken_forum_need("channel id missing"))
-    return info
+# --- bind -------------------------------------------------------------------
 
 
 def mark_forum_binding(
@@ -198,7 +123,11 @@ def mark_forum_binding(
 ) -> None:
     writer = getattr(store, "merge_binding_metadata", None)
     if callable(writer):
-        writer(workspace_id, channel_id, forum_binding_updates())
+        writer(
+            workspace_id,
+            channel_id,
+            {FORUM_META_FLAG: True, "kind": FORUM_META_KIND},
+        )
 
 
 def unmark_forum_binding(
@@ -207,9 +136,11 @@ def unmark_forum_binding(
     workspace_id: str,
     channel_id: str,
 ) -> None:
+    """Remove forum markers (text realm)."""
+
     writer = getattr(store, "merge_binding_metadata", None)
     if callable(writer):
-        writer(workspace_id, channel_id, clear_forum_binding_updates())
+        writer(workspace_id, channel_id, {FORUM_META_FLAG: False, "kind": ""})
 
 
 def binding_is_forum_realm(
@@ -222,9 +153,15 @@ def binding_is_forum_realm(
     if not callable(reader):
         return False
     try:
-        return is_forum_binding(reader(workspace_id, channel_id))
+        row = reader(workspace_id, channel_id)
     except Exception:
         return False
+    if not row:
+        return False
+    meta = binding_metadata(row)
+    if bool(meta.get(FORUM_META_FLAG)):
+        return True
+    return str(meta.get("kind") or "").strip().lower() == FORUM_META_KIND
 
 
 def remember_forum_thread_parent(
@@ -274,19 +211,7 @@ def parent_from_forum_thread_binding(
                 return parent
         except Exception:
             pass
-    lister = getattr(store, "list_bindings", None)
-    if callable(lister):
-        for wid in (workspace_id, ""):
-            try:
-                for row in lister(wid) or ():
-                    if str(row.get("channel_id") or "").strip() != tid:
-                        continue
-                    meta = binding_metadata(row)
-                    parent = str(meta.get("parent_channel_id") or "").strip()
-                    if parent:
-                        return parent
-            except Exception:
-                continue
+    # Thread may have been remembered under a different workspace id.
     conn = getattr(store, "_connection", None)
     if callable(conn):
         try:
@@ -308,44 +233,24 @@ def parent_from_forum_thread_binding(
     return ""
 
 
-def list_forum_realm_channel_ids(
-    store: Any,
-    *,
-    workspace_id: str = "default",
-    listen_ids: Sequence[str] = (),
-) -> tuple[str, ...]:
-    """Forum-marked bindings that appear in the current listen set."""
-
-    out: list[str] = []
-    seen: set[str] = set()
-    for raw in listen_ids or ():
-        cid = str(raw or "").strip()
-        if not cid or cid in seen:
-            continue
-        if binding_is_forum_realm(store, cid, workspace_id=workspace_id):
-            out.append(cid)
-            seen.add(cid)
-    return tuple(out)
-
-
-def discover_forum_post_threads(
+def _list_forum_threads(
     *,
     token: str,
     forum_channel_id: str,
     opener: Any = None,
-) -> tuple[str, ...]:
-    """Active public threads under a forum. Raises ForumRealmError on ACL miss."""
+) -> tuple[Any, ...]:
+    """Active threads under a forum. Raises ForumRealmError on ACL / HTTP miss."""
 
     from agent_discord.discord.errors import ToolInvocationError
     from agent_discord.discord.rest import list_active_threads
     from urllib.error import HTTPError
 
-    forum = (forum_channel_id or "").strip()
-    if not forum:
-        return ()
     try:
-        threads = list_active_threads(
-            token=token, channel_id=forum, opener=opener
+        return tuple(
+            list_active_threads(
+                token=token, channel_id=forum_channel_id, opener=opener
+            )
+            or ()
         )
     except HTTPError as exc:
         code = int(getattr(exc, "code", 0) or 0)
@@ -363,20 +268,6 @@ def discover_forum_post_threads(
         raise
     except Exception as exc:  # noqa: BLE001
         raise ForumRealmError(spoken_forum_need(str(exc))) from exc
-
-    ids: list[str] = []
-    seen: set[str] = set()
-    for item in threads:
-        tid = str(item.get("id") or "").strip()
-        if not tid or tid in seen:
-            continue
-        # Prefer threads whose parent is this forum when parent_id present.
-        parent = str(item.get("parent_id") or "").strip()
-        if parent and parent != forum:
-            continue
-        ids.append(tid)
-        seen.add(tid)
-    return tuple(ids)
 
 
 def discover_forum_post_rows(
@@ -387,42 +278,20 @@ def discover_forum_post_rows(
 ) -> tuple[dict[str, Any], ...]:
     """Active forum posts as thread payloads (id, parent_id, applied_tags)."""
 
-    from agent_discord.discord.errors import ToolInvocationError
-    from agent_discord.discord.rest import list_active_threads
-    from urllib.error import HTTPError
-
     forum = (forum_channel_id or "").strip()
     if not forum:
         return ()
-    try:
-        threads = list_active_threads(
-            token=token, channel_id=forum, opener=opener
-        )
-    except HTTPError as exc:
-        code = int(getattr(exc, "code", 0) or 0)
-        if code in {401, 403}:
-            raise ForumRealmError(FORUM_NEED_MISSING_PERMS) from exc
-        raise ForumRealmError(
-            spoken_forum_need(f"list threads failed HTTP {code or '?'}")
-        ) from exc
-    except ToolInvocationError as exc:
-        msg = str(exc).lower()
-        if "403" in msg or "401" in msg or "missing" in msg or "perm" in msg:
-            raise ForumRealmError(FORUM_NEED_MISSING_PERMS) from exc
-        raise ForumRealmError(spoken_forum_need(str(exc))) from exc
-    except ForumRealmError:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        raise ForumRealmError(spoken_forum_need(str(exc))) from exc
-
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for item in threads:
+    for item in _list_forum_threads(
+        token=token, forum_channel_id=forum, opener=opener
+    ):
         if not isinstance(item, dict):
             continue
         tid = str(item.get("id") or "").strip()
         if not tid or tid in seen:
             continue
+        # Prefer threads whose parent is this forum when parent_id present.
         parent = str(item.get("parent_id") or "").strip()
         if parent and parent != forum:
             continue
@@ -448,7 +317,7 @@ def validate_and_mark_forum_bind(
     """
 
     from agent_discord.discord.errors import ToolInvocationError
-    from agent_discord.discord.rest import fetch_channel, list_active_threads
+    from agent_discord.discord.rest import fetch_channel
     from urllib.error import HTTPError
 
     cid = (channel_id or "").strip()
@@ -482,27 +351,20 @@ def validate_and_mark_forum_bind(
             raise ForumRealmError(FORUM_NEED_FETCH)
         return {"forum": False, "skipped": "bad payload"}
 
-    info = parse_channel_info(raw)
-    if info.channel_type != GUILD_FORUM:
+    try:
+        ctype = int(raw.get("type") or 0)
+    except (TypeError, ValueError):
+        ctype = 0
+    if ctype != GUILD_FORUM:
         if require_forum:
             raise ForumRealmError(FORUM_NEED_NOT_FORUM)
         # Text/voice/etc. — ensure forum flag cleared if previously set.
         if binding_is_forum_realm(store, cid, workspace_id=workspace_id):
             unmark_forum_binding(store, workspace_id=workspace_id, channel_id=cid)
-        return {"forum": False, "type": info.channel_type}
+        return {"forum": False, "type": ctype}
 
     # Forum: prove we can list threads (perm probe).
-    try:
-        list_active_threads(token=token, channel_id=cid, opener=opener)
-    except HTTPError as exc:
-        code = int(getattr(exc, "code", 0) or 0)
-        if code in {401, 403}:
-            raise ForumRealmError(FORUM_NEED_MISSING_PERMS) from exc
-        raise ForumRealmError(
-            spoken_forum_need(f"list threads failed HTTP {code or '?'}")
-        ) from exc
-    except ToolInvocationError as exc:
-        raise ForumRealmError(FORUM_NEED_MISSING_PERMS) from exc
+    _list_forum_threads(token=token, forum_channel_id=cid, opener=opener)
 
     mark_forum_binding(store, workspace_id=workspace_id, channel_id=cid)
     tag_meta = cache_status_tags_from_forum_payload(
@@ -514,8 +376,8 @@ def validate_and_mark_forum_bind(
     return {
         "forum": True,
         "type": GUILD_FORUM,
-        "name": info.name,
-        "guild_id": info.guild_id,
+        "name": str(raw.get("name") or "").strip(),
+        "guild_id": str(raw.get("guild_id") or "").strip(),
         TAGS_AS_TICKETS_FLAG: bool(tag_meta.get(TAGS_AS_TICKETS_FLAG)),
         STATUS_TAG_IDS_KEY: dict(tag_meta.get(STATUS_TAG_IDS_KEY) or {}),
     }
@@ -538,9 +400,14 @@ def collect_forum_thread_dests(
 
     out: list[str] = []
     seen: set[str] = set()
-    for forum_id in list_forum_realm_channel_ids(
-        store, workspace_id=workspace_id, listen_ids=listen_ids
-    ):
+    forums: set[str] = set()
+    for raw in listen_ids or ():
+        forum_id = str(raw or "").strip()
+        if not forum_id or forum_id in forums:
+            continue
+        forums.add(forum_id)
+        if not binding_is_forum_realm(store, forum_id, workspace_id=workspace_id):
+            continue
         try:
             rows = discover_forum_post_rows(
                 token=token, forum_channel_id=forum_id, opener=opener
@@ -567,6 +434,8 @@ def collect_forum_thread_dests(
             seen.add(tid)
     return tuple(out)
 
+
+# --- tag map ----------------------------------------------------------------
 
 
 def normalize_tag_name(name: str) -> str:
@@ -666,43 +535,6 @@ def build_status_tag_id_map(
     return by_status
 
 
-def build_lifecycle_tag_id_map(
-    available: Sequence[ForumTag],
-) -> dict[str, str]:
-    """Map Spec Kit-ish phase → Discord tag id from existing available_tags.
-
-    Manual only: first matching alias wins per phase. Never invents or creates tags.
-    """
-
-    by_phase: dict[str, str] = {}
-    for tag in available or ():
-        key = normalize_tag_name(tag.name)
-        phase = _LIFECYCLE_NAME_ALIASES.get(key)
-        if phase is None:
-            phase = _LIFECYCLE_NAME_ALIASES.get(key.replace("-", ""))
-        if not phase or phase in by_phase:
-            continue
-        by_phase[phase] = tag.tag_id
-    return by_phase
-
-
-def resolve_status_from_applied_tags(
-    applied_ids: Sequence[str],
-    status_tag_ids: Mapping[str, str],
-) -> str:
-    """Best-effort status from applied tag ids (last matching status tag wins)."""
-
-    if not applied_ids or not status_tag_ids:
-        return ""
-    inverse = {str(v): str(k) for k, v in status_tag_ids.items() if v}
-    found = ""
-    for tag_id in applied_ids:
-        status = inverse.get(str(tag_id).strip())
-        if status:
-            found = status
-    return found
-
-
 def merge_applied_tags_for_status(
     current: Sequence[str],
     *,
@@ -722,68 +554,50 @@ def merge_applied_tags_for_status(
             :MAX_APPLIED_TAGS
         ]
 
+    # Target first, then non-status tags already on the post, order preserved.
     status_id_set = {str(v).strip() for v in status_tag_ids.values() if str(v or "").strip()}
-    kept: list[str] = []
-    seen: set[str] = set()
+    out: list[str] = [target]
+    seen = {target}
     for raw in current or ():
         tag = str(raw or "").strip()
         if not tag or tag in seen or tag in status_id_set:
             continue
-        kept.append(tag)
+        out.append(tag)
         seen.add(tag)
-
-    out = [target, *[t for t in kept if t != target]]
-    # Dedup preserve order, cap 5
-    final: list[str] = []
-    seen2: set[str] = set()
-    for tag in out:
-        if tag in seen2:
-            continue
-        final.append(tag)
-        seen2.add(tag)
-        if len(final) >= MAX_APPLIED_TAGS:
+        if len(out) >= MAX_APPLIED_TAGS:
             break
-    return tuple(final)
+    return tuple(out)
 
 
-def tags_as_tickets_enabled(row_or_meta: Optional[Mapping[str, Any]]) -> bool:
-    if not row_or_meta:
-        return False
-    meta = (
-        binding_metadata(row_or_meta)
-        if "metadata_json" in row_or_meta or "metadata" in row_or_meta
-        else dict(row_or_meta)
-    )
-    if TAGS_AS_TICKETS_FLAG in meta:
-        return bool(meta.get(TAGS_AS_TICKETS_FLAG))
-    ids = meta.get(STATUS_TAG_IDS_KEY)
-    return isinstance(ids, dict) and bool(ids)
-
-
-def status_tag_ids_from_binding(
+def status_tag_state(
     store: Any,
     channel_id: str,
     *,
     workspace_id: str = "default",
-) -> dict[str, str]:
+) -> tuple[bool, dict[str, str]]:
+    """``(tags_as_tickets_enabled, status → tag id)`` from one binding read."""
+
     reader = getattr(store, "get_binding", None)
     if not callable(reader):
-        return {}
+        return False, {}
     try:
         row = reader(workspace_id, channel_id)
     except Exception:
-        return {}
+        return False, {}
     meta = binding_metadata(row) if row else {}
     raw = meta.get(STATUS_TAG_IDS_KEY)
-    if not isinstance(raw, dict):
-        return {}
-    out: dict[str, str] = {}
-    for key, val in raw.items():
-        status = status_value(key)
-        tag = str(val or "").strip()
-        if status and tag:
-            out[status] = tag
-    return out
+    tag_ids: dict[str, str] = {}
+    if isinstance(raw, dict):
+        for key, val in raw.items():
+            status = status_value(key)
+            tag = str(val or "").strip()
+            if status and tag:
+                tag_ids[status] = tag
+    if TAGS_AS_TICKETS_FLAG in meta:
+        enabled = bool(meta.get(TAGS_AS_TICKETS_FLAG))
+    else:
+        enabled = bool(tag_ids)
+    return enabled, tag_ids
 
 
 def cache_status_tags_from_forum_payload(
@@ -795,14 +609,10 @@ def cache_status_tags_from_forum_payload(
 ) -> dict[str, Any]:
     """Cache status↔tag id map from forum ``available_tags``. Soft when empty."""
 
-    available = parse_available_tags(payload)
-    status_map = build_status_tag_id_map(available)
-    lifecycle_map = build_lifecycle_tag_id_map(available)
-    enabled = bool(status_map)
+    status_map = build_status_tag_id_map(parse_available_tags(payload))
     updates = {
-        TAGS_AS_TICKETS_FLAG: enabled,
+        TAGS_AS_TICKETS_FLAG: bool(status_map),
         STATUS_TAG_IDS_KEY: status_map,
-        LIFECYCLE_TAG_IDS_KEY: lifecycle_map,
     }
     writer = getattr(store, "merge_binding_metadata", None)
     if callable(writer):
@@ -925,15 +735,8 @@ def maybe_sync_forum_ticket_tags(
         else:
             return {"skipped": "not forum realm"}
 
-    row = None
-    reader = getattr(store, "get_binding", None)
-    if callable(reader):
-        try:
-            row = reader(workspace_id, cid)
-        except Exception:
-            row = None
-    status_map = status_tag_ids_from_binding(store, cid, workspace_id=workspace_id)
-    if not tags_as_tickets_enabled(row) and not require_tag:
+    enabled, status_map = status_tag_state(store, cid, workspace_id=workspace_id)
+    if not enabled and not require_tag:
         return {"skipped": "tags-as-tickets off"}
     if not status_map:
         if require_tag:
@@ -997,7 +800,6 @@ def maybe_sync_forum_ticket_tags(
     return result
 
 
-
 def refresh_status_tags_from_discord(
     store: Any,
     *,
@@ -1022,8 +824,7 @@ def refresh_status_tags_from_discord(
         raise ForumRealmError(FORUM_NEED_FETCH) from exc
     if not isinstance(payload, Mapping):
         raise ForumRealmError(FORUM_NEED_FETCH)
-    ctype = int(payload.get("type") or 0)
-    if ctype != GUILD_FORUM:
+    if int(payload.get("type") or 0) != GUILD_FORUM:
         raise ForumRealmError(FORUM_NEED_NOT_FORUM)
     updates = cache_status_tags_from_forum_payload(
         store,
@@ -1035,7 +836,6 @@ def refresh_status_tags_from_discord(
         "channel_id": cid,
         "tags_as_tickets": bool(updates.get(TAGS_AS_TICKETS_FLAG)),
         "status_tag_ids": dict(updates.get(STATUS_TAG_IDS_KEY) or {}),
-        "lifecycle_tag_ids": dict(updates.get(LIFECYCLE_TAG_IDS_KEY) or {}),
         "created_available_tags": False,
     }
 
@@ -1049,30 +849,19 @@ __all__ = [
     "FORUM_NEED_NOT_FORUM",
     "FORUM_NEED_TAGS_MISSING",
     "FORUM_NEED_TAGS_PERMS",
-    "ForumChannelInfo",
     "ForumRealmError",
     "ForumTag",
     "GUILD_FORUM",
     "MAX_APPLIED_TAGS",
-    "LIFECYCLE_TAG_IDS_KEY",
     "STATUS_TAG_IDS_KEY",
     "TAGS_AS_TICKETS_FLAG",
     "apply_thread_status_tags",
-    "assert_forum_channel",
     "binding_is_forum_realm",
-    "build_lifecycle_tag_id_map",
     "build_status_tag_id_map",
     "cache_status_tags_from_forum_payload",
-    "refresh_status_tags_from_discord",
-    "channel_is_forum",
-    "clear_forum_binding_updates",
     "collect_forum_thread_dests",
     "discover_forum_post_rows",
-    "discover_forum_post_threads",
     "extract_discord_token",
-    "forum_binding_updates",
-    "is_forum_binding",
-    "list_forum_realm_channel_ids",
     "mark_forum_binding",
     "maybe_sync_forum_ticket_tags",
     "merge_applied_tags_for_status",
@@ -1080,13 +869,10 @@ __all__ = [
     "parent_from_forum_thread_binding",
     "parse_applied_tag_ids",
     "parse_available_tags",
-    "parse_channel_info",
+    "refresh_status_tags_from_discord",
     "remember_forum_thread_parent",
-    "resolve_status_from_applied_tags",
     "spoken_forum_need",
-    "status_tag_ids_from_binding",
+    "status_tag_state",
     "status_value",
-    "tags_as_tickets_enabled",
     "unmark_forum_binding",
-    "validate_and_mark_forum_bind",
 ]

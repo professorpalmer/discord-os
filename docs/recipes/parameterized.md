@@ -54,9 +54,9 @@ See [overnight-brief](../co-work/overnight-brief.md) + [wave6-overnight-pack](..
 | Input | Example |
 |---|---|
 | `forum_id` | guild forum channel |
-| tags | manual `queued/running/done/…` (+ optional Spec Kit phases) |
+| tags | manual `queued/running/done/…` |
 
-See [forum-lane](../co-work/forum-lane.md) + [wave6-speckit-tags](../co-work/wave6-speckit-tags.md).
+See [forum-lane](../co-work/forum-lane.md).
 
 ### Wave 6 board + brain demo
 

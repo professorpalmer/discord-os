@@ -203,6 +203,9 @@
 ### Dead code removed
 - 22 top-level functions and classes that nothing in `src` referenced are gone (about 400 lines), including two never-registered import hooks in the gate inject. Test seams and helpers that drive live paths in tests stay.
 
+### Forum realms cut to bind plus the status tag map
+- Forum realms keep the two paths in use: binding a forum as a realm, and mapping job status to the forum's existing tags (never creating tags, HARD lock 2). The Spec Kit lifecycle tag map and its `lifecycle=` output on `add forum-tags` are gone.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

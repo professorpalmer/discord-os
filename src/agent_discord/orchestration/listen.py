@@ -1945,21 +1945,13 @@ def _maybe_mark_forum_on_bind(
 ) -> None:
     """Forum-as-realm: auto-mark GUILD_FORUM binds; Need + refuse mark on ACL miss."""
 
-    from agent_discord.host.forum_realm import ForumRealmError, validate_and_mark_forum_bind
+    from agent_discord.host.forum_realm import (
+        ForumRealmError,
+        extract_discord_token,
+        validate_and_mark_forum_bind,
+    )
 
-    token = ""
-    for attr in ("bot_token", "token", "_token"):
-        raw = getattr(discord, attr, None)
-        if isinstance(raw, str) and raw.strip():
-            token = raw.strip()
-            break
-    provider = getattr(discord, "provider", None)
-    if not token and provider is not None:
-        for attr in ("bot_token", "token", "_token"):
-            raw = getattr(provider, attr, None)
-            if isinstance(raw, str) and raw.strip():
-                token = raw.strip()
-                break
+    token = extract_discord_token(discord)
     if not token:
         # No REST token on this facade (fake tests) — skip probe.
         return

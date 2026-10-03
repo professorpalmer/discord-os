@@ -10,8 +10,6 @@ from agent_discord.contracts import TaskStatus
 from agent_discord.discord.errors import ToolInvocationError
 from agent_discord.discord.rest import modify_channel
 from agent_discord.host.forum_realm import (
-    ForumTag,
-    build_lifecycle_tag_id_map,
     cache_status_tags_from_forum_payload,
     refresh_status_tags_from_discord,
 )
@@ -121,23 +119,13 @@ def test_parameterized_recipe_docs_present():
     assert "parameterized.md" in index
 
 
-def test_lifecycle_tag_map_manual_only_never_create(tmp_path: Path, monkeypatch):
+def test_status_tag_map_manual_only_never_create(tmp_path: Path, monkeypatch):
     with pytest.raises(ToolInvocationError, match="available_tags"):
         modify_channel(
             token="x",
             channel_id="1",
             payload={"available_tags": [{"name": "specify"}]},
         )
-
-    tags = (
-        ForumTag(tag_id="a", name="specify"),
-        ForumTag(tag_id="b", name="implement"),
-        ForumTag(tag_id="c", name="running"),
-    )
-    life = build_lifecycle_tag_id_map(tags)
-    assert life.get("specify") == "a"
-    assert life.get("implement") == "b"
-    assert "running" not in life  # status alias, not lifecycle phase
 
     store = SQLiteStore(tmp_path / "f.sqlite3")
     store.initialize()
@@ -153,8 +141,7 @@ def test_lifecycle_tag_map_manual_only_never_create(tmp_path: Path, monkeypatch)
             ],
         },
     )
-    assert updates["lifecycle_tag_ids"].get("plan") == "t1"
-    assert updates["status_tag_ids"].get("completed") == "t2"
+    assert updates["status_tag_ids"] == {"completed": "t2"}  # "plan" is not a status
     assert updates.get("created_available_tags") is None  # cache path has no create flag
 
     def fake_fetch(*, token, channel_id, opener=None):
@@ -174,7 +161,7 @@ def test_lifecycle_tag_map_manual_only_never_create(tmp_path: Path, monkeypatch)
         store, channel_id="forum1", token="tok"
     )
     assert out["created_available_tags"] is False
-    assert out["lifecycle_tag_ids"].get("specify") == "s1"
+    assert out["status_tag_ids"] == {"completed": "d1"}
     store.close()
 
 

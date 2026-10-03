@@ -13,11 +13,9 @@ from agent_discord.host.forum_realm import (
     FORUM_NEED_NOT_FORUM,
     ForumRealmError,
     GUILD_FORUM,
-    assert_forum_channel,
     binding_is_forum_realm,
     collect_forum_thread_dests,
-    discover_forum_post_threads,
-    is_forum_binding,
+    discover_forum_post_rows,
     mark_forum_binding,
     parent_from_forum_thread_binding,
     remember_forum_thread_parent,
@@ -26,22 +24,12 @@ from agent_discord.host.forum_realm import (
 from agent_discord.persistence.sqlite import SQLiteStore
 
 
-def test_assert_forum_channel_fail_closed() -> None:
-    info = assert_forum_channel({"id": "f1", "type": GUILD_FORUM, "name": "tickets"})
-    assert info.channel_id == "f1"
-    with pytest.raises(ForumRealmError) as exc:
-        assert_forum_channel({"id": "t1", "type": 0})
-    assert "Need:" in exc.value.spoken
-    assert "forum" in exc.value.spoken.lower()
-
-
 def test_mark_and_detect_forum_binding(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "f.sqlite3")
     store.initialize()
     mark_forum_binding(store, workspace_id="ws", channel_id="forum-1")
     assert binding_is_forum_realm(store, "forum-1", workspace_id="ws")
-    row = store.get_binding("ws", "forum-1")
-    assert is_forum_binding(row)
+    assert not binding_is_forum_realm(store, "text-1", workspace_id="ws")
     store.close()
 
 
@@ -169,10 +157,10 @@ def test_discover_threads_and_parent_remember(tmp_path: Path) -> None:
 
         return Resp()
 
-    ids = discover_forum_post_threads(
+    rows = discover_forum_post_rows(
         token="tok", forum_channel_id="forum", opener=opener
     )
-    assert ids == ("post-a", "post-c")
+    assert tuple(str(row["id"]) for row in rows) == ("post-a", "post-c")
 
     dests = collect_forum_thread_dests(
         store,
