@@ -204,6 +204,17 @@ Not a product feature. Optional extra `discord-os[debug]`. Default **off.** `DIS
 
 Text binds and the HOST panel are the default. Slash is optional (default off) and mirrors the same verbs when registered — `/bind` (name autocomplete), `/job` (DOS-* autocomplete), `/status`, `/on`, `/off`, `/stop`, `/open`, `/connect`. When interactions are exposed, the host self-heals registration (version-aware; fail soft). Not required for doctor, binds, or jobs. No `/add`. See [slash.md](slash.md). Code: `src/agent_discord/discord/interactions.py`.
 
+## Forwarded messages
+
+Discord forwarding sends an **empty** outer `content` with
+`message_reference.type = 1` (FORWARD) and the real payload in
+`message_snapshots[].message`. `message_from_rest_payload` merges snapshot
+content, attachments, and embeds into the intake behind a `forwarded`
+provenance line (the forwarder's own comment, when they wrote one, stays
+first) and stamps `metadata["forwarded"]`. A reply (`type` 0) is not a
+forward and keeps its own content. Without the merge a forwarded ask lands
+blank.
+
 ## Schedules while Off
 
 Due schedules do **not** queue as a job storm when HOST is Off. Listen posts one

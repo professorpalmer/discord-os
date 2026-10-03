@@ -1003,25 +1003,88 @@ def message_from_rest_payload(
     if raw.get("thread") and isinstance(raw["thread"], dict) and raw["thread"].get("id"):
         msg_thread = str(raw["thread"]["id"])
     author = raw.get("author") if isinstance(raw.get("author"), dict) else {}
-    embeds = raw.get("embeds") if isinstance(raw.get("embeds"), list) else []
+    embeds = list(raw.get("embeds")) if isinstance(raw.get("embeds"), list) else []
+    content = str(raw.get("content") or fallback_content)
+    forwarded = _forwarded_snapshots(raw)
+    if forwarded:
+        content = _merge_forward_content(content, forwarded)
+        for snapshot in forwarded:
+            for att in snapshot.get("attachments") or ():
+                parsed = _attachment_from_rest(att)
+                if parsed is None:
+                    continue
+                if parsed.attachment_id and parsed.attachment_id in seen:
+                    continue
+                attachments.append(parsed)
+                if parsed.attachment_id:
+                    seen.add(parsed.attachment_id)
+            snap_embeds = snapshot.get("embeds")
+            if isinstance(snap_embeds, list):
+                embeds.extend(snap_embeds)
+    metadata: dict[str, Any] = {
+        "provider": "discord-rest",
+        "embeds": embeds,
+        "components": _scrub_component_urls(components),
+        "flags": raw.get("flags") or 0,
+        "author_name": str(author.get("global_name") or author.get("username") or ""),
+        "author_bot": bool(author.get("bot")),
+    }
+    if forwarded:
+        metadata["forwarded"] = True
     return DiscordMessage(
         channel_id=str(raw.get("channel_id") or channel_id),
-        content=str(raw.get("content") or fallback_content),
+        content=content,
         message_id=str(raw.get("id") or ""),
         thread_id=msg_thread,
         author_id=str(author.get("id") or "") or None,
         attachments=tuple(attachments),
-        metadata={
-            "provider": "discord-rest",
-            "embeds": embeds,
-            "components": _scrub_component_urls(components),
-            "flags": raw.get("flags") or 0,
-            "author_name": str(
-                author.get("global_name") or author.get("username") or ""
-            ),
-            "author_bot": bool(author.get("bot")),
-        },
+        metadata=metadata,
     )
+
+
+FORWARD_PROVENANCE = "forwarded"
+MESSAGE_REFERENCE_FORWARD = 1
+
+
+def _forwarded_snapshots(raw: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Snapshot message objects behind a forward.
+
+    A forward arrives with an empty outer ``content`` and the real payload in
+    ``message_snapshots[].message``; ``message_reference.type`` is 1 (FORWARD).
+    Without this the intake is blank.
+    """
+
+    snapshots = raw.get("message_snapshots")
+    if not isinstance(snapshots, list):
+        return []
+    reference = (
+        raw.get("message_reference")
+        if isinstance(raw.get("message_reference"), dict)
+        else {}
+    )
+    ref_type = reference.get("type")
+    if ref_type is not None:
+        try:
+            if int(ref_type) != MESSAGE_REFERENCE_FORWARD:
+                return []
+        except (TypeError, ValueError):
+            return []
+    found: list[dict[str, Any]] = []
+    for item in snapshots:
+        if not isinstance(item, dict):
+            continue
+        message = item.get("message")
+        if isinstance(message, dict):
+            found.append(message)
+    return found
+
+
+def _merge_forward_content(content: str, snapshots: Sequence[Mapping[str, Any]]) -> str:
+    bodies = [str(snap.get("content") or "").strip() for snap in snapshots]
+    bodies = [body for body in bodies if body]
+    block = "\n\n".join([FORWARD_PROVENANCE] + bodies)
+    head = (content or "").strip()
+    return f"{head}\n\n{block}" if head else block
 
 
 def _attachment_from_rest(att: Any) -> Optional[DiscordAttachment]:

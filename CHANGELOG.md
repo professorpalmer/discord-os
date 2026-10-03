@@ -225,6 +225,9 @@
 ### Send to Discord OS
 - A message context-menu command (long-press, Apps) turns any message, with its attachments and a provenance line, into an ask in the home channel. Operator-only. Ephemeral receipt.
 
+### Forwarded messages become asks
+- A message forwarded into a bound channel is read from its snapshot (content, attachments, embeds) behind a `forwarded` line. Before, forwards landed as empty asks.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
