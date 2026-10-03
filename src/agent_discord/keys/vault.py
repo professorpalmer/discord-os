@@ -25,6 +25,29 @@ def fingerprint_secret(secret: str) -> str:
     return text[-4:]
 
 
+def write_private(path: Path, data: bytes) -> None:
+    """Write ``data`` readable by the owner only, with no world-readable window.
+
+    The keys directory is tightened to 0700, the file is created 0600, and a
+    pre-existing file is re-tightened before it is truncated.
+    """
+
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        os.chmod(path.parent, 0o700)
+    except OSError:
+        pass
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as handle:
+            fd = -1
+            handle.write(data)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
 def _xor(data: bytes, keystream: bytes) -> bytes:
     return bytes(a ^ b for a, b in zip(data, keystream))
 
@@ -139,17 +162,12 @@ class KeyVault:
         return raw if isinstance(raw, Mapping) else None
 
     def _load_or_create_master(self) -> bytes:
-        self.keys_dir.mkdir(parents=True, exist_ok=True)
         if self.master_path.is_file():
             data = self.master_path.read_bytes()
             if len(data) == 32:
                 return data
         data = os.urandom(32)
-        self.master_path.write_bytes(data)
-        try:
-            os.chmod(self.master_path, 0o600)
-        except OSError:
-            pass
+        write_private(self.master_path, data)
         return data
 
     def _read_payload(self) -> dict[str, Any]:
@@ -162,10 +180,5 @@ class KeyVault:
         return raw if isinstance(raw, dict) else {"version": 1, "entries": {}}
 
     def _write_payload(self, payload: Mapping[str, Any]) -> None:
-        self.keys_dir.mkdir(parents=True, exist_ok=True)
         text = json.dumps(dict(payload), indent=2, sort_keys=True) + "\n"
-        self.vault_path.write_text(text, encoding="utf-8")
-        try:
-            os.chmod(self.vault_path, 0o600)
-        except OSError:
-            pass
+        write_private(self.vault_path, text.encode("utf-8"))

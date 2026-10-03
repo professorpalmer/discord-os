@@ -344,3 +344,34 @@ def test_slash_off_revokes_always_grants(tmp_path: Path) -> None:
     assert store.host_is_armed("ch") is False
     assert not _grants_live(store)
     store.close()
+
+
+def test_key_files_are_owner_only(tmp_path: Path) -> None:
+    import os
+    import stat
+
+    from agent_discord.keys.connect import mint_pairing_ticket
+
+    old_umask = os.umask(0o022)
+    try:
+        mint_pairing_ticket(tmp_path)
+        KeyVault(tmp_path / "keys").put("openrouter", "sk-or-v1-not-a-real-key", "test")
+    finally:
+        os.umask(old_umask)
+    keys = tmp_path / "keys"
+    assert stat.S_IMODE(keys.stat().st_mode) == 0o700
+    for name in ("tickets.json", "vault.json", "master.key"):
+        assert stat.S_IMODE((keys / name).stat().st_mode) == 0o600, name
+
+
+def test_existing_world_readable_tickets_are_tightened(tmp_path: Path) -> None:
+    import stat
+
+    from agent_discord.keys.connect import mint_pairing_ticket
+
+    keys = tmp_path / "keys"
+    keys.mkdir(mode=0o755)
+    (keys / "tickets.json").write_text("{}", encoding="utf-8")
+    (keys / "tickets.json").chmod(0o644)
+    mint_pairing_ticket(tmp_path)
+    assert stat.S_IMODE((keys / "tickets.json").stat().st_mode) == 0o600

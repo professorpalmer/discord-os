@@ -12,6 +12,9 @@
 ### Every Off path revokes Always grants
 - Text `/off`, slash `/off` and `/stop`, and a fatal gateway close now clear Always-allow grants, like the panel Off button already did. One helper, `set_host_armed`, owns arm/disarm.
 
+### Key files are owner-only from creation
+- `keys/tickets.json`, `vault.json` and `master.key` are created 0600 in a 0700 `keys/` directory, with no world-readable window. Existing files are tightened on the next write.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
