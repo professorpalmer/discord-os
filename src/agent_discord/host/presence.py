@@ -5,7 +5,8 @@ Fail soft if the extra is missing, Discord desktop is not running, or IPC
 dies — never crash the host.
 
 Install: ``pip install discord-os[presence]``.
-Disable: ``DISCORD_OS_PRESENCE=0``. Default ON when the extra is available.
+Enable: ``DISCORD_OS_PRESENCE=1``. Default OFF: bot Gateway presence already
+shows the host state on the phone.
 Client id: ``DISCORD_APPLICATION_ID`` (same application id as invite / slash).
 """
 
@@ -31,11 +32,11 @@ _SESSION: Optional["RichPresence"] = None
 
 
 def presence_enabled(env: Optional[Mapping[str, str]] = None) -> bool:
-    """Feature flag. Default ON. Set ``DISCORD_OS_PRESENCE=0`` to disable."""
+    """Feature flag. Default OFF. Set ``DISCORD_OS_PRESENCE=1`` to enable."""
 
     source = env if env is not None else os.environ
-    raw = str(source.get(ENV_PRESENCE) or "1").strip().lower()
-    return raw not in _FALSEY
+    raw = str(source.get(ENV_PRESENCE) or "").strip().lower()
+    return bool(raw) and raw not in _FALSEY
 
 
 def pypresence_available() -> bool:
