@@ -96,6 +96,17 @@ the codebase lands with an ISO-8601 local timestamp. Call sites stay plain.
 | Foreground | No-op when both streams are a terminal. |
 | Partial line | Held until its newline, so one logical line is never split across two stamps. |
 
+### Rotation
+
+The host rotates its own log — at startup and then at most once a minute from
+the writer. No logrotate, no cron.
+
+| Rule | Behavior |
+|---|---|
+| Ceiling | `host.log` over **10 MB** rotates. |
+| Generations | `host.log.1` .. `host.log.3`; the fourth is deleted. |
+| Method | **Copy-truncate.** launchd opens `StandardOutPath` once per spawn and holds that descriptor for the life of the process, so a rename would leave the host writing into an unlinked inode until the next respawn. The bytes are copied to `host.log.1` and `host.log` is truncated in place; launchd and `start_detached` both open it append, so writes resume at the new end of file. |
+
 ## Approval timeout (P0.3)
 
 Parked write-gate Allow / Always allow / Deny does not sit forever. After
@@ -185,7 +196,7 @@ Not a product feature. Optional extra `discord-os[debug]`. Default **off.** `DIS
 - `src/agent_discord/host/status_digest.py` — Discord RO status digest from dashboard (P2.7)
 - `src/agent_discord/discord/tts.py` — local TTS + voice join/leave honesty (DAVE Deny)
 - `src/agent_discord/host/install.py` — login item
-- `src/agent_discord/host/logstream.py` — timestamped host.log lines
+- `src/agent_discord/host/logstream.py` — timestamped host.log lines + copy-truncate rotation
 - `src/agent_discord/host/actions.py` — Terminal / files / browser
 - `src/agent_discord/cli.py` — `cmd_host_*`, `cmd_setup`
 

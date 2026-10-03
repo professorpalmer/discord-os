@@ -81,6 +81,9 @@
 ### host.log lines carry a timestamp
 - The long-running host wraps stdout and stderr so every complete line in `host.log` starts with a local ISO-8601 timestamp. One-shot `--once` / `--json` output stays plain.
 
+### host.log rotates at 10 MB
+- The host copy-truncates `host.log` into `host.log.1`..`.3` past 10 MB, at startup and at most once a minute. Copy-truncate keeps launchd's open descriptor on the live file.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
