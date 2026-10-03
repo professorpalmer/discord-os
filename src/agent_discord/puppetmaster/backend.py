@@ -427,6 +427,49 @@ def worker_env(base: Optional[Mapping[str, str]] = None) -> dict[str, str]:
     return env
 
 
+SCRATCH_DIR_ENV = "DISCORD_OS_SCRATCH_DIR"
+
+
+def scratch_dir(env: Optional[Mapping[str, str]] = None) -> Path:
+    """Owner-only empty cwd for asks that name no checkout."""
+
+    source = os.environ if env is None else env
+    raw = str(source.get(SCRATCH_DIR_ENV) or "").strip()
+    path = Path(raw).expanduser() if raw else Path.home() / ".discord-os" / "scratch"
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return path
+
+
+def is_runtime_dir(path: Path, workspace: Optional[Path]) -> bool:
+    """The Discord OS state dir, anything inside it, or the non-repo dir holding it.
+
+    That is where ``.env`` and the SQLite store live, so no worker may use it
+    as its cwd.
+    """
+
+    if workspace is None:
+        return False
+    here = Path(path).expanduser().resolve()
+    state = Path(workspace).expanduser().resolve()
+    if here == state or state in here.parents:
+        return True
+    return here == state.parent and not (here / ".git").exists()
+
+
+def confine_worker_cwd(
+    workdir: Optional[str],
+    *,
+    workspace: Optional[Path],
+    env: Optional[Mapping[str, str]] = None,
+) -> str:
+    """Never cook in the runtime dir. Fall back to the scratch dir instead."""
+
+    candidate = Path(workdir).expanduser() if workdir else Path.cwd()
+    if is_runtime_dir(candidate, workspace):
+        return str(scratch_dir(env))
+    return str(candidate)
+
+
 def request_workdir(
     request: DispatchRequest,
     fallback: Optional[str | Path] = None,

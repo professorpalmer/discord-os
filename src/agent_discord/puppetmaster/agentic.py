@@ -38,6 +38,7 @@ from agent_discord.puppetmaster.backend import (
     _parse_safe_cli_completion,
     _safe_dispatch_prompt,
     cli_supports_flag,
+    confine_worker_cwd,
     iter_cli_process_events,
     prepend_early_job_id,
     request_workdir,
@@ -58,6 +59,8 @@ class AgenticPuppetmasterBackend:
     cli: str = "puppetmaster"
     pin: ModelPin = field(default_factory=lambda: AGENTIC_MODEL_PIN)
     cwd: Optional[str | Path] = None
+    # Host state dir (.agent-discord): never a worker cwd; owns gates/.
+    workspace: Optional[str | Path] = None
     timeout_seconds: float = 3600.0
     vault: Optional[KeyVault] = None
     env: Optional[Mapping[str, str]] = None
@@ -408,7 +411,11 @@ class AgenticPuppetmasterBackend:
         """Build ARG_MAX-safe local agentic argv (file handoff when oversized)."""
 
         prompt = _safe_dispatch_prompt(request)
-        workdir = request_workdir(request, self.cwd)
+        workdir = confine_worker_cwd(
+            request_workdir(request, self.cwd),
+            workspace=self._host_workspace(),
+            env=self.env,
+        )
         mode = str((request.metadata or {}).get("compute_mode") or "implement")
         if mode not in {"implement", "analyze"}:
             mode = "implement"
@@ -488,6 +495,13 @@ class AgenticPuppetmasterBackend:
             attach_gate_env(child_env, run_id=request.run_id, workspace=ws)
         except Exception:
             pass
+
+    def _host_workspace(self) -> Optional[Path]:
+        if self.workspace:
+            return Path(self.workspace)
+        source = self.env if self.env is not None else os.environ
+        raw = str(source.get("AGENT_DISCORD_WORKSPACE") or "").strip()
+        return Path(raw) if raw else None
 
     def _resolve_secret(self) -> str:
         if self.vault is not None:

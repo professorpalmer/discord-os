@@ -25,6 +25,10 @@
 - Failed check names are reduced to a safe label of at most 60 characters.
 - A PR URL in a job summary binds the job only when the repo is a GitHub remote of a host checkout, or is listed in `DISCORD_OS_GITHUB_REPOS`.
 
+### Workers never run in the Discord OS runtime directory
+- When a run's cwd would be the state dir (`.agent-discord`), anything inside it, or the non-repo directory that holds it and `.env`, the worker runs in an owner-only scratch dir instead (`~/.discord-os/scratch`, or `DISCORD_OS_SCRATCH_DIR`).
+- The gate hook refuses read tools on `.env` / `.env.*` (templates excepted), `.netrc`, `.git-credentials`, key files, SQLite files, and anything under `.agent-discord`, `.ssh`, `.aws` or `.gnupg`.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

@@ -1334,6 +1334,7 @@ def _select_backend(config: AppConfig) -> PuppetmasterBackend:
         cli=cli,
         pin=AGENTIC_MODEL_PIN,
         cwd=config.puppetmaster_cwd,
+        workspace=config.workspace,
         vault=KeyVault(keys_dir(config)),
     )
 

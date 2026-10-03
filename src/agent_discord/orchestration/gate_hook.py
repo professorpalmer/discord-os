@@ -519,6 +519,47 @@ def hook_stdout_payload(result: GateHoldResult) -> dict[str, Any]:
     }
 
 
+# Host secrets and Discord OS state. A read tool never returns these, even
+# when the worker cwd would allow it.
+_PROTECTED_NAMES = frozenset(
+    {
+        ".env",
+        ".netrc",
+        ".git-credentials",
+        "master.key",
+        "vault.json",
+        "tickets.json",
+        "id_rsa",
+        "id_ecdsa",
+        "id_ed25519",
+    }
+)
+_PROTECTED_SUFFIXES = (".sqlite3", ".sqlite", ".sqlite3-wal", ".sqlite3-shm", ".pem")
+_PROTECTED_DIRS = frozenset({".agent-discord", ".ssh", ".aws", ".gnupg"})
+_ENV_TEMPLATES = frozenset({".env.example", ".env.sample", ".env.template"})
+
+
+def protected_path_reason(tool_input: Any) -> str:
+    """Why this read is refused, or "" when it may pass through."""
+
+    if not isinstance(tool_input, Mapping):
+        return ""
+    raw = str(tool_input.get("path") or tool_input.get("file_path") or "").strip()
+    if not raw:
+        return ""
+    parts = [part.lower() for part in Path(raw).parts]
+    if any(part in _PROTECTED_DIRS for part in parts):
+        return "protected path: host state or credentials"
+    name = parts[-1] if parts else ""
+    if name in _PROTECTED_NAMES:
+        return "protected path: host secret file"
+    if name.startswith(".env.") and name not in _ENV_TEMPLATES:
+        return "protected path: host secret file"
+    if name.endswith(_PROTECTED_SUFFIXES):
+        return "protected path: database or key file"
+    return ""
+
+
 def deny_result(request_id: str, reason: str, tool_class: str = "") -> GateHoldResult:
     return GateHoldResult(
         request_id=request_id or "unknown",
@@ -1054,12 +1095,16 @@ def run_hook(
             if klass is None:
                 result = deny_result(req.request_id, "unknown tool class", tool_name)
             elif klass == "read":
-                result = GateHoldResult(
-                    request_id=req.request_id,
-                    decision="allow",
-                    reason="read passthrough",
-                    tool_class="read",
-                )
+                refused = protected_path_reason(tool_input)
+                if refused:
+                    result = deny_result(req.request_id, refused, "read")
+                else:
+                    result = GateHoldResult(
+                        request_id=req.request_id,
+                        decision="allow",
+                        reason="read passthrough",
+                        tool_class="read",
+                    )
             else:
                 run_dir = ensure_run_gate_dir(
                     resolve_run_gate_dir(run_id=req.run_id, env=source)

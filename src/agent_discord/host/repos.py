@@ -208,8 +208,8 @@ def host_reach_block(
         lines.append(f"- This run cwd: {work.resolve()}")
     else:
         lines.append(
-            "- This run cwd is the Discord OS runtime, not a product repo. "
-            "cd into a named checkout first when the ask names one."
+            "- This run cwd is an empty scratch directory, not a product repo. "
+            "Name a checkout in the ask to work in it."
         )
     lines.append("Do not treat .agent-discord as the subject repository.")
     return "\n".join(lines)
