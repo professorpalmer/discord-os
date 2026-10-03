@@ -15,6 +15,10 @@
 ### Key files are owner-only from creation
 - `keys/tickets.json`, `vault.json` and `master.key` are created 0600 in a 0700 `keys/` directory, with no world-readable window. Existing files are tightened on the next write.
 
+### Roles modal validates role ids
+- Only a 17-20 digit role snowflake is accepted. The guild id (the @everyone role) is refused.
+- Prefix the id with `-` to remove an operator role from Discord.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

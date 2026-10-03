@@ -517,7 +517,7 @@ def test_roles_modal_adds_operator_role(tmp_path: Path):
                     {
                         "type": 1,
                         "components": [
-                            {"type": 4, "custom_id": "discord-os:roles-text", "value": "role-99"}
+                            {"type": 4, "custom_id": "discord-os:roles-text", "value": "123456789012345678"}
                         ],
                     }
                 ],
@@ -527,7 +527,7 @@ def test_roles_modal_adds_operator_role(tmp_path: Path):
         opener=opener,
     )
     assert action == "roles"
-    assert "role-99" in store.list_operator_roles()
+    assert "123456789012345678" in store.list_operator_roles()
     store.close()
 
 

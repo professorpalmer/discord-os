@@ -375,3 +375,45 @@ def test_existing_world_readable_tickets_are_tightened(tmp_path: Path) -> None:
     (keys / "tickets.json").chmod(0o644)
     mint_pairing_ticket(tmp_path)
     assert stat.S_IMODE((keys / "tickets.json").stat().st_mode) == 0o600
+
+
+def _roles_modal(text: str, user: str, guild_id: str = "111111111111111111") -> dict[str, Any]:
+    from agent_discord.host.panel import ROLES_MODAL_ID
+
+    return {
+        "type": INTERACTION_MODAL_SUBMIT,
+        "id": "ix",
+        "token": "tok",
+        "application_id": "app-1",
+        "channel_id": "ch",
+        "guild_id": guild_id,
+        "member": {"user": {"id": user}, "roles": []},
+        "data": {
+            "custom_id": ROLES_MODAL_ID,
+            "components": [
+                {"type": 1, "components": [{"type": 4, "custom_id": "r", "value": text}]}
+            ],
+        },
+    }
+
+
+def test_roles_modal_refuses_everyone_and_junk(tmp_path: Path) -> None:
+    store = _store(tmp_path, owner="owner-1")
+    for text in ("111111111111111111", "role-99", "12", "<@&222222222222222222>"):
+        handle_gateway_interaction(store, "ch", _roles_modal(text, "owner-1"), opener=_Recorder())
+    assert store.list_operator_roles() == []
+    store.close()
+
+
+def test_roles_modal_adds_then_removes(tmp_path: Path) -> None:
+    store = _store(tmp_path, owner="owner-1")
+    role = "222222222222222222"
+    handle_gateway_interaction(store, "ch", _roles_modal(role, "owner-1"), opener=_Recorder())
+    assert store.list_operator_roles() == [role]
+    assert store.is_operator("member-5", role_ids=[role])
+    handle_gateway_interaction(
+        store, "ch", _roles_modal(f"-{role}", "owner-1"), opener=_Recorder()
+    )
+    assert store.list_operator_roles() == []
+    assert not store.is_operator("member-5", role_ids=[role])
+    store.close()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Callable, Mapping, Optional
 
 from agent_discord.discord.layout import action_row, string_select
@@ -361,12 +362,33 @@ def poll_modal_payload() -> dict[str, Any]:
 def roles_modal_payload() -> dict[str, Any]:
     return _text_modal_payload(
         ROLES_MODAL_ID,
-        "Add operator role",
+        "Operator roles",
         ROLES_TEXT_ID,
         "Discord role id",
-        "Snowflake role id",
+        "Role id to add, or -role id to remove",
         max_length=32,
     )
+
+
+_SNOWFLAKE_RE = re.compile(r"^[0-9]{17,20}$")
+
+
+def parse_role_edit(text: str, *, guild_id: str = "") -> tuple[str, str] | None:
+    """Roles modal text -> ("add" | "remove", role_id), or None when refused.
+
+    The guild id is the @everyone role id, so adding it would make every
+    member an operator. It is refused.
+    """
+
+    raw = (text or "").strip()
+    verb = "add"
+    if raw.startswith("-"):
+        verb, raw = "remove", raw[1:].strip()
+    if not _SNOWFLAKE_RE.match(raw):
+        return None
+    if verb == "add" and raw == str(guild_id or "").strip():
+        return None
+    return verb, raw
 
 
 def _ephemeral_operator_menu(
@@ -1438,14 +1460,20 @@ def _handle_modal_submit(
     if not author_may_operate(store, user_id, custom_id, role_ids=role_ids):
         return "denied"
     if custom_id == ROLES_MODAL_ID:
-        role_id = text.strip()
-        writer = getattr(store, "add_operator_role", None)
-        if role_id and callable(writer):
-            try:
-                writer(role_id)
-                print(f"panel role {role_id}", flush=True)
-            except Exception as exc:
-                print(f"panel role failed: {exc}", flush=True)
+        edit = parse_role_edit(text, guild_id=str(payload.get("guild_id") or ""))
+        if edit is None:
+            print("panel role refused: not a role snowflake, or @everyone", flush=True)
+        else:
+            verb, role_id = edit
+            writer = getattr(
+                store, "add_operator_role" if verb == "add" else "remove_operator_role", None
+            )
+            if callable(writer):
+                try:
+                    writer(role_id)
+                    print(f"panel role {verb} {role_id}", flush=True)
+                except Exception as exc:
+                    print(f"panel role failed: {exc}", flush=True)
         _paint_interaction(
             store, channel_id, payload, token=token, opener=opener, confirm_off=False
         )

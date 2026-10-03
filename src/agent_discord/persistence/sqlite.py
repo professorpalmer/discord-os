@@ -1548,6 +1548,15 @@ class SQLiteStore:
         )
         conn.commit()
 
+    def remove_operator_role(self, role_id: str) -> bool:
+        conn = self._connection()
+        cursor = conn.execute(
+            "DELETE FROM operator_roles WHERE role_id=?",
+            (str(role_id or "").strip(),),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
     def list_operators(self) -> list[dict[str, Any]]:
         rows = self._connection().execute(
             "SELECT user_id, role, created_ms FROM operators ORDER BY created_ms ASC"
