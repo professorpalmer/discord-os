@@ -33,7 +33,12 @@ discord-os put|get|ls …
 discord-os repo status [NAME] [--json]
 discord-os map [QUERY] [--rank shipped|now|next|never] [--json]
 discord-os lineage [RUN_ID|DOS-10001] [--json]
+discord-os eval [--limit N --yes] [--pin MODEL] [--out PATH] [--json]
 ```
+
+`eval` replays [labeled runs](../jobs/outcomes.md) read-only and spends
+OpenRouter money, so it needs both `--limit` and `--yes`; without them it prints
+the plan and exits. See [eval](../jobs/eval.md).
 
 `python -m agent_discord` is the same entry. `--fake` is the hermetic path.
 

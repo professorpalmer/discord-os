@@ -252,6 +252,9 @@
 ### Outcomes from reactions
 - An operator's thumbs up, shrug or thumbs down on a Done card is stored as that run's outcome (good, partial, bad). Reactions are read over REST, polled at most every 5 minutes for runs settled in the last 7 days. The HOST card shows a 7-day tally, and `discord-os lineage` shows each run's outcomes.
 
+### discord-os eval
+- `discord-os eval --limit N --yes` replays labeled runs read-only (analyze mode, no Discord posts) under the current or an allowlisted pin. It scores win, loss or same with a documented rubric and can write a JSON report. Without `--yes` it only prints the plan. A pin outside the allowlist exits 2.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

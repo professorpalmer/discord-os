@@ -35,6 +35,7 @@ from agent_discord.contracts import (
     DiscordObjectRef,
     ObjectNotFoundError,
     PuppetmasterBackend,
+    RunReceipt,
     TaskIntake,
     discord_jump_url,
 )
@@ -563,6 +564,39 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_lineage.add_argument("--json", action="store_true")
 
+    p_eval = sub.add_parser(
+        "eval",
+        help="Replay labeled runs read-only and score win/loss/same (spends OpenRouter)",
+    )
+    p_eval.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="How many labeled runs to replay. Required to actually run",
+    )
+    p_eval.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm the spend. Without it, print the plan and exit",
+    )
+    p_eval.add_argument(
+        "--pin",
+        default="",
+        help="Candidate model pin. Must be in the allowlist; default is the current pin",
+    )
+    p_eval.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Write the JSON report to this path",
+    )
+    p_eval.add_argument("--json", action="store_true", help="Print the JSON report")
+    p_eval.add_argument(
+        "--fake",
+        action="store_true",
+        help="Use the fake Puppetmaster backend (no network / no spend)",
+    )
+
     p_hook = sub.add_parser(
         "gate-hook",
         help="PreToolUse hold: park Discord Allow/Deny and block until resolved (always exit 0)",
@@ -794,6 +828,87 @@ def cmd_lineage(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         return 0 if nodes else 1
     finally:
         store.close()
+
+
+def cmd_eval(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
+    """Replay labeled runs read-only and score them. Needs --limit and --yes."""
+
+    out = out or sys.stdout
+    from agent_discord.contracts import ModelNotAllowedError
+    from agent_discord.orchestration.evaluate import (
+        assert_pin_allowed,
+        format_plan,
+        pin_refusal,
+        plan_eval,
+        run_eval,
+    )
+    from agent_discord.orchestration.jobs import JobPool
+
+    requested_pin = str(getattr(args, "pin", "") or "")
+    try:
+        pin = assert_pin_allowed(requested_pin)
+    except ModelNotAllowedError:
+        print(pin_refusal(requested_pin), file=sys.stderr)
+        return 2
+
+    config = apply_runtime_secrets(load_config())
+    store = SQLiteStore(config.database_path)
+    store.initialize()
+    try:
+        limit = max(0, int(getattr(args, "limit", 0) or 0))
+        candidates = plan_eval(store, limit=limit)
+        if not limit or not getattr(args, "yes", False):
+            print(format_plan(candidates, pin=pin), file=out)
+            return 0
+        if not candidates:
+            print("eval: no labeled runs to replay", file=out)
+            return 0
+        if args.fake:
+            backend = FakePuppetmasterBackend()
+        else:
+            backend = _select_backend(config)
+            backend.resolve_model(pin)
+        # No Discord facade at all: an eval must not land a card in a channel.
+        orch = AgentOrchestrator(
+            store=store,
+            backend=backend,
+            discord=None,
+            model=pin,
+            post_progress_to_discord=False,
+            workspace=config.workspace,
+            compute_cwd=config.puppetmaster_cwd,
+        )
+        pool = JobPool(max_live=1)
+
+        def dispatch(intake: TaskIntake) -> RunReceipt | None:
+            pool.submit(orch.run_task, intake)
+            for receipt in pool.wait():
+                return receipt
+            return None
+
+        report = run_eval(store, dispatch=dispatch, candidates=candidates, pin=pin)
+    finally:
+        store.close()
+
+    body = json.dumps(report, indent=2)
+    if args.out is not None:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(body + "\n", encoding="utf-8")
+    if args.json:
+        print(body, file=out)
+    else:
+        totals = report["totals"]
+        print(f"eval: pin {report['pin']} · {report['replayed']} replayed", file=out)
+        print(
+            f"win {totals['win']} · loss {totals['loss']} · same {totals['same']}",
+            file=out,
+        )
+        for row in report["results"]:
+            code = row["job_code"] or row["run_id"][:12]
+            print(f"  {code}  {row['label']:7} -> {row['verdict']}", file=out)
+        if args.out is not None:
+            print(f"report: {args.out}", file=out)
+    return 0
 
 
 def cmd_bootstrap(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
@@ -3295,6 +3410,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return cmd_repo(args)
     if args.command == "lineage":
         return cmd_lineage(args)
+    if args.command == "eval":
+        return cmd_eval(args)
     if args.command == "gate-hook":
         return cmd_gate_hook(args)
     parser.error(f"unknown command {args.command}")

@@ -190,6 +190,11 @@ class JobPool:
 
 
 def _needs_write_lock(intake: TaskIntake) -> bool:
+    from agent_discord.orchestration.evaluate import is_eval_metadata
+
+    if is_eval_metadata(intake.metadata):
+        # Eval replays are analyze-only, so they overlap like any other read.
+        return False
     if compute_dispatch_mode(intake.text) in {MODE_IMPLEMENT, MODE_SWARM}:
         return True
     # run_task becomes a swarm when metadata asks for workers, whatever the text.
