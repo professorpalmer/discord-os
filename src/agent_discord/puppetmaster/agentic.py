@@ -12,6 +12,8 @@ from typing import Any, Iterator, Mapping, Optional
 
 from agent_discord.puppetmaster.cancel_honesty import (
     cancel_receipt,
+    clear_local_pid_sidecar,
+    persist_local_pid_sidecar,
     popen_kwargs_for_killable_child,
     terminate_process_group,
 )
@@ -345,7 +347,7 @@ class AgenticPuppetmasterBackend:
                 model=pin.canonical,
                 cli=self.cli,
                 timeout_seconds=self.timeout_seconds,
-                on_job_id=lambda job_id: self._job_ids.__setitem__(request.run_id, job_id),
+                on_job_id=lambda job_id: self._note_job_id(request.run_id, job_id),
             ):
                 if event.kind == EventKind.RECEIPT:
                     event = self._with_measured_usage(
@@ -512,6 +514,7 @@ class AgenticPuppetmasterBackend:
             return
         with self._child_lock:
             self._children[rid] = proc
+        self._write_pid_sidecar(rid, proc)
 
     def _unregister_child(self, run_id: str, proc: Any) -> None:
         rid = (run_id or "").strip()
@@ -521,6 +524,48 @@ class AgenticPuppetmasterBackend:
             current = self._children.get(rid)
             if current is proc or current is None:
                 self._children.pop(rid, None)
+        clear_local_pid_sidecar(rid, workspace=self._host_workspace(), env=self.env)
+
+    def _write_pid_sidecar(self, run_id: str, proc: Any = None) -> None:
+        """Durable record of the live worker group, for reap after a host restart."""
+
+        rid = (run_id or "").strip()
+        if not rid:
+            return
+        with self._child_lock:
+            child = proc if proc is not None else self._children.get(rid)
+        pid = int(getattr(child, "pid", 0) or 0)
+        if pid <= 0:
+            return
+        # Spawned with start_new_session, so the group leader is the child.
+        pgid = pid
+        if os.name == "posix":
+            try:
+                pgid = os.getpgid(pid)
+            except OSError:
+                pgid = pid
+        try:
+            persist_local_pid_sidecar(
+                run_id=rid,
+                pid=pid,
+                pgid=pgid,
+                job_id=self._job_ids.get(rid, ""),
+                workspace=self._host_workspace(),
+                env=self.env,
+                command=f"puppetmaster agentic ({self.cli})",
+            )
+        except Exception:
+            pass
+
+    def _note_job_id(self, run_id: str, job_id: str) -> None:
+        """Remember the PM job id and fold it into the pid sidecar."""
+
+        rid = (run_id or "").strip()
+        ident = (job_id or "").strip()
+        if not rid or not ident:
+            return
+        self._job_ids[rid] = ident
+        self._write_pid_sidecar(rid)
 
     def cancel_receipt_for(self, run_id: str):
         """gjc-remote-shaped receipt after ``cancel`` (inspect only)."""

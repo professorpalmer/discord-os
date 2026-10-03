@@ -1715,6 +1715,26 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     stale = store.fail_stale_runs()
     if stale:
         print(f"cleared {len(stale)} leftover running job(s)", flush=True)
+    # Local agentic children run in their own session, so an abrupt host exit
+    # leaves them cooking, spending, and writing the checkout. Path A already
+    # reaps orphaned remote pids; this is the local half.
+    try:
+        from agent_discord.puppetmaster.cancel_honesty import reap_orphaned_local_pids
+
+        for record in reap_orphaned_local_pids(workspace=config.workspace):
+            print(
+                "orphan worker {action}: run={run_id} pid={pid} pgid={pgid} "
+                "job={job_id}".format(
+                    action=record.get("action") or "?",
+                    run_id=record.get("run_id") or "?",
+                    pid=record.get("pid") or 0,
+                    pgid=record.get("pgid") or 0,
+                    job_id=record.get("job_id") or "-",
+                ),
+                flush=True,
+            )
+    except Exception as exc:  # best-effort: never block host startup
+        print(f"orphan worker reap skipped: {exc}", flush=True)
     try:
         compacted = store.compact_events()
         if compacted["deleted"]:

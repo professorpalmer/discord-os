@@ -61,6 +61,15 @@ SSH cook backend for the run — never silent local cook. If interrupt cannot be
 confirmed, Discord speaks **Cancel unconfirmed** and does not paint Cancelled.
 See [cards/reactive.md](../cards/reactive.md).
 
+Local children spawn with `start_new_session`, so an abrupt host exit orphans
+them: they keep cooking, spending, and writing the checkout after the write lock
+is released. Both halves leave a durable pid sidecar — Path A remote pids under
+`remote_pids/`, local agentic groups under `{workspace}/local_pids/` (override
+`DISCORD_OS_LOCAL_PID_DIR`) — and `discord-os listen` reaps live groups at
+startup, beside `fail_stale_runs()`. A group is only signalled when the recorded
+pid still looks like a Puppetmaster process (`ps` command line), so a reused pid
+is cleared, never killed. Every outcome prints a line.
+
 ## Path A edge races (beyond 0.5.54)
 
 Best-effort hardenings for residual Path A races:
