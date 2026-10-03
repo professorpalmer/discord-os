@@ -45,6 +45,9 @@
 ### SSH remote command is one quoted string
 - Without a host workdir, the remote argv went to ssh as separate words. sshd re-split it, so the `bash -lc` PID/trap/watchdog prelude ran in the wrong shell and Cancel/orphan reaping broke. The remote command is now always one shell-quoted string, and `--` precedes the target.
 
+### File tools never write inside `.git`
+- The gate hook refuses write, edit, hashline and delete tools on any path inside `.git`. A written `.git/hooks/*` or `.git/config` would run later, outside any gate. Git commands still change `.git` as usual.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

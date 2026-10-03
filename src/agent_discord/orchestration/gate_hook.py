@@ -560,6 +560,17 @@ def protected_path_reason(tool_input: Any) -> str:
     return ""
 
 
+def protected_write_reason(tool_input: Any) -> str:
+    """File tools never write inside .git: hooks and config run later, ungated."""
+
+    if not isinstance(tool_input, Mapping):
+        return ""
+    raw = str(tool_input.get("path") or tool_input.get("file_path") or "").strip()
+    if raw and ".git" in (part.lower() for part in Path(raw).parts):
+        return "protected path: .git is changed only through git commands"
+    return ""
+
+
 def deny_result(request_id: str, reason: str, tool_class: str = "") -> GateHoldResult:
     return GateHoldResult(
         request_id=request_id or "unknown",
@@ -1105,6 +1116,10 @@ def run_hook(
                         reason="read passthrough",
                         tool_class="read",
                     )
+            elif klass in {"write", "edit"} and protected_write_reason(tool_input):
+                result = deny_result(
+                    req.request_id, protected_write_reason(tool_input), klass
+                )
             else:
                 run_dir = ensure_run_gate_dir(
                     resolve_run_gate_dir(run_id=req.run_id, env=source)

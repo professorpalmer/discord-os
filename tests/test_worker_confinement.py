@@ -114,7 +114,11 @@ def _hook(tool_name: str, tool_input: dict, tmp_path: Path) -> dict:
         [],
         stdin=stdin,
         stdout=stdout,
-        env={"DISCORD_OS_GATE_DIR": str(tmp_path / "gate"), "DISCORD_OS_RUN_ID": "run-1"},
+        env={
+            "DISCORD_OS_GATE_DIR": str(tmp_path / "gate"),
+            "DISCORD_OS_RUN_ID": "run-1",
+            "DISCORD_OS_GATE_TIMEOUT_SECONDS": "0.05",
+        },
     )
     return json.loads(stdout.getvalue())
 
@@ -412,3 +416,21 @@ def test_ssh_argv_survives_remote_shell_without_workdir() -> None:
         out = subprocess.run(_as_sshd(argv), capture_output=True, text=True, timeout=10).stdout
         assert out.splitlines()[0].startswith("PID=") and out.splitlines()[0] != "PID=", out
         assert "two words" in out, out
+
+
+def test_hook_refuses_file_tools_inside_git(tmp_path: Path) -> None:
+    """Audit E2-5: .git/hooks and .git/config never change through file tools."""
+
+    for tool, args in (
+        ("write_file", {"path": ".git/hooks/pre-commit", "content": "x"}),
+        ("edit_file", {"path": "repo/.git/config"}),
+        ("apply_hashline", {"path": ".git/hooks/post-checkout"}),
+        ("delete_file", {"path": ".git/index"}),
+    ):
+        out = _hook(tool, args, tmp_path)
+        assert out["permissionDecision"] == "deny", tool
+        assert ".git" in out["permissionDecisionReason"], tool
+    # Nothing was queued for a phone card: refused before enqueue.
+    assert not (tmp_path / "gate" / "pending").exists() or not any(
+        (tmp_path / "gate" / "pending").iterdir()
+    )
