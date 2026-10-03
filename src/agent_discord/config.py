@@ -11,6 +11,36 @@ from typing import Mapping, Optional
 
 DEFAULT_HOST_BOT_TOKEN_PATH = Path.home() / ".pmharness" / ".discord_token"
 
+# Workspace resolution is deliberately CWD-independent: `discord-os ...` run from
+# a git checkout used to create or open a second SQLite database next to the
+# source. Documented in docs/host/README.md.
+LIVE_WORKSPACE_RELPATH = ("discord-os", ".agent-discord")
+FALLBACK_WORKSPACE_RELPATH = (".discord-os", "workspace")
+
+
+def default_workspace(*, home: Optional[Path] = None) -> Path:
+    """The workspace used when AGENT_DISCORD_WORKSPACE is unset.
+
+    Prefer the documented live layout ``~/discord-os/.agent-discord`` when it
+    already exists, else ``~/.discord-os/workspace``. Never the current
+    directory.
+    """
+
+    root = Path(home) if home is not None else Path.home()
+    live = root.joinpath(*LIVE_WORKSPACE_RELPATH)
+    if live.is_dir():
+        return live
+    return root.joinpath(*FALLBACK_WORKSPACE_RELPATH)
+
+
+def default_dotenv_path(workspace: Path) -> Path:
+    """``.env`` sits beside the workspace, not in the current directory.
+
+    The live layout is ``~/discord-os/.env`` next to ``~/discord-os/.agent-discord``.
+    """
+
+    return Path(workspace).expanduser().parent / ".env"
+
 
 class ConfigError(ValueError):
     """Invalid or incomplete local configuration."""
@@ -75,6 +105,17 @@ def _parse_dotenv(path: Path) -> dict[str, str]:
     return values
 
 
+def _resolve_workspace(
+    explicit: Optional[Path],
+    from_env: Optional[str],
+) -> Path:
+    if explicit is not None:
+        return Path(explicit).expanduser().resolve()
+    if (from_env or "").strip():
+        return Path(str(from_env).strip()).expanduser().resolve()
+    return default_workspace().resolve()
+
+
 def load_config(
     *,
     env: Optional[Mapping[str, str]] = None,
@@ -82,18 +123,18 @@ def load_config(
     workspace: Optional[Path] = None,
 ) -> AppConfig:
     """Load config from process env, optionally overlaying a .env file first."""
-    merged: dict[str, str] = {}
-    if dotenv_path is None:
-        dotenv_path = Path.cwd() / ".env"
-    merged.update(_parse_dotenv(dotenv_path))
     source = dict(os.environ if env is None else env)
+    if dotenv_path is None:
+        # Locate .env from the workspace we can already name, so the file read
+        # does not depend on where the command was run.
+        dotenv_path = default_dotenv_path(
+            _resolve_workspace(workspace, source.get("AGENT_DISCORD_WORKSPACE"))
+        )
+    merged: dict[str, str] = {}
+    merged.update(_parse_dotenv(dotenv_path))
     merged.update({k: v for k, v in source.items() if v is not None})
 
-    ws = Path(
-        workspace
-        or merged.get("AGENT_DISCORD_WORKSPACE")
-        or ".agent-discord"
-    ).expanduser().resolve()
+    ws = _resolve_workspace(workspace, merged.get("AGENT_DISCORD_WORKSPACE"))
 
     provider = (merged.get("DISCORD_MCP_PROVIDER") or "rest").strip().lower()
     if provider not in {"rest", "saseq", "braindao"}:

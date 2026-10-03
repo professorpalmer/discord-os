@@ -87,6 +87,9 @@
 ### LaunchAgent ThrottleInterval
 - The rendered plist sets `ThrottleInterval` 30 (and the systemd unit `RestartSec=30`), so a crash at startup is a readable log, not a 10 s respawn loop.
 
+### Workspace and .env no longer depend on the current directory
+- With `AGENT_DISCORD_WORKSPACE` unset, the workspace is `~/discord-os/.agent-discord` when it exists, else `~/.discord-os/workspace`, and `.env` is read from beside it. Running `discord-os` from a checkout no longer creates a second database there.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

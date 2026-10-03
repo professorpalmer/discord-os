@@ -13,6 +13,7 @@ from agent_discord import __version__
 from agent_discord.config import (
     AppConfig,
     apply_runtime_secrets,
+    default_workspace,
     discord_token_source,
     load_config,
 )
@@ -24,8 +25,13 @@ _PID_IN_OWNER = re.compile(r"(?:^|\D)(\d{2,})(?:\D|$)")
 
 
 def preferred_live_workspace(home: Optional[Path] = None) -> Optional[Path]:
-    root = Path(home) if home is not None else Path.home()
-    candidate = root / "discord-os" / ".agent-discord"
+    """The workspace `discord-os` picks with AGENT_DISCORD_WORKSPACE unset.
+
+    Same resolver as `load_config`, so doctor cannot WARN against a path the
+    product would never choose. None when it does not exist yet.
+    """
+
+    candidate = default_workspace(home=home)
     return candidate if candidate.is_dir() else None
 
 

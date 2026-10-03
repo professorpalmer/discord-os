@@ -86,6 +86,26 @@ discord-os host stop
 discord-os host start --channel-id ID
 ```
 
+## Workspace and .env resolution
+
+Resolution is **CWD-independent**. Running `discord-os ...` from a git checkout
+used to create or open a second SQLite database next to the source; it no longer
+can.
+
+| Input | Resolves to |
+|---|---|
+| `AGENT_DISCORD_WORKSPACE` set | That path, expanded and resolved. Unchanged. |
+| Unset, `~/discord-os/.agent-discord` exists | **That** — the documented live workspace. |
+| Unset, live layout absent | `~/.discord-os/workspace`. |
+| `.env` | Beside the workspace: `<workspace>/../.env`, i.e. `~/discord-os/.env` for the live layout. Never the current directory. |
+| Explicit `dotenv_path=` / `workspace=` | Honored exactly as passed. |
+
+A `.env` may still declare `AGENT_DISCORD_WORKSPACE`; the file is located from
+the stable default first, then that declaration wins over the default.
+`host doctor`'s preferred-workspace WARN uses the same resolver, so it cannot
+warn against a path the product would never choose. Code:
+`default_workspace` / `default_dotenv_path` in `src/agent_discord/config.py`.
+
 ## Host log
 
 `.agent-discord/logs/host.log` is the LaunchAgent's `StandardOutPath` **and**
