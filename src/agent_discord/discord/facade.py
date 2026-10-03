@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Optional, Sequence
+import inspect
+from typing import Any, Callable, Mapping, Optional, Sequence
 
 from agent_discord.contracts import DiscordMessage, GatewayOwnerRegistry, ToolDescriptor, ToolInvocationResult
 from agent_discord.discord.chunking import chunk_message
@@ -11,6 +12,36 @@ from agent_discord.discord.gateway import InMemoryGatewayOwnerRegistry
 
 _CARD_PREFIX = "**Card**"
 _RECEIPT_PREFIX = "**Receipt**"
+
+
+def accepts_keyword(method: Callable[..., Any], name: str) -> bool:
+    """Whether ``method`` takes keyword ``name``.
+
+    The facade asks this instead of calling and catching TypeError: a provider
+    that raises TypeError while serializing a Components V2 payload or parsing
+    the response would otherwise look like a signature mismatch, and the retry
+    would silently drop the components or re-post a message Discord already
+    accepted.
+    """
+
+    try:
+        signature = inspect.signature(method)
+    except (TypeError, ValueError):
+        # Builtin or C-level callable: assume it takes what we pass and let a
+        # real TypeError propagate.
+        return True
+    parameters = signature.parameters
+    if any(
+        param.kind is inspect.Parameter.VAR_KEYWORD for param in parameters.values()
+    ):
+        return True
+    param = parameters.get(name)
+    if param is None:
+        return False
+    return param.kind in {
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    }
 
 
 class DiscordFacade:
@@ -62,42 +93,36 @@ class DiscordFacade:
         flags: int = 0,
     ) -> list[DiscordMessage]:
         """Send content, chunking as needed; return all posted messages."""
+        send = self.provider.send_message
         if flags or embeds:
-            kwargs: dict = {"thread_id": thread_id}
-            if embeds:
+            takes_embeds = accepts_keyword(send, "embeds")
+            takes_flags = accepts_keyword(send, "flags")
+            kwargs: dict = {}
+            if accepts_keyword(send, "thread_id"):
+                kwargs["thread_id"] = thread_id
+            if embeds and takes_embeds:
                 kwargs["embeds"] = embeds
-            if components is not None:
+            if components is not None and accepts_keyword(send, "components"):
                 kwargs["components"] = components
-            if flags:
+            if flags and takes_flags:
                 kwargs["flags"] = flags
-            try:
-                msg = self.provider.send_message(channel_id, content or "", **kwargs)
-            except TypeError:
-                fallback = content or _fallback_from_embeds(embeds)
-                try:
-                    msg = self.provider.send_message(
-                        channel_id,
-                        fallback,
-                        thread_id=thread_id,
-                        components=components,
-                    )
-                except TypeError:
-                    msg = self.provider.send_message(
-                        channel_id, fallback, thread_id=thread_id
-                    )
+            rich = (not embeds or takes_embeds) and (not flags or takes_flags)
+            body = content or "" if rich else content or _fallback_from_embeds(embeds)
+            msg = send(channel_id, body, **kwargs)
             self._remember_outbound(msg)
             return [msg]
         chunks = _chunks_for_inbound_skip(content, chunk_limit)
         posted: list[DiscordMessage] = []
         last = len(chunks) - 1
+        takes_components = accepts_keyword(send, "components")
+        takes_thread = accepts_keyword(send, "thread_id")
         for index, chunk in enumerate(chunks):
-            kwargs = {"thread_id": thread_id}
-            if components is not None and index == last:
+            kwargs = {}
+            if takes_thread:
+                kwargs["thread_id"] = thread_id
+            if components is not None and index == last and takes_components:
                 kwargs["components"] = components
-            try:
-                msg = self.provider.send_message(channel_id, chunk, **kwargs)
-            except TypeError:
-                msg = self.provider.send_message(channel_id, chunk, thread_id=thread_id)
+            msg = send(channel_id, chunk, **kwargs)
             self._remember_outbound(msg)
             posted.append(msg)
         return posted
@@ -146,21 +171,19 @@ class DiscordFacade:
         components: Optional[list] = None,
         flags: int = 0,
     ) -> DiscordMessage:
-        try:
-            msg = self.provider.send_attachment(
-                channel_id,
-                filename,
-                data,
-                content=content,
-                thread_id=thread_id,
-                embeds=embeds,
-                components=components,
-                flags=flags,
-            )
-        except TypeError:
-            msg = self.provider.send_attachment(
-                channel_id, filename, data, content=content, thread_id=thread_id
-            )
+        send = self.provider.send_attachment
+        kwargs: dict = {}
+        if accepts_keyword(send, "content"):
+            kwargs["content"] = content
+        if accepts_keyword(send, "thread_id"):
+            kwargs["thread_id"] = thread_id
+        if accepts_keyword(send, "embeds"):
+            kwargs["embeds"] = embeds
+        if accepts_keyword(send, "components"):
+            kwargs["components"] = components
+        if accepts_keyword(send, "flags"):
+            kwargs["flags"] = flags
+        msg = send(channel_id, filename, data, **kwargs)
         self._remember_outbound(msg)
         return msg
 
@@ -208,25 +231,14 @@ class DiscordFacade:
     ) -> DiscordMessage:
         method = getattr(self.provider, "edit_message", None)
         if callable(method):
-            try:
-                msg = method(
-                    channel_id,
-                    message_id,
-                    content,
-                    components=components,
-                    embeds=embeds,
-                    flags=flags,
-                )
-            except TypeError:
-                try:
-                    msg = method(
-                        channel_id,
-                        message_id,
-                        content,
-                        components=components,
-                    )
-                except TypeError:
-                    msg = method(channel_id, message_id, content)
+            kwargs: dict = {}
+            if accepts_keyword(method, "components"):
+                kwargs["components"] = components
+            if accepts_keyword(method, "embeds"):
+                kwargs["embeds"] = embeds
+            if accepts_keyword(method, "flags"):
+                kwargs["flags"] = flags
+            msg = method(channel_id, message_id, content, **kwargs)
             self._remember_outbound(msg)
             return msg
         result = self._invoke_first(

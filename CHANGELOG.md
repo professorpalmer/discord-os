@@ -98,6 +98,9 @@
 ### Components v2 cards always fit
 - Cards are trimmed to Discord's 40-component and 4,000-character limits before send or edit. Long text is truncated, and buttons and selects are never dropped. Before, an oversized card got a 400 and the live card silently stopped updating.
 
+### Facade checks provider capability
+- The Discord facade picks the call shape with `inspect.signature`, not `except TypeError`. A real TypeError during send or edit now surfaces, instead of silently dropping Components v2 or posting the message twice.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
