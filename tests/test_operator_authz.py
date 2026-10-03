@@ -417,3 +417,58 @@ def test_roles_modal_adds_then_removes(tmp_path: Path) -> None:
     assert store.list_operator_roles() == []
     assert not store.is_operator("member-5", role_ids=[role])
     store.close()
+
+
+def _ask(fake, now_ms: int, offset: int, text: str = "summarize open PRs", author: str = "owner-1"):
+    fake.inbox.append(
+        DiscordMessage(
+            channel_id="ch",
+            content=text,
+            message_id=_snowflake_at(now_ms + offset),
+            author_id=author,
+        )
+    )
+
+
+def _notices(fake, needle: str) -> int:
+    return sum(1 for m in fake.sent if needle in (m.content or ""))
+
+
+def test_ask_while_off_replies_once_until_an_ask_runs(tmp_path: Path) -> None:
+    """Audit B6: asks while Off were dropped with no reply."""
+
+    store = _store(tmp_path, owner="owner-1")
+    store.set_host_control("ch", armed=False)
+    orch, facade, fake = _orch(tmp_path, store)
+    now_ms = 1_750_000_000_000
+    _ask(fake, now_ms, 1_000)
+    _ask(fake, now_ms, 2_000)
+    receipts = drain_inbound(orch, facade, channel_id="ch", workspace_id="ws", since_ms=now_ms)
+    assert receipts == []
+    assert _notices(fake, "Host is Off") == 1
+
+    store.set_host_control("ch", armed=True)
+    _ask(fake, now_ms, 3_000)
+    assert len(drain_inbound(orch, facade, channel_id="ch", workspace_id="ws", since_ms=now_ms)) == 1
+
+    store.set_host_control("ch", armed=False)
+    _ask(fake, now_ms, 4_000)
+    drain_inbound(orch, facade, channel_id="ch", workspace_id="ws", since_ms=now_ms)
+    assert _notices(fake, "Host is Off") == 2
+    store.close()
+
+
+def test_ask_while_halted_replies_and_strangers_get_nothing(tmp_path: Path) -> None:
+    from agent_discord.orchestration.service import set_spend_halted
+
+    store = _store(tmp_path, owner="owner-1")
+    set_spend_halted(store, True)
+    orch, facade, fake = _orch(tmp_path, store)
+    now_ms = 1_750_000_000_000
+    _ask(fake, now_ms, 1_000, author="stranger-9")
+    drain_inbound(orch, facade, channel_id="ch", workspace_id="ws", since_ms=now_ms)
+    assert _notices(fake, "Spend is halted") == 0
+    _ask(fake, now_ms, 2_000)
+    drain_inbound(orch, facade, channel_id="ch", workspace_id="ws", since_ms=now_ms)
+    assert _notices(fake, "Spend is halted") == 1
+    store.close()

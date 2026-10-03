@@ -63,6 +63,9 @@
 ### Approve cooks in JobPool
 - Approve and Always on a parked write now submit the cook to the host JobPool (realm write lock, live slot, live-thread tracking). Before, the whole implement ran on the Gateway reader thread, which stalled heartbeat ACKs and bypassed the write lock.
 
+### Asks while Off or halted get one reply
+- A typed ask or a HOST Ask-modal ask that arrives while the host is Off or spend-halted now gets one reply saying why it did not start, plus the HOST card with On / More > Halt. Repeats stay quiet until an ask runs again. Before, these asks were dropped silently.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

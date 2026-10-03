@@ -1934,11 +1934,19 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                     ask_channel, prompt, replay_of, requester_id = asks.get_nowait()
                 except Empty:
                     break
-                if not store.host_is_armed(ask_channel or args.channel_id):
-                    continue
+                from agent_discord.orchestration.listen import (
+                    PAUSED_HALTED,
+                    PAUSED_OFF,
+                    notice_paused_once,
+                )
                 from agent_discord.orchestration.service import is_spend_halted
 
+                paused_channel = ask_channel or args.channel_id
+                if not store.host_is_armed(paused_channel):
+                    notice_paused_once(discord, store, paused_channel, None, PAUSED_OFF)
+                    continue
                 if is_spend_halted(store, args.workspace_id):
+                    notice_paused_once(discord, store, paused_channel, None, PAUSED_HALTED)
                     continue
                 ask_meta: dict[str, Any] = {}
                 if replay_of:

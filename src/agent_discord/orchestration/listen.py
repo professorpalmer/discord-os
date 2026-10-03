@@ -408,22 +408,24 @@ def drain_inbound(
                 store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
+        paused = ""
         if not _channel_is_armed(store, channel_id):
-            watermark = _advance_listen_watermark(
-                store, watermark_key, created_ms, message.message_id, watermark
-            )
-            continue
+            paused = PAUSED_OFF
+        elif is_spend_halted(store, workspace_id):
+            paused = PAUSED_HALTED
         text = intake_text or (message.content or "").strip()
-        if not text:
+        if paused or not text:
+            if paused and text and author_may_operate(
+                store, message.author_id, "ask", role_ids=_author_role_ids(message)
+            ):
+                notice_paused_once(
+                    discord, store, channel_id, message.thread_id or thread_id, paused
+                )
             watermark = _advance_listen_watermark(
                 store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
-        if is_spend_halted(store, workspace_id):
-            watermark = _advance_listen_watermark(
-                store, watermark_key, created_ms, message.message_id, watermark
-            )
-            continue
+        clear_paused_notice(store, channel_id)
         if not author_may_dispatch(
             store,
             message.author_id,
@@ -1512,6 +1514,53 @@ def _absorb_power(
             force=True,
         )
 
+
+
+PAUSED_OFF = "off"
+PAUSED_HALTED = "halted"
+_PAUSED_SPOKEN = {
+    PAUSED_OFF: "Host is Off, so this ask was not started. Press On on the HOST card, then send it again.",
+    PAUSED_HALTED: (
+        "Spend is halted, so this ask was not started. Choose Halt in the HOST card's "
+        "More menu to resume (or raise DISCORD_OS_SPEND_CAP_USD), then send it again."
+    ),
+}
+
+
+def _paused_notice_key(channel_id: str) -> str:
+    return f"paused_notice:{(channel_id or '').strip()}"
+
+
+def notice_paused_once(
+    discord: Any, store: Any, channel_id: str, thread_id: Optional[str], state: str
+) -> None:
+    """Say once why an ask did not start, with the HOST card for On / Resume.
+
+    Repeats are quiet until the channel runs an ask again (clear_paused_notice).
+    """
+
+    from agent_discord.orchestration.service import HOST_PREFS_WORKSPACE
+
+    key = _paused_notice_key(channel_id)
+    try:
+        if store.get_preference(HOST_PREFS_WORKSPACE, key) == state:
+            return
+        store.set_preference(HOST_PREFS_WORKSPACE, key, state)
+    except Exception:
+        return
+    _post_host_deny(discord, channel_id, thread_id, _PAUSED_SPOKEN[state])
+    publish_host_card(discord, store, channel_id, thread_id=thread_id)
+
+
+def clear_paused_notice(store: Any, channel_id: str) -> None:
+    from agent_discord.orchestration.service import HOST_PREFS_WORKSPACE
+
+    key = _paused_notice_key(channel_id)
+    try:
+        if store.get_preference(HOST_PREFS_WORKSPACE, key):
+            store.set_preference(HOST_PREFS_WORKSPACE, key, "")
+    except Exception:
+        return
 
 
 def _post_host_deny(
