@@ -231,6 +231,9 @@
 ### User-installable commands
 - `/ask` and Send to Discord OS can be user-installed, so they work in DMs and servers without the bot. These calls answer through the interaction webhook, land in the home channel, and require a paired operator even on an unpaired desk. Setup steps are in `docs/host/slash.md`.
 
+### Repo status without a cook
+- "Any open PRs on X?", "issues on X" and "status of X" for a bound or named repo now answer with one card built from `gh` and git (branch, ahead/behind, last commit, CI, open PRs with checks, open issues). No worker runs and no OpenRouter spend. Also `discord-os repo status [NAME] [--json]`.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

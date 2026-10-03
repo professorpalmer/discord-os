@@ -527,6 +527,9 @@ class AgentOrchestrator:
         self.compute_cwd = Path(compute_cwd) if compute_cwd is not None else None
         self.host_repos = host_repos
         self.host_github: Optional[Callable[[Path], str]] = None
+        # Deterministic "status of <repo>" answer. cli listen wires the real
+        # collector; unset means every status ask still cooks.
+        self.repo_status_collector: Optional[Callable[..., Any]] = None
         self.retry_backoff_s = float(retry_backoff_s)
         self.presence = presence
         # Injectable SSH runner for Path A remote cook tests (argv, *, timeout_seconds).
@@ -1053,6 +1056,17 @@ class AgentOrchestrator:
             extra_meta["cwd"] = str(run_cwd)
         if chosen is not None:
             extra_meta["repo"] = chosen.name
+        card = self._deterministic_repo_status(intake, chosen)
+        if card:
+            receipt = self._close_without_worker(
+                intake,
+                task_id=task_id,
+                run_id=run_id,
+                summary=card,
+                live=live,
+            )
+            self._release_live_thread(job_thread_id, run_id)
+            return receipt
         from agent_discord.host.github import is_github_status_ask
         from agent_discord.host.github import is_github_unauthed_report
 
@@ -3690,6 +3704,28 @@ class AgentOrchestrator:
             posted += 1
             if posted >= SETTLE_MAX_BUBBLES:
                 return
+
+    def _deterministic_repo_status(
+        self, intake: TaskIntake, chosen: Optional[HostRepo]
+    ) -> str:
+        """Answer "status of <repo>" from git and gh — no worker, no spend."""
+
+        if chosen is None or not callable(self.repo_status_collector):
+            return ""
+        from agent_discord.host.repo_status import (
+            format_repo_status,
+            is_repo_status_ask,
+        )
+
+        if not is_repo_status_ask(intake.text):
+            return ""
+        try:
+            status = self.repo_status_collector(chosen.path, name=chosen.name)
+        except Exception:
+            return ""
+        if status is None:
+            return ""
+        return format_repo_status(status).strip()
 
     def _close_without_worker(
         self,

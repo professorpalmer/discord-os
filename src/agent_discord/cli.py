@@ -617,6 +617,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_clear.add_argument("--fake", action="store_true", help="Fake Discord/Puppetmaster")
     p_clear.add_argument("--json", action="store_true")
 
+    p_repo = sub.add_parser("repo", help="Read a named host checkout")
+    repo_sub = p_repo.add_subparsers(dest="repo_command", required=True)
+    p_repo_status = repo_sub.add_parser(
+        "status",
+        help="Open PRs, open issues, branch drift, and default-branch CI (no cook)",
+    )
+    p_repo_status.add_argument(
+        "name",
+        nargs="?",
+        default="",
+        help="Named checkout (default: every host checkout)",
+    )
+    p_repo_status.add_argument("--json", action="store_true")
+
     return parser
 
 
@@ -662,6 +676,40 @@ def cmd_map(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     if world:
         chunks.append(format_lifts(world))
     print("\n\n".join(chunks), file=out)
+    return 0
+
+
+def cmd_repo(
+    args: argparse.Namespace,
+    *,
+    out: TextIO | None = None,
+    repos: Any = None,
+    collector: Any = None,
+) -> int:
+    out = out or sys.stdout
+    if str(getattr(args, "repo_command", "") or "") != "status":
+        print("unknown repo subcommand", file=sys.stderr)
+        return 2
+    from agent_discord.host.repo_status import (
+        collect_repo_status,
+        format_repo_status,
+        repo_status_payload,
+    )
+    from agent_discord.host.repos import load_host_repos
+
+    catalog = tuple(repos) if repos is not None else load_host_repos()
+    wanted = str(getattr(args, "name", "") or "").strip().lower()
+    if wanted:
+        catalog = tuple(item for item in catalog if item.matches(wanted))
+    if not catalog:
+        print("no host checkout matched", file=sys.stderr)
+        return 1
+    collect = collector or collect_repo_status
+    rows = [collect(repo.path, name=repo.name) for repo in catalog]
+    if getattr(args, "json", False):
+        print(json.dumps([repo_status_payload(row) for row in rows], indent=2), file=out)
+        return 0
+    print("\n\n".join(format_repo_status(row) for row in rows), file=out)
     return 0
 
 
@@ -1737,8 +1785,10 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         retry_backoff_s=15.0,
     )
     from agent_discord.host.github import host_github_report
+    from agent_discord.host.repo_status import collect_repo_status
 
     orch.host_github = host_github_report
+    orch.repo_status_collector = collect_repo_status
     claimed = False
     exit_code = 0
     panel_stop = threading.Event()
@@ -3182,6 +3232,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return cmd_add(args)
     if args.command == "map":
         return cmd_map(args)
+    if args.command == "repo":
+        return cmd_repo(args)
     if args.command == "lineage":
         return cmd_lineage(args)
     if args.command == "gate-hook":

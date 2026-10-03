@@ -14,6 +14,7 @@ Surface README is first run plus this map. Feature pages live in their own folde
 | [host](host/README.md) | On/Off/Ask, watchdogs, status digest, TTS, REQUIRE_OPERATORS, LaunchAgent |
 | [host/policy](host/policy.md) | **HARD locks** (SSH OPT-IN, forum tags, Path A, gateway, Update, voice, spend, desk, slash, CU PARKED) |
 | [realms](realms/README.md) | Channel = checkout |
+| [realms/repo-status](realms/repo-status.md) | "Open PRs on X?" answered from gh + git, no cook |
 | [jobs](jobs/README.md) | Parallel cooks, `DISCORD_OS_MAX_LIVE`, live session threads |
 | [tools](tools/README.md) | Named CLI/HTTP catalog |
 | [wiki](wiki/README.md) | Portable LLM wiki over HTTP |

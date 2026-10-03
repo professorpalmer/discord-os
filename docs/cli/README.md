@@ -29,6 +29,7 @@ discord-os schedule --every 1h --channel-id ID PROMPT
 discord-os spend [--cap USD] [--halt] [--resume]
 discord-os jobs clear-needs --failed [--older-than DAYS] [--channel-id ID] [--dry-run]
 discord-os put|get|ls …
+discord-os repo status [NAME] [--json]
 discord-os map [QUERY] [--rank shipped|now|next|never] [--json]
 discord-os lineage [RUN_ID|DOS-10001] [--json]
 ```
