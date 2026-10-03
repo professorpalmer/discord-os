@@ -15,6 +15,7 @@ from typing import Any, Optional, Sequence
 
 from agent_discord import PRODUCT_NAME
 from agent_discord.contracts import RunReceipt, TaskStatus
+from agent_discord.discord.host_page import POWER_HALTED, POWER_OFF, POWER_ON
 from agent_discord.discord.layout import (
     FLAG_COMPONENTS_V2,
     STYLE_DANGER,
@@ -91,6 +92,7 @@ class CardMessage:
     thinking: str = ""
     chrome: str = ""  # Need / Live / Done Section label
     job_code: str = ""
+    power: str = ""  # HOST only: on / off / halted (not derived from the title)
 
     @property
     def text(self) -> str:
@@ -144,6 +146,7 @@ class CardMessage:
                         action_rows=extra,
                         avatar_url=self.avatar_url or "",
                         updated_ts=self.updated_ts,
+                        power=self.power,
                     )
             except Exception:
                 pass
@@ -173,11 +176,14 @@ class CardMessage:
             children = [text_display(heading)]
             used = len(heading)
         if self.kind == "HOST":
-            live = self.title == "Running"
-            table = [
-                ("power", "on" if live else "off"),
-                ("listen", "live" if live else "idle"),
-            ]
+            from agent_discord.discord.host_page import (
+                host_power_table,
+                power_from_host_title,
+            )
+
+            table = list(
+                host_power_table(self.power or power_from_host_title(self.title))
+            )
             table.extend((name, value) for name, value, _inline in self.fields)
             table_text = status_table(table)
             children.append(text_display(table_text))
@@ -704,6 +710,14 @@ def host_card(
         github=github,
         spend_known=spend_known,
     )
+    # Power is carried, not read back off the title: a confirm screen and an
+    # armed-but-halted host both kept painting "power off / listen idle".
+    if not armed:
+        power = POWER_OFF
+    elif halted:
+        power = POWER_HALTED
+    else:
+        power = POWER_ON
     if confirm_off:
         return CardMessage(
             kind="HOST",
@@ -712,6 +726,7 @@ def host_card(
             color=COLOR_WORK,
             avatar_url=avatar_url,
             fields=fields,
+            power=power,
         )
     if int(confirm_clear_needs or 0) > 0:
         n = int(confirm_clear_needs)
@@ -725,6 +740,7 @@ def host_card(
             color=COLOR_WORK,
             avatar_url=avatar_url,
             fields=fields,
+            power=power,
         )
     return CardMessage(
         kind="HOST",
@@ -738,6 +754,7 @@ def host_card(
         color=COLOR_FAIL if halted and armed else (COLOR_LIVE if armed else COLOR_IDLE),
         avatar_url=avatar_url,
         fields=fields,
+        power=power,
     )
 
 

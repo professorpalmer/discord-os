@@ -682,6 +682,77 @@ def test_jobs_pick_answers_ephemerally_without_a_channel_post(tmp_path: Path):
     store.close()
 
 
+def _host_card_text(card) -> str:
+    payload = card.v2_payload()
+    out: list[str] = []
+
+    def walk(items) -> None:
+        for item in items or ():
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == 10:
+                out.append(str(item.get("content") or ""))
+            walk(item.get("components"))
+
+    walk(payload["components"])
+    return "\n".join(out)
+
+
+def test_host_card_power_rows_follow_the_host_without_host_page(monkeypatch):
+    """Same contract on the monolith layout (DISCORD_OS_HOST_PAGE=0)."""
+
+    from agent_discord.orchestration.cards import host_card
+
+    def row(text: str, name: str) -> str:
+        for line in text.splitlines():
+            bare = line.strip().strip("`")
+            if bare.startswith(name):
+                return bare[len(name) :].strip()
+        raise AssertionError(f"no {name} row in {text!r}")
+
+    monkeypatch.setenv("DISCORD_OS_HOST_PAGE", "0")
+    halted = _host_card_text(host_card(armed=True, halted=True))
+    assert row(halted, "power") == "on"
+    assert row(halted, "listen") == "halted"
+    confirm = _host_card_text(host_card(armed=True, confirm_off=True))
+    assert row(confirm, "power") == "on"
+    assert row(confirm, "listen") == "live"
+    stopped = _host_card_text(host_card(armed=False))
+    assert row(stopped, "power") == "off"
+    assert row(stopped, "listen") == "idle"
+
+
+def test_host_card_power_rows_follow_the_host_not_the_title():
+    """Audit 2026-10-02 G1-13: armed+halted and Stop? both painted power off."""
+
+    from agent_discord.orchestration.cards import host_card
+
+    running = _host_card_text(host_card(armed=True))
+    assert "`power`  on" in running
+    assert "`listen`  live" in running
+
+    halted = _host_card_text(host_card(armed=True, halted=True))
+    assert "### Halted" in halted
+    assert "`power`  on" in halted
+    assert "`listen`  halted" in halted
+
+    confirm = _host_card_text(host_card(armed=True, confirm_off=True))
+    assert "### Stop?" in confirm
+    assert "`power`  on" in confirm
+    assert "`listen`  live" in confirm
+
+    stopped = _host_card_text(host_card(armed=False))
+    assert "`power`  off" in stopped
+    assert "`listen`  idle" in stopped
+
+    # Off confirm while halted keeps power on until Confirm is tapped.
+    halted_confirm = _host_card_text(
+        host_card(armed=True, halted=True, confirm_off=True)
+    )
+    assert "`power`  on" in halted_confirm
+    assert "`listen`  halted" in halted_confirm
+
+
 def test_github_option_answers_with_auth_state_and_command(tmp_path: Path, monkeypatch):
     """Audit 2026-10-02 G1-12: More > GitHub only repainted the panel."""
 

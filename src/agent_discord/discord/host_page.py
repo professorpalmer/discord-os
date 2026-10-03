@@ -40,6 +40,37 @@ def kagekit_spike_adopted() -> bool:
     return False
 
 
+POWER_ON = "on"
+POWER_OFF = "off"
+POWER_HALTED = "halted"
+
+# Titles that are painted while the host is still armed. "Stop?" is the Off
+# confirm screen: power stays on until Confirm, and "Halted" is armed intake
+# that is holding new jobs.
+_ARMED_TITLES = {"Running": POWER_ON, "Stop?": POWER_ON, "Halted": POWER_HALTED}
+
+
+def power_from_host_title(title: str) -> str:
+    """Fallback for callers that do not carry the host power state."""
+
+    return _ARMED_TITLES.get((title or "").strip(), POWER_OFF)
+
+
+def host_power_table(power: str) -> tuple[tuple[str, str], ...]:
+    """`power` / `listen` rows. Armed-but-halted is on + halted, never off."""
+
+    state = (power or "").strip() or POWER_OFF
+    if state == POWER_HALTED:
+        return (("power", POWER_ON), ("listen", POWER_HALTED))
+    if state == POWER_ON:
+        return (("power", POWER_ON), ("listen", "live"))
+    return (("power", POWER_OFF), ("listen", "idle"))
+
+
+def host_power_lines(power: str) -> list[str]:
+    return [f"`{name}`  {value}" for name, value in host_power_table(power)]
+
+
 def split_host_v2_components(
     *,
     title: str,
@@ -50,14 +81,11 @@ def split_host_v2_components(
     update_pill: str = "",
     avatar_url: str = "",
     updated_ts: Optional[int] = None,
+    power: str = "",
 ) -> list[dict[str, Any]]:
     """Build top-level CV2: status Container + outer action rows (kagekit-shaped)."""
 
-    live = (title or "").strip() == "Running"
-    table_lines = [
-        f"`power`  {'on' if live else 'off'}",
-        f"`listen`  {'live' if live else 'idle'}",
-    ]
+    table_lines = host_power_lines(power or power_from_host_title(title))
     for name, value, _inline in fields:
         table_lines.append(f"`{name}`  {value}")
     heading = f"### {title}"
@@ -104,6 +132,7 @@ def host_v2_payload(
     update_pill: str = "",
     avatar_url: str = "",
     updated_ts: Optional[int] = None,
+    power: str = "",
 ) -> dict[str, Any]:
     return {
         "flags": FLAG_COMPONENTS_V2,
@@ -116,5 +145,6 @@ def host_v2_payload(
             update_pill=update_pill,
             avatar_url=avatar_url,
             updated_ts=updated_ts,
+            power=power,
         ),
     }

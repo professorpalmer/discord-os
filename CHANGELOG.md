@@ -191,6 +191,9 @@
 ### More > GitHub reports gh sign-in state
 - More > GitHub replies with the host's `gh` auth state and the command to run on the Mac to sign in. Before, it did nothing. No interactive login starts from Discord.
 
+### HOST status shows halted correctly
+- Armed but halted shows as power on, intake halted. The Off confirm screen keeps showing on until Off is confirmed. Before, both read `power off / listen idle`.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

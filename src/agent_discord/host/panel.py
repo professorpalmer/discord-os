@@ -705,6 +705,7 @@ def host_panel_payload(
                 thinking=card.thinking,
                 chrome=bucket,
                 job_code=card.job_code,
+                power=card.power,
             )
         except Exception:
             pass
