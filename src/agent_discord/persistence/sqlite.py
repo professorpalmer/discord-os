@@ -683,7 +683,8 @@ class SQLiteStore:
         conn.execute(
             """
             UPDATE runs SET status=?, summary=COALESCE(?, summary),
-                error=?, usage_json=?, updated_at=datetime('now')
+                error=COALESCE(?, error), usage_json=COALESCE(?, usage_json),
+                updated_at=datetime('now')
             WHERE run_id=?
             """,
             (

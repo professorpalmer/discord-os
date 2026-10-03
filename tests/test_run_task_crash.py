@@ -104,3 +104,27 @@ def test_crash_before_run_exists_still_raises(tmp_path: Path) -> None:
     else:  # pragma: no cover
         raise AssertionError("expected the pre-run error to propagate")
     store.close()
+
+
+def test_status_only_update_keeps_usage_and_error(tmp_path: Path) -> None:
+    """Audit C2: a later status-only update_run nulled usage_json and error."""
+
+    import json
+
+    store = SQLiteStore(tmp_path / "usage.sqlite3")
+    store.initialize()
+    store.create_task(task_id="t1", workspace_id="ws", channel_id="ch", intake_text="x")
+    store.create_run(run_id="r1", task_id="t1", model="m", adapter_name="a", status=TaskStatus.RUNNING)
+    store.update_run(
+        "r1",
+        status=TaskStatus.FAILED,
+        summary="boom",
+        error="swarm exited with incomplete tasks",
+        usage={"cost_usd": 0.0123, "tokens_in": 900},
+    )
+    store.update_run("r1", status=TaskStatus.CANCELLED)
+    row = store.get_run("r1")
+    assert row["status"] == TaskStatus.CANCELLED.value
+    assert row["error"] == "swarm exited with incomplete tasks"
+    assert json.loads(row["usage_json"])["cost_usd"] == 0.0123
+    store.close()

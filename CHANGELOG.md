@@ -69,6 +69,9 @@
 ### Lineage keys are per run
 - `node_key` now includes the run id. Two runs with the same ask text used to share the intake node, so the second run's lineage was pinned to the first run and `discord-os lineage` showed it empty. Existing rows keep their keys.
 
+### Status-only run updates keep usage and error
+- `update_run` no longer nulls `usage_json` or `error` when a later call only changes status (approve, dismiss, cancel, complete). Spend receipts and root causes survive.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
