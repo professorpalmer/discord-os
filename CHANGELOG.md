@@ -167,6 +167,9 @@
 ### Host restart reaps orphaned local workers
 - Local agentic children record a pid sidecar. On host start, any whose process group is still alive and still a Puppetmaster process gets SIGTERM, then SIGKILL after a grace period, and each one is logged. Before, an orphan kept cooking, spending and writing the checkout after its write lock was gone.
 
+### Stream timeout is enforced
+- The streaming read loop now checks its deadline on every pass and kills the whole process group on timeout. Before, a grandchild holding stdout open kept the loop spinning forever, and the timeout path killed only the leader.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

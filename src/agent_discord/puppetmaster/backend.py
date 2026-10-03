@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Optional
 
@@ -25,6 +26,7 @@ from agent_discord.contracts import (
     TaskStatus,
     UsageReceipt,
 )
+from agent_discord.puppetmaster.cancel_honesty import terminate_process_group
 from agent_discord.redaction import (
     ALLOWED_REASONING_KEYS,
     redact_text_markers,
@@ -1346,8 +1348,20 @@ def iter_cli_process_events(
     token_buffer = TokenStreamBuffer()
     follower = None
     seen_job_id = ""
+    # Wall-clock deadline enforced inside the loop. A grandchild holding stdout
+    # keeps both pipes open after the leader exits, so waiting for EOF plus
+    # proc.poll() could spin past timeout_seconds forever. Match dispatch():
+    # kill the whole group, not just the leader.
+    deadline = time.monotonic() + max(1.0, float(timeout_seconds))
     try:
         while True:
+            if time.monotonic() >= deadline:
+                terminate_process_group(proc, started_new_session=True)
+                yield DispatchEvent(
+                    kind=EventKind.ERROR,
+                    summary=ProgressSummary(stage="dispatch", message="timeout"),
+                )
+                return
             try:
                 item = line_queue.get(timeout=0.25)
             except queue.Empty:
@@ -1379,10 +1393,9 @@ def iter_cli_process_events(
             event = _event_from_cli_line(line, model, token_buffer)
             if event is not None:
                 yield event
-        proc.wait(timeout=timeout_seconds)
+        proc.wait(timeout=max(1.0, deadline - time.monotonic()))
     except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+        terminate_process_group(proc, started_new_session=True)
         yield DispatchEvent(
             kind=EventKind.ERROR,
             summary=ProgressSummary(stage="dispatch", message="timeout"),
