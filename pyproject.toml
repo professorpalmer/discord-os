@@ -21,7 +21,10 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Topic :: Communications :: Chat",
 ]
-dependencies = []
+# Product compute is `puppetmaster agentic` (HARD lock 10). The floor is the
+# oldest release carrying `steer`, `cost --json`, and `--emit-job-id-early`;
+# keep it in step with PUPPETMASTER_REQUIREMENT in src/agent_discord/config.py.
+dependencies = ["puppetmaster-ai>=1.27.24,<2"]
 
 [project.optional-dependencies]
 kagekit = ["discord-kagekit>=0.1"]

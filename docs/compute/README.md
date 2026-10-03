@@ -30,10 +30,11 @@ allowlist cannot widen it. `PUPPETMASTER_STATE_DIR` is already
 
 ## Puppetmaster version floor
 
-`pyproject.toml` declares `puppetmaster-ai>=1.27.30,<2` — the floor that has
-`steer`, `cost --json`, and `--emit-job-id-early`. Production once ran a stale
-1.22.15 because `dependencies` was empty and `resolve_puppetmaster_cli` prefers
-the CLI next to this Python. `discord-os host doctor` now prints the resolved
+`pyproject.toml` declares `puppetmaster-ai>=1.27.24,<2`. `steer` first shipped
+in v1.27.24. `cost --json` (with `token_usage` and `actual_cost`) and
+`--emit-job-id-early` are older. Production once ran a stale 1.22.15, which had
+no `steer` at all, because `dependencies` was empty and
+`resolve_puppetmaster_cli` prefers the CLI next to this Python. `discord-os host doctor` now prints the resolved
 CLI path and version and WARNs when it falls outside the declared range; the
 same version lands in run usage metadata as `pm_version`.
 

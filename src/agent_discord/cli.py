@@ -20,12 +20,14 @@ from uuid import uuid4
 from agent_discord import CLI_NAME, CLI_OWNER_PREFIX, PRODUCT_NAME, __version__
 from agent_discord.bootstrap import bootstrap_workspace, describe_bootstrap
 from agent_discord.config import (
+    PUPPETMASTER_REQUIREMENT,
     AppConfig,
     apply_runtime_secrets,
     check_config,
     discord_token_source,
     keys_dir,
     load_config,
+    puppetmaster_cli_found,
     resolve_compute,
     resolve_puppetmaster_cli,
 )
@@ -841,10 +843,10 @@ def cmd_check(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     if config.agent_backend == "marionette":
         print(f"marionette: {config.marionette_base_url or '(unset)'}", file=out)
     print(f"bootstrapped: {info.get('bootstrapped', False)}", file=out)
-    if shutil.which(config.puppetmaster_cli) is None:
+    if not puppetmaster_cli_found(config.puppetmaster_cli):
         print(
-            f"note:       {config.puppetmaster_cli} not on PATH "
-            "(install puppetmaster-ai for live dispatch)",
+            f"note:       {config.puppetmaster_cli} not found "
+            f"(install {PUPPETMASTER_REQUIREMENT} for live dispatch)",
             file=out,
         )
     if problems:

@@ -360,12 +360,19 @@ def usage_from_cli_meta(
         ):
             if key in nested and key not in payload:
                 payload[key] = nested[key]
+    from agent_discord.config import puppetmaster_cli_version
+
     meta: dict[str, Any] = {
         "backend": "cli",
         "cli": cli,
         "cli_model": pin.adapter_name,
         "job_id": payload.get("job_id"),
     }
+    # Which Puppetmaster actually cooked this run. Production once ran a stale
+    # 1.22.15 with no receipt saying so.
+    pm_version = puppetmaster_cli_version(cli)
+    if pm_version:
+        meta["pm_version"] = pm_version
     for key in ("cost", "total_cost", "cost_usd", "tokens"):
         if key in payload:
             meta[key] = payload[key]

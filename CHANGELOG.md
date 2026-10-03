@@ -157,6 +157,10 @@
 ### Platform-lock failures name the real fix
 - A Puppetmaster platform-lock refusal now says to run `puppetmaster platform enable agentic` on the host that cooked. Before, it said to run `discord-os connect`, which only stores a key.
 
+### Puppetmaster is a declared dependency
+- `discord-os` now depends on `puppetmaster-ai>=1.27.24,<2` (`steer` first shipped in 1.27.24). Production had been running a stale 1.22.15 with no `steer`.
+- One resolver picks the Puppetmaster CLI everywhere. `discord-os host doctor` prints its path and version and WARNs outside the range. Run usage records `pm_version`.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

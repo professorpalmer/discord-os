@@ -242,8 +242,25 @@ def load_config(
     )
 
 
+# Declared Puppetmaster range. Mirrors `dependencies` in pyproject.toml. The
+# floor is the oldest release with everything the agentic backend calls:
+# `steer` landed in v1.27.24; `cost --json` with token_usage / actual_cost and
+# `--emit-job-id-early` are older (checked in the Puppetmaster repo history).
+PUPPETMASTER_VERSION_FLOOR = (1, 27, 24)
+PUPPETMASTER_VERSION_CEILING = (2,)
+PUPPETMASTER_REQUIREMENT = "puppetmaster-ai>=1.27.24,<2"
+
+_PM_VERSION_CACHE: dict[str, str] = {}
+
+
 def resolve_puppetmaster_cli(configured: str = "puppetmaster") -> str:
-    """Prefer the CLI next to this Python. LaunchAgents often have a tiny PATH."""
+    """The one resolver for the PM executable. Every call site routes here.
+
+    Prefers the CLI next to this Python, because LaunchAgents often have a tiny
+    PATH. That preference is why production once ran a stale 1.22.15, so the
+    version is now reported (see :func:`puppetmaster_cli_version`) rather than
+    the order being guessed at.
+    """
 
     name = (configured or "puppetmaster").strip() or "puppetmaster"
     sibling = Path(sys.executable).resolve().parent / Path(name).name
@@ -253,6 +270,67 @@ def resolve_puppetmaster_cli(configured: str = "puppetmaster") -> str:
     if found:
         return found
     return name
+
+
+def puppetmaster_cli_found(configured: str = "puppetmaster") -> bool:
+    """True when the resolved PM executable actually exists on this host."""
+
+    resolved = resolve_puppetmaster_cli(configured)
+    if os.sep in resolved:
+        return Path(resolved).is_file()
+    return shutil.which(resolved) is not None
+
+
+def parse_puppetmaster_version(text: str) -> tuple[int, ...]:
+    """First dotted numeric run in ``puppetmaster --version`` output."""
+
+    import re
+
+    match = re.search(r"(\d+(?:\.\d+)+)", text or "")
+    if not match:
+        return ()
+    return tuple(int(part) for part in match.group(1).split("."))
+
+
+def puppetmaster_cli_version(cli: str = "", *, refresh: bool = False) -> str:
+    """Resolved PM version string, or "" when it cannot be read. Never raises."""
+
+    import subprocess
+
+    target = (cli or "").strip() or resolve_puppetmaster_cli()
+    if not refresh and target in _PM_VERSION_CACHE:
+        return _PM_VERSION_CACHE[target]
+    version = ""
+    try:
+        proc = subprocess.run(
+            [target, "--version"], capture_output=True, text=True, timeout=15
+        )
+        parts = parse_puppetmaster_version(f"{proc.stdout}\n{proc.stderr}")
+        if parts:
+            version = ".".join(str(part) for part in parts)
+    except Exception:
+        version = ""
+    if not version:
+        try:
+            from importlib.metadata import version as dist_version
+
+            version = dist_version("puppetmaster-ai")
+        except Exception:
+            version = ""
+    _PM_VERSION_CACHE[target] = version
+    return version
+
+
+def puppetmaster_version_in_range(version: str) -> bool:
+    """True when ``version`` satisfies PUPPETMASTER_REQUIREMENT.
+
+    An unreadable version is not a violation — callers report it separately.
+    """
+
+    parts = parse_puppetmaster_version(version)
+    if not parts:
+        return True
+    return PUPPETMASTER_VERSION_FLOOR <= parts < PUPPETMASTER_VERSION_CEILING
 
 
 def read_host_bot_token(*, path: Optional[Path] = None) -> str:

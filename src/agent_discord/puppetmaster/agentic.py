@@ -83,6 +83,9 @@ class AgenticPuppetmasterBackend:
         return self.pin
 
     def available(self) -> bool:
+        # Presence check on an already-picked executable: `self.cli` comes from
+        # config.resolve_puppetmaster_cli, the one resolver. Do not re-resolve
+        # here, or the backend could run a different CLI than it reports.
         return shutil.which(self.cli) is not None
 
     def dispatch(self, request: DispatchRequest) -> DispatchResult:

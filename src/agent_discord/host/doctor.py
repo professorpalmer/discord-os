@@ -107,6 +107,7 @@ def run_doctor(
     else:
         lines.append(f"OK discord token source={source}")
 
+    _check_puppetmaster_cli(cfg, lines)
     fails += _check_host_allowlist(lines)
     _warn_voice_join(lines)
     _check_slash_self_heal(cfg, ws, lines)
@@ -125,6 +126,41 @@ def run_doctor(
 
     return (1 if fails else 0, lines)
 
+
+
+def _check_puppetmaster_cli(cfg: AppConfig, lines: list[str]) -> None:
+    """Name the PM executable and version that would cook. WARN, never FAIL.
+
+    A stale CLI still runs, so this cannot gate the host — but production once
+    cooked on 1.22.15 with no line anywhere saying so.
+    """
+
+    from agent_discord.config import (
+        PUPPETMASTER_REQUIREMENT,
+        puppetmaster_cli_found,
+        puppetmaster_cli_version,
+        puppetmaster_version_in_range,
+        resolve_puppetmaster_cli,
+    )
+
+    configured = cfg.puppetmaster_cli
+    resolved = resolve_puppetmaster_cli(configured)
+    if not puppetmaster_cli_found(configured):
+        lines.append(
+            f"WARN puppetmaster CLI not found: {resolved} "
+            f"(install {PUPPETMASTER_REQUIREMENT})"
+        )
+        return
+    version = puppetmaster_cli_version(resolved)
+    if not version:
+        lines.append(f"WARN puppetmaster {resolved} version unreadable")
+    elif puppetmaster_version_in_range(version):
+        lines.append(f"OK puppetmaster {version} at {resolved}")
+    else:
+        lines.append(
+            f"WARN puppetmaster {version} at {resolved} is outside "
+            f"{PUPPETMASTER_REQUIREMENT}"
+        )
 
 
 def _interactions_public() -> bool:
