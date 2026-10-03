@@ -240,6 +240,9 @@
 ### Morning summary
 - Once a day (default 07:30 local, `DISCORD_OS_MORNING_AT=HH:MM`), an armed host posts one card with up to five work items: overnight results, open Needs, and red CI or PRs, with a Cook button per actionable line. Silent when there is nothing to report. `DISCORD_OS_MORNING=0` disables it.
 
+### Puppetmaster job inbox (opt-in)
+- `discord-os add pm-inbox --channel-id ID` gives each Puppetmaster job started elsewhere on this Mac (Marionette, MCP, CLI) one live card in its own thread, edited as it changes. Approve/Reject when parked, and thread replies steer the job. Operator-only. There is no Cancel, since Puppetmaster has no cancel verb. Discovery limits are in `docs/jobs/pm-inbox.md`.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

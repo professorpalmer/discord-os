@@ -231,6 +231,23 @@ CREATE TABLE IF NOT EXISTS pending_intake (
     attempts INTEGER NOT NULL DEFAULT 0,
     created_ms INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS pm_inbox_jobs (
+    job_id TEXT PRIMARY KEY,
+    state_dir TEXT NOT NULL DEFAULT '',
+    channel_id TEXT NOT NULL DEFAULT '',
+    thread_id TEXT NOT NULL DEFAULT '',
+    message_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT '',
+    revision INTEGER NOT NULL DEFAULT 0,
+    task_count INTEGER NOT NULL DEFAULT 0,
+    label TEXT NOT NULL DEFAULT '',
+    goal_preview TEXT NOT NULL DEFAULT '',
+    steer_after TEXT NOT NULL DEFAULT '',
+    created_ms INTEGER NOT NULL,
+    updated_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pm_inbox_thread ON pm_inbox_jobs(thread_id);
 """
 
 PREFERENCE_KINDS = frozenset({"preference", "style", "failure", "journal", "plan"})
@@ -259,6 +276,7 @@ class SQLiteStore:
         self._migrate_job_queue(conn)
         self._migrate_inbound_queue(conn)
         self._migrate_pending_intake(conn)
+        self._migrate_pm_inbox(conn)
         self._fts_enabled = self._try_enable_fts(conn)
         conn.commit()
 
@@ -477,6 +495,29 @@ class SQLiteStore:
                 attempts INTEGER NOT NULL DEFAULT 0,
                 created_ms INTEGER NOT NULL
             );
+            """
+        )
+
+    def _migrate_pm_inbox(self, conn: sqlite3.Connection) -> None:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS pm_inbox_jobs (
+                job_id TEXT PRIMARY KEY,
+                state_dir TEXT NOT NULL DEFAULT '',
+                channel_id TEXT NOT NULL DEFAULT '',
+                thread_id TEXT NOT NULL DEFAULT '',
+                message_id TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT '',
+                revision INTEGER NOT NULL DEFAULT 0,
+                task_count INTEGER NOT NULL DEFAULT 0,
+                label TEXT NOT NULL DEFAULT '',
+                goal_preview TEXT NOT NULL DEFAULT '',
+                steer_after TEXT NOT NULL DEFAULT '',
+                created_ms INTEGER NOT NULL,
+                updated_ms INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_pm_inbox_thread
+            ON pm_inbox_jobs(thread_id);
             """
         )
 
@@ -1308,6 +1349,88 @@ class SQLiteStore:
             return False
         return True
 
+    # --- puppetmaster job inbox ---
+
+    def record_pm_inbox_job(
+        self,
+        job_id: str,
+        *,
+        state_dir: str = "",
+        channel_id: str = "",
+        thread_id: str = "",
+        message_id: str = "",
+        status: str = "",
+        revision: int = 0,
+        task_count: int = 0,
+        label: str = "",
+        goal_preview: str = "",
+        steer_after: str = "",
+    ) -> None:
+        """Remember an observed Puppetmaster job and the card that shows it.
+
+        One row per PM job id. ``revision`` and ``status`` are what stops a
+        restart reposting a card that is already in the channel.
+        """
+
+        jid = (job_id or "").strip()
+        if not jid:
+            return
+        now = int(time.time() * 1000)
+        conn = self._connection()
+        conn.execute(
+            """
+            INSERT INTO pm_inbox_jobs (
+                job_id, state_dir, channel_id, thread_id, message_id,
+                status, revision, task_count, label, goal_preview, steer_after,
+                created_ms, updated_ms
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(job_id) DO UPDATE SET
+                state_dir=excluded.state_dir,
+                channel_id=excluded.channel_id,
+                thread_id=excluded.thread_id,
+                message_id=excluded.message_id,
+                status=excluded.status,
+                revision=excluded.revision,
+                task_count=excluded.task_count,
+                label=excluded.label,
+                goal_preview=excluded.goal_preview,
+                steer_after=excluded.steer_after,
+                updated_ms=excluded.updated_ms
+            """,
+            (
+                jid,
+                str(state_dir or ""),
+                str(channel_id or ""),
+                str(thread_id or ""),
+                str(message_id or ""),
+                str(status or ""),
+                int(revision or 0),
+                int(task_count or 0),
+                redact_text_markers(str(label or "")),
+                redact_text_markers(str(goal_preview or "")),
+                str(steer_after or ""),
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+
+    def get_pm_inbox_job(self, job_id: str) -> Optional[dict[str, Any]]:
+        jid = (job_id or "").strip()
+        if not jid:
+            return None
+        row = self._connection().execute(
+            "SELECT * FROM pm_inbox_jobs WHERE job_id=?", (jid,)
+        ).fetchone()
+        return None if row is None else dict(row)
+
+    def list_pm_inbox_jobs(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        rows = self._connection().execute(
+            "SELECT * FROM pm_inbox_jobs ORDER BY updated_ms DESC LIMIT ?",
+            (int(limit),),
+        ).fetchall()
+        return [dict(row) for row in rows]
 
     # --- events ---
 

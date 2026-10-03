@@ -225,6 +225,38 @@ def add_memory(
     }
 
 
+def add_pm_inbox(
+    store: Any,
+    *,
+    channel_id: str,
+    env_file: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Open the Puppetmaster job inbox on one channel.
+
+    Jobs already running when the inbox opens are not carded, so this records
+    the moment as well as the channel.
+    """
+
+    from agent_discord.orchestration.pm_inbox import (
+        PM_INBOX_CHANNEL_ENV,
+        enable_pm_inbox,
+    )
+
+    cid = (channel_id or "").strip()
+    if not cid:
+        raise ValueError("add pm-inbox needs --channel-id")
+    enabled_ms = enable_pm_inbox(store, cid)
+    dest = env_file or dotenv_path()
+    upsert_dotenv(dest, {PM_INBOX_CHANNEL_ENV: cid})
+    return {
+        "kind": "pm-inbox",
+        "channel_id": cid,
+        "enabled_ms": enabled_ms,
+        "env": str(dest),
+        "live": True,
+    }
+
+
 def add_repo(
     *,
     name: str,
@@ -488,8 +520,11 @@ def list_added(
         for item in load_host_tools(env=merged)
         if item.ready
     ]
+    from agent_discord.orchestration.pm_inbox import pm_inbox_channel_id
+
     return {
         "env": str(path) if path.is_file() else "",
+        "pm_inbox": pm_inbox_channel_id(store, env=merged),
         "repos": [{"name": repo.name, "path": str(repo.path)} for repo in repos],
         "realms": realms,
         "memory": list(memory_channel_ids(store, workspace_id=workspace_id, env=merged)),

@@ -928,6 +928,18 @@ def handle_gateway_interaction(
     )
     if cooked is not None:
         return cooked
+    from agent_discord.orchestration.pm_inbox import (
+        handle_pm_inbox_click,
+        pm_inbox_action_from_custom_id,
+    )
+
+    pm_inbox = pm_inbox_action_from_custom_id(custom_id)
+    if pm_inbox is not None:
+        # Observed Puppetmaster job: approve/reject it through the PM CLI.
+        # Never a Discord OS cook, so no JobPool and no on_job hop.
+        return handle_pm_inbox_click(
+            store, payload, action=pm_inbox, opener=opener
+        )
     confirm = ask_confirm_action_from_custom_id(custom_id)
     if confirm is not None:
         if not _operator_may_click(store, payload, "ask-confirm", opener=opener):

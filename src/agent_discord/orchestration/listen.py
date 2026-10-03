@@ -1026,6 +1026,7 @@ def drain_inbound(
                 workspace_id=workspace_id,
                 env=env,
             )
+        _tick_pm_inbox_best_effort(discord, store, env=env)
         _tick_host_liveness_best_effort(
             discord,
             store,
@@ -1347,6 +1348,22 @@ def _tick_morning_summary_best_effort(
             env=env,
             repo_status=getattr(orchestrator, "repo_status_collector", None),
         )
+    except Exception:
+        pass
+
+
+def _tick_pm_inbox_best_effort(
+    discord: Any,
+    store: Any,
+    *,
+    env: Optional[Mapping[str, str]],
+) -> None:
+    """Card Puppetmaster jobs started elsewhere on this Mac. Opt-in, read-only."""
+
+    try:
+        from agent_discord.orchestration.pm_inbox import tick_pm_inbox
+
+        tick_pm_inbox(discord, store, env=env)
     except Exception:
         pass
 

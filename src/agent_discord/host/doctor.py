@@ -124,6 +124,8 @@ def run_doctor(
         fails += _check_operators(None, lines)
         fails += _check_gateway_ws(ws, lines)
 
+    _check_pm_inbox(db, lines)
+
     return (1 if fails else 0, lines)
 
 
@@ -160,6 +162,47 @@ def _check_puppetmaster_cli(cfg: AppConfig, lines: list[str]) -> None:
         lines.append(
             f"WARN puppetmaster {version} at {resolved} is outside "
             f"{PUPPETMASTER_REQUIREMENT}"
+        )
+
+
+def _check_pm_inbox(db: Optional[Path], lines: list[str]) -> None:
+    """Say whether the Puppetmaster job inbox is on. OPT-IN, so off is OK."""
+
+    from agent_discord.orchestration.pm_inbox import (
+        PM_INBOX_CHANNEL_ENV,
+        candidate_state_dirs,
+        pm_inbox_channel_id,
+    )
+    from agent_discord.persistence.sqlite import SQLiteStore
+
+    store = None
+    if db is not None and db.is_file():
+        store = SQLiteStore(db)
+        try:
+            store.initialize()
+        except Exception:
+            store = None
+    try:
+        channel_id = pm_inbox_channel_id(store)
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
+    if not channel_id:
+        lines.append(
+            "OK pm-inbox off (discord-os add pm-inbox --channel-id ID "
+            f"or {PM_INBOX_CHANNEL_ENV})"
+        )
+        return
+    dirs = candidate_state_dirs()
+    lines.append(
+        f"OK pm-inbox on channel={channel_id} state_dirs={len(dirs)}"
+    )
+    if not dirs:
+        lines.append(
+            "WARN pm-inbox found no other Puppetmaster state dirs on this Mac"
         )
 
 
