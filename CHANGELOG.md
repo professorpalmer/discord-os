@@ -194,6 +194,9 @@
 ### HOST status shows halted correctly
 - Armed but halted shows as power on, intake halted. The Off confirm screen keeps showing on until Off is confirmed. Before, both read `power off / listen idle`.
 
+### saseq and braindao providers removed
+- Discord OS talks to Discord over REST only. The saseq and BrainDAO MCP adapters, their MCP transports, and `DISCORD_MCP_TRANSPORT` / `DISCORD_MCP_STDIO_COMMAND` / `SASEQ_MCP_HTTP_URL` / `BRAINDAO_MCP_HTTP_URL` are gone (about 1,800 lines). `DISCORD_MCP_PROVIDER` must be `rest`, and any other value is a config error that names the removal.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

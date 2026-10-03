@@ -245,7 +245,7 @@ class DispatchResult:
 
 @runtime_checkable
 class DiscordMCPProvider(Protocol):
-    """Normalized Discord provider surface (REST, SaseQ, BrainDAO, or fake)."""
+    """Normalized Discord provider surface (REST or fake)."""
 
     name: str
 
@@ -294,13 +294,6 @@ class DiscordMCPProvider(Protocol):
         message_id: str,
         attachment_id: str,
     ) -> bytes: ...
-
-
-@runtime_checkable
-class SamplingIngress(Protocol):
-    """BrainDAO sampling-compatible ingress seam (no second Gateway required)."""
-
-    def handle_sampling_request(self, payload: Mapping[str, Any]) -> Mapping[str, Any]: ...
 
 
 @runtime_checkable

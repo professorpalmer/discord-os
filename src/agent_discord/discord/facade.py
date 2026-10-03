@@ -302,19 +302,8 @@ class DiscordFacade:
             raise MessageDedupError(f"duplicate message id {message_id!r}")
         self._seen_message_ids.add(message_id)
 
-    def handle_sampling_request(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
-        """Delegate BrainDAO sampling-compatible ingress when the provider supports it."""
-        handler = getattr(self.provider, "handle_sampling_request", None)
-        if handler is None:
-            return {
-                "ok": False,
-                "error": "provider does not expose sampling ingress",
-                "provider": getattr(self.provider, "name", "unknown"),
-            }
-        return handler(payload)
-
     def close(self) -> None:
-        """Release provider resources such as a persistent stdio MCP process."""
+        """Release provider resources."""
         closer = getattr(self.provider, "close", None)
         if callable(closer):
             closer()

@@ -46,19 +46,11 @@ class ConfigError(ValueError):
     """Invalid or incomplete local configuration."""
 
 
-DEFAULT_SASEQ_MCP_HTTP_URL = "http://127.0.0.1:8085/mcp"
-DEFAULT_BRAINDAO_MCP_HTTP_URL = "http://127.0.0.1:3000/mcp"
-
-
 @dataclass(frozen=True)
 class AppConfig:
     workspace: Path
     discord_bot_token: str
-    discord_mcp_provider: str  # rest | saseq | braindao
-    discord_mcp_transport: str  # http | stdio
-    saseq_mcp_http_url: str
-    braindao_mcp_http_url: str
-    discord_mcp_stdio_command: str
+    discord_mcp_provider: str  # rest
     puppetmaster_model: str
     puppetmaster_cli: str
     puppetmaster_cwd: Path
@@ -137,15 +129,10 @@ def load_config(
     ws = _resolve_workspace(workspace, merged.get("AGENT_DISCORD_WORKSPACE"))
 
     provider = (merged.get("DISCORD_MCP_PROVIDER") or "rest").strip().lower()
-    if provider not in {"rest", "saseq", "braindao"}:
+    if provider != "rest":
         raise ConfigError(
-            f"DISCORD_MCP_PROVIDER must be 'rest', 'saseq', or 'braindao', got {provider!r}"
-        )
-
-    transport = (merged.get("DISCORD_MCP_TRANSPORT") or "http").strip().lower()
-    if transport not in {"http", "stdio"}:
-        raise ConfigError(
-            f"DISCORD_MCP_TRANSPORT must be 'http' or 'stdio', got {transport!r}"
+            f"DISCORD_MCP_PROVIDER must be 'rest', got {provider!r} "
+            "(the saseq and braindao MCP adapters were removed)"
         )
 
     model = (merged.get("PUPPETMASTER_MODEL") or "openrouter/auto").strip()
@@ -210,14 +197,6 @@ def load_config(
         workspace=ws,
         discord_bot_token=(merged.get("DISCORD_BOT_TOKEN") or "").strip(),
         discord_mcp_provider=provider,
-        discord_mcp_transport=transport,
-        saseq_mcp_http_url=(
-            merged.get("SASEQ_MCP_HTTP_URL") or DEFAULT_SASEQ_MCP_HTTP_URL
-        ).strip(),
-        braindao_mcp_http_url=(
-            merged.get("BRAINDAO_MCP_HTTP_URL") or DEFAULT_BRAINDAO_MCP_HTTP_URL
-        ).strip(),
-        discord_mcp_stdio_command=(merged.get("DISCORD_MCP_STDIO_COMMAND") or "").strip(),
         puppetmaster_model=model,
         puppetmaster_cli=(merged.get("PUPPETMASTER_CLI") or "puppetmaster").strip(),
         puppetmaster_cwd=puppetmaster_cwd,
@@ -376,17 +355,8 @@ def check_config(config: AppConfig, *, require_token: bool = True) -> list[str]:
     problems: list[str] = []
     if require_token and not config.discord_bot_token:
         problems.append("DISCORD_BOT_TOKEN is empty")
-    if config.discord_mcp_provider not in {"rest", "saseq", "braindao"}:
-        problems.append("invalid DISCORD_MCP_PROVIDER")
     if config.discord_mcp_provider != "rest":
-        if config.discord_mcp_transport not in {"http", "stdio"}:
-            problems.append("invalid DISCORD_MCP_TRANSPORT")
-        if config.discord_mcp_transport == "stdio" and not config.discord_mcp_stdio_command:
-            problems.append(
-                "DISCORD_MCP_STDIO_COMMAND is required when DISCORD_MCP_TRANSPORT=stdio "
-                "(no fabricated default npm package; set an explicit command, e.g. "
-                "'npx -y @iqai/mcp-discord' for BrainDAO)"
-            )
+        problems.append("invalid DISCORD_MCP_PROVIDER")
     if config.compute not in {"auto", "agentic"}:
         problems.append("invalid AGENT_DISCORD_COMPUTE")
     if config.interactions not in {"off", "http"}:

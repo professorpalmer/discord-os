@@ -36,7 +36,6 @@ class FakeDiscordMCPProvider:
     sent: list[DiscordMessage] = field(default_factory=list)
     inbox: list[DiscordMessage] = field(default_factory=list)
     fail_tools: set[str] = field(default_factory=set)
-    sampling_calls: list[Mapping[str, Any]] = field(default_factory=list)
     blobs: dict[str, bytes] = field(default_factory=dict)
     threads: dict[str, dict[str, str]] = field(default_factory=dict)
     persist_dir: Optional[Path] = None
@@ -346,10 +345,6 @@ class FakeDiscordMCPProvider:
         self.sent.append(msg)
         self._save_persist()
         return msg
-
-    def handle_sampling_request(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
-        self.sampling_calls.append(dict(payload))
-        return {"ok": True, "provider": self.name, "echo": payload.get("messages", [])}
 
     def _load_persist(self) -> None:
         assert self.persist_dir is not None

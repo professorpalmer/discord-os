@@ -43,8 +43,6 @@ agent-discord = "agent_discord.cli:main"
 Homepage = "https://github.com/professorpalmer/discord-os"
 Documentation = "https://github.com/professorpalmer/discord-os/blob/master/README.md"
 Changelog = "https://github.com/professorpalmer/discord-os/blob/master/CHANGELOG.md"
-Attribution-SaseQ = "https://github.com/SaseQ/discord-mcp"
-Attribution-BrainDAO = "https://github.com/BrainDAO/mcp-discord"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,10 +1,12 @@
-"""Message chunking, provider selection, gateway exclusivity, sampling seam."""
+"""Message chunking, provider selection, gateway exclusivity."""
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
-from agent_discord.config import load_config
+from agent_discord.config import ConfigError, load_config
 from agent_discord.contracts import DiscordMessage, ToolDescriptor
 from agent_discord.discord.chunking import chunk_message
 from agent_discord.discord.errors import (
@@ -15,9 +17,8 @@ from agent_discord.discord.errors import (
 from agent_discord.discord.facade import DiscordFacade
 from agent_discord.discord.gateway import InMemoryGatewayOwnerRegistry
 from agent_discord.discord.providers import select_provider
-from agent_discord.discord.providers.braindao import BrainDAODiscordProvider
 from agent_discord.discord.providers.fake import FakeDiscordMCPProvider
-from agent_discord.discord.providers.saseq import SaseQDiscordProvider
+from agent_discord.discord.providers.rest import RestDiscordProvider
 
 
 class RecordingClient:
@@ -95,57 +96,23 @@ def test_gateway_owner_exclusivity():
     assert reg.current_owner("tok") == "owner-b"
 
 
-def test_provider_selection_saseq_and_braindao(tmp_path):
-    client = RecordingClient()
+def test_provider_selection_rejects_removed_adapters(tmp_path):
+    with pytest.raises(ConfigError, match="saseq"):
+        load_config(
+            env={
+                "AGENT_DISCORD_WORKSPACE": str(tmp_path),
+                "DISCORD_MCP_PROVIDER": "saseq",
+                "DISCORD_BOT_TOKEN": "x",
+            },
+            dotenv_path=tmp_path / "none",
+        )
     cfg = load_config(
         env={
             "AGENT_DISCORD_WORKSPACE": str(tmp_path),
-            "DISCORD_MCP_PROVIDER": "saseq",
             "DISCORD_BOT_TOKEN": "x",
         },
         dotenv_path=tmp_path / "none",
     )
-    p = select_provider(cfg, client=client)
-    assert isinstance(p, SaseQDiscordProvider)
-    p.send_message("1", "hello")
-    assert client.calls
-
-    cfg2 = load_config(
-        env={
-            "AGENT_DISCORD_WORKSPACE": str(tmp_path),
-            "DISCORD_MCP_PROVIDER": "braindao",
-            "DISCORD_BOT_TOKEN": "x",
-        },
-        dotenv_path=tmp_path / "none",
-    )
-    client2 = RecordingClient()
-    p2 = select_provider(cfg2, client=client2)
-    assert isinstance(p2, BrainDAODiscordProvider)
-    out = p2.handle_sampling_request(
-        {"method": "sampling/createMessage", "messages": [{"content": "ping"}]}
-    )
-    assert out["ok"] is True
-    assert "echo" in out
-
-
-def test_saseq_stdio_requires_explicit_command(tmp_path):
-    cfg = load_config(
-        env={
-            "AGENT_DISCORD_WORKSPACE": str(tmp_path),
-            "DISCORD_MCP_PROVIDER": "saseq",
-            "DISCORD_MCP_TRANSPORT": "stdio",
-            "DISCORD_MCP_STDIO_COMMAND": "",
-            "DISCORD_BOT_TOKEN": "x",
-        },
-        dotenv_path=tmp_path / "none",
-    )
-    with pytest.raises(ProviderSelectionError, match="DISCORD_MCP_STDIO_COMMAND"):
-        select_provider(cfg)
-
-
-def test_facade_sampling_seam():
-    fake = FakeDiscordMCPProvider()
-    facade = DiscordFacade(fake, bot_token_fingerprint="t", owner_id="cli")
-    result = facade.handle_sampling_request({"messages": ["hi"]})
-    assert result["ok"] is True
-    assert fake.sampling_calls
+    assert isinstance(select_provider(cfg), RestDiscordProvider)
+    with pytest.raises(ProviderSelectionError, match="braindao"):
+        select_provider(replace(cfg, discord_mcp_provider="braindao"))

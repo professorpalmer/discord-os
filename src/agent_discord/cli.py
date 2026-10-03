@@ -781,8 +781,7 @@ def cmd_bootstrap(args: argparse.Namespace, *, out: TextIO | None = None) -> int
     if result["created_env"]:
         print("  created .env from .env.example — fill in DISCORD_BOT_TOKEN", file=out)
     print(
-        "\nDefault transport is Discord REST (no MCP, no Gateway). "
-        "Optional MCP adapters: SaseQ / BrainDAO — upstream source is not copied.",
+        "\nTransport is Discord REST (no MCP, no Gateway).",
         file=out,
     )
     return 0
@@ -795,13 +794,8 @@ def cmd_check(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     info = describe_bootstrap(config)
     print(f"workspace:  {config.workspace}", file=out)
     print(f"database:   {config.database_path}", file=out)
-    print(f"provider:   {config.discord_mcp_provider} / {config.discord_mcp_transport}", file=out)
-    if config.discord_mcp_provider == "saseq":
-        print(f"saseq url:  {config.saseq_mcp_http_url}", file=out)
-    elif config.discord_mcp_provider == "braindao":
-        print(f"braindao:   {config.braindao_mcp_http_url}", file=out)
-    else:
-        print("transport:  Discord REST (no MCP, no Gateway)", file=out)
+    print(f"provider:   {config.discord_mcp_provider}", file=out)
+    print("transport:  Discord REST (no MCP, no Gateway)", file=out)
     resolution = resolve_compute(config)
     print(f"backend:    {config.agent_backend}", file=out)
     print(f"compute:    {resolution.requested} -> {resolution.mode}", file=out)
@@ -2839,12 +2833,7 @@ def cmd_status(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                 "created_at": "",
             }
         )
-    if config.discord_mcp_provider == "saseq":
-        mcp_url = config.saseq_mcp_http_url
-    elif config.discord_mcp_provider == "braindao":
-        mcp_url = config.braindao_mcp_http_url
-    else:
-        mcp_url = "https://discord.com/api/v10"
+    mcp_url = "https://discord.com/api/v10"
     payload = {
         "product": PRODUCT_NAME,
         "cli": CLI_NAME,

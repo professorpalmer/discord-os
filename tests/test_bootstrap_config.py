@@ -6,7 +6,6 @@ from pathlib import Path
 
 from agent_discord.bootstrap import bootstrap_workspace, describe_bootstrap
 from agent_discord.config import (
-    DEFAULT_SASEQ_MCP_HTTP_URL,
     ConfigError,
     check_config,
     load_config,
@@ -22,8 +21,6 @@ def test_load_config_defaults(tmp_path: Path, monkeypatch):
     assert cfg.discord_mcp_provider == "rest"
     assert cfg.puppetmaster_model == CANONICAL_MODEL
     assert cfg.workspace == (tmp_path / "ws").resolve()
-    assert cfg.saseq_mcp_http_url == DEFAULT_SASEQ_MCP_HTTP_URL
-    assert "8085" in cfg.saseq_mcp_http_url
     assert cfg.puppetmaster_cwd == tmp_path.resolve()
     assert cfg.agent_backend == "puppetmaster"
     assert cfg.marionette_base_url == ""
@@ -45,21 +42,21 @@ def test_check_config_requires_token_and_openrouter(tmp_path: Path):
     assert any("run discord-os connect" in p for p in problems)
 
 
-def test_check_config_requires_stdio_command(tmp_path: Path):
-    cfg = load_config(
-        env={
-            "AGENT_DISCORD_WORKSPACE": str(tmp_path),
-            "DISCORD_BOT_TOKEN": "tok",
-            "DISCORD_MCP_PROVIDER": "saseq",
-            "DISCORD_MCP_TRANSPORT": "stdio",
-            "DISCORD_MCP_STDIO_COMMAND": "",
-            "PUPPETMASTER_MODEL": "openrouter/auto",
-            "OPENROUTER_API_KEY": "sk-or-v1-test",
-        },
-        dotenv_path=tmp_path / "missing.env",
-    )
-    problems = check_config(cfg, require_token=True)
-    assert any("DISCORD_MCP_STDIO_COMMAND" in p for p in problems)
+def test_load_config_rejects_removed_mcp_providers(tmp_path: Path):
+    for name in ("saseq", "braindao"):
+        try:
+            load_config(
+                env={
+                    "AGENT_DISCORD_WORKSPACE": str(tmp_path),
+                    "DISCORD_BOT_TOKEN": "tok",
+                    "DISCORD_MCP_PROVIDER": name,
+                },
+                dotenv_path=tmp_path / "missing.env",
+            )
+        except ConfigError as exc:
+            assert "removed" in str(exc)
+        else:
+            raise AssertionError(f"{name} should be rejected")
 
 
 def test_bootstrap_creates_workspace_and_db(tmp_path: Path, monkeypatch):
