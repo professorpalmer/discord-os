@@ -260,27 +260,6 @@ def test_host_start_hook_is_wired_and_fail_soft():
     assert notify_host_start(channel_id="ch", env=env, execute=exe) is False
 
 
-def test_package_version_is_084():
-    text = Path("CHANGELOG.md").read_text()
-    assert "## 0.5.86" in text
-    assert "Band C" in text
-
-
-def test_band_c_doc_records_flag_and_parks():
-    text = (
-        Path(__file__).resolve().parents[1] / "docs/co-work/band-c-webhook.md"
-    ).read_text()
-    lowered = text.lower()
-    assert "discord_os_webhook=0" in lowered
-    assert "empty" in lowered and "url" in lowered
-    assert "fail soft" in lowered or "fail-soft" in lowered
-    assert "side-channel" in lowered
-    assert "jobpool" in lowered
-    assert "jishaku" in lowered
-    assert "graham" not in lowered or "never graham" in lowered
-    assert "board + brain" in lowered
-
-
 def test_webhook_username_has_no_discord_substring():
     assert "discord" not in WEBHOOK_USERNAME.lower()
     assert "discord" not in webhook_username().lower()

@@ -217,16 +217,3 @@ def test_stall_oneliner_opt_in():
         stall_line=line,
     )
     assert "Stall?" in card.description
-
-
-def test_wave6_p2_docs_brand():
-    for rel in (
-        "docs/co-work/wave6-recovery-beat.md",
-        "docs/co-work/wave6-roe-escalate.md",
-        "docs/co-work/wave6-stall-signal.md",
-        "docs/co-work/wave6-speckit-tags.md",
-        "docs/recipes/parameterized.md",
-    ):
-        text = (ROOT / rel).read_text(encoding="utf-8").lower()
-        assert "graham" not in text
-        assert "board" in text or "recipe" in text or "roe" in text or "stall" in text or "spec" in text

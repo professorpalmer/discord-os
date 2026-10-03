@@ -264,18 +264,6 @@ def test_pypresence_available_is_bool():
     assert pypresence_available() in {True, False}
 
 
-def test_band_b_doc_records_flag_and_parks():
-    text = (
-        Path(__file__).resolve().parents[1] / "docs/co-work/band-b-pypresence.md"
-    ).read_text()
-    lowered = text.lower()
-    assert "discord_os_presence=0" in lowered
-    assert "pypresence" in lowered
-    assert "fail soft" in lowered or "fail-soft" in lowered
-    assert "graham" not in lowered or "never graham" in lowered
-    assert "webhook" not in lowered or "band c" in lowered
-
-
 def test_tick_resolves_application_id_from_config(monkeypatch, tmp_path):
     """LaunchAgent may omit DISCORD_APPLICATION_ID in process env; .env/config must win."""
 

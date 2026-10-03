@@ -129,6 +129,10 @@
 ### Dead `DISCORD_OS_SERVICE` flag removed
 - The LaunchAgent plist and systemd unit no longer set `DISCORD_OS_SERVICE`, which nothing read.
 
+### Tests no longer pin docs or the version
+- Tests that asserted wording in `docs/co-work` delivery logs or the CHANGELOG are gone. The exact-version pin is now a check that `__version__` matches `pyproject.toml`. A release no longer needs test edits.
+- One repo-wide test keeps the old internal name out of product text (src, product docs, READMEs) instead of nine per-doc checks.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

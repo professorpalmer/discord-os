@@ -127,13 +127,3 @@ def test_cross_dri_conflict_lines():
     ]
     rel = lane_relationships(jobs)
     assert any("cross-DRI" in line or "alex" in line for line in rel)
-
-
-def test_wave5_p2_docs_present():
-    root = Path(__file__).resolve().parents[1]
-    for rel in (
-        "docs/co-work/wave5-compensation.md",
-        "docs/co-work/wave5-dri-role.md",
-    ):
-        text = (root / rel).read_text(encoding="utf-8").lower()
-        assert "graham" not in text

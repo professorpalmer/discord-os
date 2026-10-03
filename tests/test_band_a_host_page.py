@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
 from agent_discord.discord.host_page import (
     host_page_enabled,
@@ -55,10 +54,3 @@ def test_host_card_v2_uses_page_layout(monkeypatch):
     assert comps[0]["type"] == TYPE_CONTAINER
     assert any(c.get("type") == TYPE_ACTION_ROW for c in comps[1:])
     assert "Pair → Ask → Done" in (card.description or "")
-
-
-def test_spike_doc_records_fail():
-    text = (Path(__file__).resolve().parents[1] / "docs/co-work/band-a-kagekit-spike.md").read_text()
-    assert "Do not adopt" in text or "FAIL" in text
-    assert "graham" not in text.lower() or "never graham" in text.lower()
-    assert "host_page" in text

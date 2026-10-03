@@ -270,11 +270,13 @@ def test_absorb_uses_mocked_loader(tmp_path: Path):
     store.close()
 
 
-def test_package_version_is_current():
-    assert __version__ == "0.5.87"
-    text = Path("pyproject.toml").read_text()
-    assert 'version = "0.5.87"' in text
-    assert 'debug = ["jishaku>=2.5"]' in text
+def test_package_version_matches_pyproject():
+    import tomllib
+
+    root = Path(__file__).resolve().parents[1]
+    project = tomllib.loads((root / "pyproject.toml").read_text())["project"]
+    assert __version__ == project["version"]
+    assert project["optional-dependencies"]["debug"] == ["jishaku>=2.5"]
 
 
 def test_cli_wires_maybe_load():
@@ -282,22 +284,6 @@ def test_cli_wires_maybe_load():
 
     src = Path(cli_mod.__file__).read_text()
     assert "maybe_load_jishaku" in src
-
-
-def test_band_d_doc_records_flag_owner_and_parks():
-    text = (
-        Path(__file__).resolve().parents[1] / "docs/co-work/band-d-jishaku.md"
-    ).read_text()
-    lowered = text.lower()
-    assert "discord_os_jishaku=1" in lowered
-    assert "default" in lowered and "off" in lowered
-    assert "owner" in lowered
-    assert "tip" in lowered and "debug" in lowered
-    assert "not a product feature" in lowered
-    assert "loop" in lowered and "closed" in lowered
-    assert "wave 7 p1" in lowered
-    assert "graham" not in lowered or "never graham" in lowered
-    assert "board + brain" in lowered
 
 
 def test_owner_jsk_py_never_evaluates_code(tmp_path: Path):
