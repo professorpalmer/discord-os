@@ -7,6 +7,7 @@ import os
 import select
 import socket
 import ssl
+import threading
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -75,6 +76,9 @@ class WebSocketClient:
     def __init__(self, sock: socket.socket) -> None:
         self._sock = sock
         self._buffer = bytearray()
+        # Heartbeat thread and the dispatch thread both send. Interleaved
+        # frames are a protocol error (Discord closes 4002).
+        self._send_lock = threading.Lock()
 
     @classmethod
     def connect(cls, url: str, *, timeout: float = 30.0) -> "WebSocketClient":
@@ -119,15 +123,20 @@ class WebSocketClient:
         sock.settimeout(None)
         return client
 
+    def _send_frame(self, payload: bytes, *, opcode: int) -> None:
+        frame = encode_frame(payload, opcode=opcode)
+        with self._send_lock:
+            self._sock.sendall(frame)
+
     def send_text(self, text: str) -> None:
-        self._sock.sendall(encode_frame(text.encode("utf-8"), opcode=1))
+        self._send_frame(text.encode("utf-8"), opcode=1)
 
     def send_pong(self, payload: bytes = b"") -> None:
-        self._sock.sendall(encode_frame(payload, opcode=10))
+        self._send_frame(payload, opcode=10)
 
     def send_close(self) -> None:
         try:
-            self._sock.sendall(encode_frame(b"", opcode=8))
+            self._send_frame(b"", opcode=8)
         except OSError:
             pass
 

@@ -101,6 +101,9 @@
 ### Facade checks provider capability
 - The Discord facade picks the call shape with `inspect.signature`, not `except TypeError`. A real TypeError during send or edit now surfaces, instead of silently dropping Components v2 or posting the message twice.
 
+### Gateway socket writes are serialized
+- The heartbeat thread and the main thread share one send lock, so frames no longer interleave (Discord closed with 4002).
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

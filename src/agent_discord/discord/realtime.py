@@ -87,9 +87,13 @@ def run_discord_gateway(
     seq: Optional[int] = None
     beat_stop = threading.Event()
     beater: Optional[threading.Thread] = None
+    send_lock = threading.Lock()
 
     def send(payload: dict[str, Any]) -> None:
-        sock.send_text(json.dumps(payload, separators=(",", ":")))
+        text = json.dumps(payload, separators=(",", ":"))
+        # Heartbeat thread and this thread share one socket.
+        with send_lock:
+            sock.send_text(text)
 
     try:
         while not halt.is_set():
