@@ -50,6 +50,8 @@ from agent_discord.orchestration.service import (
 DISCORD_EPOCH_MS = 1_420_070_400_000
 LISTEN_HISTORY_SLACK_MS = 15_000
 # Read more than we keep: harness cards are filtered out before the keep slice.
+INBOUND_PAGE_LIMIT = 100
+INBOUND_MAX_PAGES = 10
 THREAD_HISTORY_READ_LIMIT = 12
 THREAD_HISTORY_KEEP = 6
 HOST_AUTHOR_LABEL = "Discord OS"
@@ -229,6 +231,58 @@ def should_dispatch_inbound(message: DiscordMessage) -> bool:
     return True
 
 
+def _read_inbound_backlog(
+    discord: Any,
+    channel_id: str,
+    *,
+    thread_id: Optional[str],
+    limit: int,
+    after: str,
+) -> list[DiscordMessage]:
+    """Every message since the watermark, not just the newest page.
+
+    A burst larger than one page used to lose its older messages: the poll read
+    the newest ``limit`` and the watermark then skipped past the rest. With a
+    watermark message id we walk forward with ``after=`` until a short page.
+    Without one (first listen) a single newest page is all we are allowed to
+    take, or the seed would replay the whole channel.
+    """
+
+    anchor = (after or "").strip()
+    if not anchor:
+        return list(
+            discord.read_messages(
+                channel_id,
+                limit=limit,
+                thread_id=thread_id,
+                skip_duplicates=False,
+            )
+        )
+    collected: list[DiscordMessage] = []
+    seen: set[str] = set()
+    for _page in range(INBOUND_MAX_PAGES):
+        page = list(
+            discord.read_messages(
+                channel_id,
+                limit=INBOUND_PAGE_LIMIT,
+                thread_id=thread_id,
+                after=anchor,
+                skip_duplicates=False,
+            )
+        )
+        fresh = [m for m in page if m.message_id and m.message_id not in seen]
+        for message in fresh:
+            seen.add(message.message_id)
+            collected.append(message)
+        if len(page) < INBOUND_PAGE_LIMIT or not fresh:
+            break
+        newest = max(fresh, key=_inbound_sort_key)
+        if not _message_id_after(newest.message_id or "", anchor):
+            break
+        anchor = newest.message_id or anchor
+    return collected
+
+
 def drain_inbound(
     orchestrator: Any,
     discord: Any,
@@ -253,12 +307,6 @@ def drain_inbound(
     opens stay on this process; Discord is only the remote.
     """
 
-    messages = discord.read_messages(
-        channel_id,
-        limit=limit,
-        thread_id=thread_id,
-        skip_duplicates=False,
-    )
     receipts: list[RunReceipt] = []
     ws = Path(workspace) if workspace is not None else _workspace_from(orchestrator)
     store = getattr(orchestrator, "store", None)
@@ -275,6 +323,13 @@ def drain_inbound(
     else:
         watermark = {"channel_id": watermark_key, "last_created_ms": seed_ms, "last_message_id": ""}
     snapshot = dict(watermark)
+    messages = _read_inbound_backlog(
+        discord,
+        channel_id,
+        thread_id=thread_id,
+        limit=limit,
+        after=str(snapshot.get("last_message_id") or ""),
+    )
     pending: list[DiscordMessage] = []
     for message in messages:
         created_ms = snowflake_created_ms(message.message_id) if message.message_id else None

@@ -72,12 +72,14 @@ class RestDiscordProvider:
         *,
         limit: int = 20,
         thread_id: Optional[str] = None,
+        after: Optional[str] = None,
     ) -> Sequence[DiscordMessage]:
         return list_channel_messages(
             token=self._bot_token,
             channel_id=channel_id,
             limit=limit,
             thread_id=thread_id,
+            after=after,
             opener=self._opener,
         )
 

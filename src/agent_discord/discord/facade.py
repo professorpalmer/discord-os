@@ -133,11 +133,16 @@ class DiscordFacade:
         *,
         limit: int = 20,
         thread_id: Optional[str] = None,
+        after: Optional[str] = None,
         skip_duplicates: bool = True,
     ) -> list[DiscordMessage]:
-        messages = list(
-            self.provider.read_messages(channel_id, limit=limit, thread_id=thread_id)
-        )
+        reader = self.provider.read_messages
+        kwargs: dict = {"limit": limit, "thread_id": thread_id}
+        # A provider without `after` reads the newest page; the caller sees a
+        # short page and stops, rather than looping on the same window.
+        if after and accepts_keyword(reader, "after"):
+            kwargs["after"] = after
+        messages = list(reader(channel_id, **kwargs))
         if not skip_duplicates or not self.dedupe:
             return messages
         fresh: list[DiscordMessage] = []

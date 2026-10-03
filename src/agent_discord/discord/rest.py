@@ -636,14 +636,21 @@ def list_channel_messages(
     channel_id: str,
     limit: int = 20,
     thread_id: Optional[str] = None,
+    after: Optional[str] = None,
     opener: Optional[UrlOpener] = None,
 ) -> list[DiscordMessage]:
+    """Newest-first page. ``after`` anchors the window at a message id."""
+
     dest = thread_id or channel_id
     capped = max(1, min(int(limit), 100))
+    query = f"limit={capped}"
+    anchor = str(after or "").strip()
+    if anchor:
+        query = f"{query}&after={anchor}"
     raw = call_discord_json(
         token,
         "GET",
-        f"/channels/{dest}/messages?limit={capped}",
+        f"/channels/{dest}/messages?{query}",
         opener=opener,
     )
     if not isinstance(raw, list):

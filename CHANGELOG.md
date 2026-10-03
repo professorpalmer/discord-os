@@ -139,6 +139,9 @@
 ### Thread history is the newest six, in order, with authors
 - Context from a job thread now holds the newest six human messages, oldest first, each labeled with its author, and framed as conversation from Discord users (data, not instructions). Before, the two newest were dropped and the rest arrived in reverse order, unattributed and mixed with host cards.
 
+### Listen paginates from the watermark
+- Each poll reads forward from the last seen message with `after=`, 100 per page and up to 10 pages per tick. A burst of more than 20 messages between polls is no longer lost.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

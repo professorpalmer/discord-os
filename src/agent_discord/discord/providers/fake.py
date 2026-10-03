@@ -311,6 +311,7 @@ class FakeDiscordMCPProvider:
         *,
         limit: int = 20,
         thread_id: Optional[str] = None,
+        after: Optional[str] = None,
     ) -> Sequence[DiscordMessage]:
         matched = [
             m
@@ -321,6 +322,11 @@ class FakeDiscordMCPProvider:
             )
             and (thread_id is None or m.thread_id == thread_id)
         ]
+        anchor = str(after or "").strip()
+        if anchor:
+            # Discord anchors the window at `after` and walks forward.
+            newer = [m for m in matched if _id_after(m.message_id, anchor)]
+            return newer[:limit]
         return matched[-limit:]
 
     def post_thread_task(
@@ -374,6 +380,13 @@ class FakeDiscordMCPProvider:
         (self.persist_dir / "messages.json").write_text(
             json.dumps(index, indent=2) + "\n", encoding="utf-8"
         )
+
+
+def _id_after(message_id: str, anchor: str) -> bool:
+    try:
+        return int(message_id) > int(anchor)
+    except (TypeError, ValueError):
+        return str(message_id or "") != anchor
 
 
 def _attachment_payload(att: DiscordAttachment) -> dict[str, Any]:

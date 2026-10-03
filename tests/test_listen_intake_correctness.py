@@ -23,7 +23,7 @@ def _snowflake_at(created_ms: int) -> str:
 
 
 class NewestFirstProvider(FakeDiscordMCPProvider):
-    """Mirror Discord REST: newest message first, newest `limit` only."""
+    """Mirror Discord REST: one page, newest message first."""
 
     def read_messages(
         self,
@@ -31,17 +31,12 @@ class NewestFirstProvider(FakeDiscordMCPProvider):
         *,
         limit: int = 20,
         thread_id: Optional[str] = None,
+        after: Optional[str] = None,
     ) -> Sequence[DiscordMessage]:
-        matched = [
-            m
-            for m in self.inbox
-            if (
-                m.channel_id == channel_id
-                or (thread_id is None and m.thread_id == channel_id)
-            )
-            and (thread_id is None or m.thread_id == thread_id)
-        ]
-        return list(reversed(matched))[:limit]
+        page = super().read_messages(
+            channel_id, limit=limit, thread_id=thread_id, after=after
+        )
+        return list(reversed(list(page)))
 
 
 def _orch(tmp_path: Path, provider: FakeDiscordMCPProvider):
@@ -129,4 +124,78 @@ def test_thread_history_keeps_newest_lines_in_order_with_authors(tmp_path: Path)
     assert texts[:4] == ["line-4", "line-5", "line-6", "line-7"]
     assert lines[0] == "op4: line-4"
     assert "line-0" not in prompt
+    store.close()
+
+
+# --- B4: paginate the backlog instead of reading one page ---
+
+
+def test_burst_larger_than_one_page_is_not_lost(tmp_path: Path):
+    provider = NewestFirstProvider()
+    now_ms = 1_750_000_000_000
+    provider.inbox.append(
+        DiscordMessage(
+            channel_id="ch",
+            content="first ask",
+            message_id=_snowflake_at(now_ms),
+            author_id="human-1",
+        )
+    )
+    orch, store, facade, _backend = _orch(tmp_path, provider)
+    first = drain_inbound(
+        orch, facade, channel_id="ch", workspace_id="ws", limit=5, since_ms=0
+    )
+    assert len(first) == 1
+    for index in range(25):
+        provider.inbox.append(
+            DiscordMessage(
+                channel_id="ch",
+                content=f"burst ask {index}",
+                message_id=_snowflake_at(now_ms + 10_000 + index),
+                author_id="human-1",
+            )
+        )
+    receipts = drain_inbound(
+        orch, facade, channel_id="ch", workspace_id="ws", limit=5, since_ms=0
+    )
+    summaries = " ".join(r.summary or "" for r in receipts)
+    assert len(receipts) == 25
+    assert "burst ask 0" in summaries
+    assert "burst ask 24" in summaries
+    store.close()
+
+
+def test_pagination_stops_and_keeps_watermark_semantics(tmp_path: Path):
+    provider = NewestFirstProvider()
+    now_ms = 1_750_000_000_000
+    reads: list[dict] = []
+    inner = provider.read_messages
+
+    def recording(channel_id, **kwargs):
+        reads.append(dict(kwargs))
+        return inner(channel_id, **kwargs)
+
+    provider.read_messages = recording  # type: ignore[assignment]
+    provider.inbox.append(
+        DiscordMessage(
+            channel_id="ch",
+            content="only ask",
+            message_id=_snowflake_at(now_ms),
+            author_id="human-1",
+        )
+    )
+    orch, store, facade, _backend = _orch(tmp_path, provider)
+    assert len(drain_inbound(
+        orch, facade, channel_id="ch", workspace_id="ws", limit=5, since_ms=0
+    )) == 1
+    reads.clear()
+    # Nothing new: one anchored page, no loop, no re-dispatch.
+    assert drain_inbound(
+        orch, facade, channel_id="ch", workspace_id="ws", limit=5, since_ms=0
+    ) == []
+    anchored = [r for r in reads if r.get("after")]
+    assert len(anchored) == 1
+    assert anchored[0]["after"] == _snowflake_at(now_ms)
+    watermark = store.get_listen_watermark("ch")
+    assert watermark["last_message_id"] == _snowflake_at(now_ms)
     store.close()
