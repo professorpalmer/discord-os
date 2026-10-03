@@ -298,3 +298,34 @@ def test_band_d_doc_records_flag_owner_and_parks():
     assert "wave 7 p1" in lowered
     assert "graham" not in lowered or "never graham" in lowered
     assert "board + brain" in lowered
+
+
+def test_owner_jsk_py_never_evaluates_code(tmp_path: Path):
+    """Audit E1-6: eval stays unreachable even with the flag and an owner."""
+
+    orch, store, fake, backend = _orch(tmp_path)
+    store.add_operator("cary", role="owner")
+    store.set_host_control("ch", armed=True)
+    marker = tmp_path / "evaluated.txt"
+    fake.inbox.append(
+        DiscordMessage(
+            channel_id="ch",
+            content=f"jsk py __import__('pathlib').Path({str(marker)!r}).write_text('x')",
+            message_id="23",
+            author_id="cary",
+        )
+    )
+    receipts = drain_inbound(
+        orch,
+        orch.discord,
+        channel_id="ch",
+        workspace_id="ws",
+        since_ms=0,
+        env={ENV_JISHAKU: "1"},
+    )
+    assert receipts == []
+    assert backend.dispatch_count == 0
+    assert not marker.exists()
+    spoken = " ".join(msg.content or "" for msg in fake.sent).lower()
+    assert "parked" in spoken
+    store.close()
