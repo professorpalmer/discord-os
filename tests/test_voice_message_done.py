@@ -509,3 +509,24 @@ def test_doctor_reports_the_voice_done_knob(monkeypatch) -> None:
     _report_voice_done(ok)
     assert ok[0].startswith(f"OK {ENV_VOICE_DONE}=1 voice message on Done")
     assert "/opt/ffmpeg" in ok[0]
+
+
+def test_doctor_tools_flag_an_ffmpeg_that_does_not_start(tmp_path):
+    from agent_discord.discord.tts import voice_done_tools
+
+    say = tmp_path / "say"
+    ffmpeg = tmp_path / "ffmpeg"
+    for tool in (say, ffmpeg):
+        tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        tool.chmod(0o755)
+    env = {"DISCORD_OS_VOICE_DONE": "1"}
+    broken = voice_done_tools(
+        say_cmd=str(say), ffmpeg_cmd=str(ffmpeg), env=env, runner=lambda argv: -6
+    )
+    assert broken["ready"] is False and broken["ffmpeg_exit"] == -6
+    healthy = voice_done_tools(
+        say_cmd=str(say), ffmpeg_cmd=str(ffmpeg), env=env, runner=lambda argv: 0
+    )
+    assert healthy["ready"] is True
+    off = voice_done_tools(say_cmd=str(say), ffmpeg_cmd=str(ffmpeg), env={}, runner=lambda argv: -6)
+    assert off["ffmpeg_exit"] is None

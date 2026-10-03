@@ -800,6 +800,13 @@ def _report_voice_done(lines: list[str]) -> None:
             f"(tts={tools['tts_cli']}, ffmpeg={tools['ffmpeg_cli']})"
         )
         return
+    if tools["tts_cli"] and tools["ffmpeg_cli"]:
+        lines.append(
+            f"WARN {ENV_VOICE_DONE}=1 but {tools['ffmpeg_cli']} does not start "
+            f"(exit {tools['ffmpeg_exit']}); reinstall ffmpeg. Voice message fails "
+            "soft; the Done card is unaffected"
+        )
+        return
     missing = " + ".join(
         name
         for name, found in (("say/espeak", tools["tts_cli"]), ("ffmpeg", tools["ffmpeg_cli"]))

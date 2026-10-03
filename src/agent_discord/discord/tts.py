@@ -169,16 +169,30 @@ def voice_done_tools(
     say_cmd: Optional[str] = None,
     ffmpeg_cmd: Optional[str] = None,
     env: Optional[Mapping[str, str]] = None,
+    runner: Optional[Callable[[Sequence[str]], int]] = None,
 ) -> dict[str, Any]:
-    """Doctor view: is voice-Done opted in, and do both local tools resolve?"""
+    """Doctor view: is voice-Done opted in, do both tools resolve, does ffmpeg start?
+
+    A Homebrew ffmpeg with a missing dylib resolves on PATH but aborts on
+    launch, so when voice-Done is on, ffmpeg is actually run once.
+    """
 
     tts = _resolve_tts_cmd(say_cmd)
     ffmpeg = _resolve_ffmpeg_cmd(ffmpeg_cmd)
+    enabled = voice_done_enabled(env=env)
+    ffmpeg_exit: Optional[int] = None
+    if enabled and ffmpeg:
+        run = runner or _run_voice_tool
+        try:
+            ffmpeg_exit = int(run([ffmpeg, "-hide_banner", "-version"]))
+        except Exception:
+            ffmpeg_exit = -1
     return {
-        "enabled": voice_done_enabled(env=env),
+        "enabled": enabled,
         "tts_cli": tts or "",
         "ffmpeg_cli": ffmpeg or "",
-        "ready": bool(tts and ffmpeg),
+        "ffmpeg_exit": ffmpeg_exit,
+        "ready": bool(tts and ffmpeg) and ffmpeg_exit in (None, 0),
     }
 
 
