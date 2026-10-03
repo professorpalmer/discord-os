@@ -5,7 +5,7 @@ Filmable loop on a shared desk. **Phone = Discord only** — no Tailscale / ttyd
 ## Steps
 
 1. `REQUIRE_OPERATORS=1` → Pair×2.
-2. Desk-pack + `discord-os add brain --channel-id … --dri alex --role implementer`.
+2. Desk-pack + `discord-os add brain --channel-id … --strategy-docs ~/Projects/strategy`.
 3. Dual ask / steer; optional W5 typed handoff envelope (`handoff_id=…`).
 4. Point camera at **HOST spend meter** (ASCII bar + Halt badge).
 5. Off → On Catch-up (one briefing, no storm).

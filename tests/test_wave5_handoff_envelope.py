@@ -5,11 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from agent_discord.contracts import RunReceipt, TaskStatus
-from agent_discord.host.brain import format_meat_proxy_handoff_preamble
 from agent_discord.orchestration.cards import receipt_card
 from agent_discord.orchestration.handoff_envelope import (
     build_handoff_envelope,
     find_live_handoff_claim,
+    format_handoff_preamble,
     spoken_already_claimed,
     stable_handoff_id,
 )
@@ -79,7 +79,7 @@ def test_receipt_and_preamble_include_envelope(tmp_path: Path):
         peer_prompt="ship it | brain_dri=alex | constraints=no-push",
         now_ms=2,
     )
-    preamble = format_meat_proxy_handoff_preamble(
+    preamble = format_handoff_preamble(
         store,
         workspace_id="default",
         channel_id="ch",

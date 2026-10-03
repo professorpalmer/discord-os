@@ -1,23 +1,21 @@
-"""Wave 4: board catch-up conflicts, lane relationships, brain lake, meat-proxy cut."""
+"""Wave 4: board catch-up conflicts, brain lake, meat-proxy cut."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from agent_discord.host.add import add_brain
-from agent_discord.host.brain import (
-    format_brain_prompt_block,
-    format_meat_proxy_handoff_preamble,
-)
+from agent_discord.host.memory import build_compact_recall_pack
 from agent_discord.orchestration.board_catchup import (
     collect_channel_conflicts,
     extract_adr_refs,
     extract_pr_refs,
     format_board_catchup,
+    format_conflict_lines,
     is_board_digest_prompt,
     scan_job_conflicts,
 )
-from agent_discord.orchestration.job_briefing import lane_relationships
+from agent_discord.orchestration.handoff_envelope import format_handoff_preamble
 from agent_discord.persistence.sqlite import SQLiteStore
 
 
@@ -49,7 +47,7 @@ def test_scan_job_conflicts_shared_adr():
     ]
     hits = scan_job_conflicts(jobs)
     assert any(h.shared == "ADR-003" and h.kind == "adr" for h in hits)
-    lines = lane_relationships(jobs)
+    lines = format_conflict_lines(hits)
     assert any("ADR-003" in line for line in lines)
 
 
@@ -123,23 +121,21 @@ def test_add_brain_and_prompt_block(tmp_path: Path, monkeypatch):
     payload = add_brain(
         store,
         channel_id="ch-brain",
-        dri="alex",
         strategy_docs=str(docs),
         transcripts_channel="tr-1",
         journal=True,
     )
     assert payload["kind"] == "brain"
-    assert payload["dri"] == "alex"
     store.set_preference("default", "journal:alex:1", "noted swim lanes", kind="journal")
     binding = store.get_binding("default", "ch-brain")
-    block = format_brain_prompt_block(
+    block = build_compact_recall_pack(
         binding, store=store, workspace_id="default"
     )
     assert "[brain-lake]" in block
-    assert "alex" in block
+    assert "noted swim lanes" in block
     assert "Strategy docs" in block
     assert "Durable Objects" in block
-    preamble = format_meat_proxy_handoff_preamble(
+    preamble = format_handoff_preamble(
         store,
         workspace_id="default",
         channel_id="ch-brain",

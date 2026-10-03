@@ -230,46 +230,23 @@ def format_conflict_lines(
     hits: Sequence[ConflictHit],
     *,
     limit: int = 8,
-    dri_by_code: Mapping[str, str] | None = None,
 ) -> list[str]:
-    """Format conflict/relationship lines; annotate when DRIs differ (P2c)."""
-
-    dri_map = {str(k): str(v) for k, v in dict(dri_by_code or {}).items() if str(v).strip()}
-
-    def _label(code: str) -> str:
-        dri = dri_map.get(code, "").strip()
-        if dri:
-            return f"{code} ({dri})"
-        return code
+    """Format conflict/relationship lines for the Catch-up body."""
 
     lines: list[str] = []
     for hit in list(hits)[: max(0, int(limit))]:
-        left = _label(hit.left_code)
-        right = _label(hit.right_code)
-        left_dri = dri_map.get(hit.left_code, "").strip()
-        right_dri = dri_map.get(hit.right_code, "").strip()
-        cross = bool(left_dri and right_dri and left_dri.lower() != right_dri.lower())
-        cross_tag = " · cross-DRI" if cross else ""
+        left = hit.left_code
+        right = hit.right_code
         if hit.kind == "adr":
-            lines.append(
-                f"{left} ↔ {right} via {hit.shared} (ADR coordination tax{cross_tag})"
-            )
+            lines.append(f"{left} ↔ {right} via {hit.shared} (ADR coordination tax)")
         elif hit.kind == "pr":
-            lines.append(
-                f"{left} ↔ {right} via {hit.shared} (PR overlap{cross_tag})"
-            )
+            lines.append(f"{left} ↔ {right} via {hit.shared} (PR overlap)")
         elif hit.kind == "write_key":
-            lines.append(
-                f"{left} ↔ {right} via write-key {hit.shared}{cross_tag}"
-            )
+            lines.append(f"{left} ↔ {right} via write-key {hit.shared}")
         elif hit.kind == "path":
-            lines.append(
-                f"{left} ↔ {right} via path {hit.shared}{cross_tag}"
-            )
+            lines.append(f"{left} ↔ {right} via path {hit.shared}")
         else:
-            lines.append(
-                f"{left} ↔ {right} via cwd {hit.shared}{cross_tag}"
-            )
+            lines.append(f"{left} ↔ {right} via cwd {hit.shared}")
     return lines
 
 

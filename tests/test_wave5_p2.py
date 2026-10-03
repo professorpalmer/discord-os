@@ -1,53 +1,37 @@
-"""Wave 5 P2 stretch — compensation NOTE, DRI role SOP, cross-DRI lanes."""
+"""Wave 5 P2 stretch — compensation NOTE, brain lake bind, conflict lines."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from agent_discord.contracts import TaskStatus
-from agent_discord.host.brain import (
-    BRAIN_ROLES,
-    bind_brain,
-    brain_from_binding,
-    build_compact_recall_pack,
-    normalize_brain_role,
-)
+from agent_discord.host.memory import bind_brain_lake, build_compact_recall_pack
 from agent_discord.orchestration.board_catchup import ConflictHit, format_conflict_lines
 from agent_discord.orchestration.handoff_compensation import (
     compensation_note_text,
     is_handoff_peer_intake,
     maybe_post_handoff_compensation,
 )
-from agent_discord.orchestration.job_briefing import lane_relationships
 from agent_discord.persistence.sqlite import SQLiteStore
 
 
-def test_normalize_brain_role():
-    assert normalize_brain_role("Implementer") == "implementer"
-    assert normalize_brain_role("nope") == ""
-    assert BRAIN_ROLES == frozenset({"implementer", "reviewer", "planner"})
-
-
-def test_bind_brain_role_in_recall(tmp_path: Path):
+def test_bind_brain_lake_in_recall(tmp_path: Path):
     store = SQLiteStore(tmp_path / "t.sqlite3")
     store.initialize()
-    out = bind_brain(
+    out = bind_brain_lake(
         store,
         workspace_id="default",
         channel_id="111",
-        dri="alex",
-        role="reviewer",
+        transcripts_channel="tr-9",
     )
-    assert out["brain_role"] == "reviewer"
-    brain = brain_from_binding(store.get_binding("default", "111"))
-    assert brain["brain_role"] == "reviewer"
+    assert out["transcripts_channel"] == "tr-9"
     pack = build_compact_recall_pack(
         store.get_binding("default", "111"),
         store=store,
         workspace_id="default",
     )
-    assert "Role SOP: reviewer" in pack
-    assert "DRI: alex" in pack
+    assert "[brain-lake]" in pack
+    assert "Transcripts channel: tr-9" in pack
 
 
 def test_compensation_note_and_post(tmp_path: Path):
@@ -97,7 +81,7 @@ def test_compensation_note_and_post(tmp_path: Path):
     assert "Saga-lite" in compensation_note_text(handoff_id="x", status="cancelled")
 
 
-def test_cross_dri_conflict_lines():
+def test_conflict_lines_name_both_jobs():
     hits = [
         ConflictHit(
             left_code="DOS-1",
@@ -106,24 +90,6 @@ def test_cross_dri_conflict_lines():
             kind="adr",
         )
     ]
-    lines = format_conflict_lines(
-        hits, dri_by_code={"DOS-1": "alex", "DOS-2": "sam"}
-    )
-    assert lines and "alex" in lines[0] and "sam" in lines[0]
-    assert "cross-DRI" in lines[0]
-    jobs = [
-        {
-            "job_code": "DOS-1",
-            "intake_text": "touch ADR-003",
-            "brain_dri": "alex",
-            "status": "running",
-        },
-        {
-            "job_code": "DOS-2",
-            "intake_text": "also ADR-003 please",
-            "brain_dri": "sam",
-            "status": "running",
-        },
-    ]
-    rel = lane_relationships(jobs)
-    assert any("cross-DRI" in line or "alex" in line for line in rel)
+    lines = format_conflict_lines(hits)
+    assert lines and "DOS-1" in lines[0] and "DOS-2" in lines[0]
+    assert "ADR-003" in lines[0]

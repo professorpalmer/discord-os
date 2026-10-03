@@ -17,7 +17,7 @@ Success metric: **first Done card**, not “bot is online.”
 2. **Bootstrap** `discord-os setup` / host LaunchAgent; On HOST panel.
 3. Point at HOST **empty-state tip**: `Tip: Pair → Ask → Done` (unpaired, no jobs).
 4. `REQUIRE_OPERATORS=1` → **Pair×2**.
-5. Desk-pack (+ optional `add brain --dri`).
+5. Desk-pack (+ optional `add brain`).
 6. First **Ask** (short analyze / one-liner).
 7. Camera on first **Need → Live → Done** (Story/cites if Wave 6 tip).
 8. Optional: HOST spend meter glance (Wave 6).

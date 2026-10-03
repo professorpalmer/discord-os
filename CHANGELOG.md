@@ -206,6 +206,10 @@
 ### Forum realms cut to bind plus the status tag map
 - Forum realms keep the two paths in use: binding a forum as a realm, and mapping job status to the forum's existing tags (never creating tags, HARD lock 2). The Spec Kit lifecycle tag map and its `lifecycle=` output on `add forum-tags` are gone.
 
+### Brain lakes folded into memory
+- The brain lake is now a prompt block in host memory (`[brain-lake]` inject and `discord-os brain show` stay). DRI and role binding metadata are gone: `add brain --dri/--role`, the `DRI:` / `Role SOP:` lines, and the cross-DRI `Lanes:` footer on HOST Jobs.
+- Fixes `discord-os run` without `--fake`, which could raise NameError from a misplaced `add brain` print.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

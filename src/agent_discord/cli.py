@@ -538,15 +538,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_add_desk.add_argument("--github-token", default="")
     p_add_brain = add_sub.add_parser(
         "brain",
-        help="Per-DRI brain lake bind (strategy docs + transcripts + journal; single-host)",
+        help="Brain lake bind (strategy docs + transcripts + journal; single-host)",
     )
     p_add_brain.add_argument("--channel-id", required=True)
-    p_add_brain.add_argument("--dri", required=True, help="DRI / operator label for this brain")
-    p_add_brain.add_argument(
-        "--role",
-        default="",
-        help="Optional SOP role: implementer | reviewer | planner",
-    )
     p_add_brain.add_argument("--strategy-docs", default="", help="Path to strategy docs dir/file")
     p_add_brain.add_argument("--transcripts-channel", default="", help="Discord channel id for meeting transcripts")
     p_add_brain.add_argument("--no-journal", action="store_true", help="Skip journal inject")
@@ -904,7 +898,7 @@ def cmd_pair(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
 
 def cmd_brain(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     out = out or sys.stdout
-    from agent_discord.host.brain import build_compact_recall_pack
+    from agent_discord.host.memory import build_compact_recall_pack
 
     config = apply_runtime_secrets(load_config())
     store = SQLiteStore(config.database_path)
@@ -1068,8 +1062,6 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                 payload = add_brain(
                     store,
                     channel_id=args.channel_id,
-                    dri=args.dri,
-                    role=str(getattr(args, "role", "") or ""),
                     strategy_docs=getattr(args, "strategy_docs", "") or "",
                     transcripts_channel=getattr(args, "transcripts_channel", "") or "",
                     journal=not bool(getattr(args, "no_journal", False)),
@@ -1165,6 +1157,12 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         )
         for step in payload.get("steps") or ():
             print(f"  - {step.get('kind')}", file=out)
+    elif kind == "brain":
+        print(
+            f"brain #{payload.get('channel_id')} "
+            f"(single-host lake; not multi-host DO)",
+            file=out,
+        )
     if payload.get("restart"):
         print("restart the host so the running process sees this", file=out)
     return 0
@@ -1251,15 +1249,6 @@ def cmd_run(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     if args.fake:
         provider = FakeDiscordMCPProvider()
         backend = FakePuppetmasterBackend()
-    elif kind == "brain":
-        print(
-            f"brain dri={payload.get('dri')}"
-            f"{(' role=' + str(payload.get('brain_role'))) if payload.get('brain_role') else ''}"
-            f" #{payload.get('channel_id')} "
-            f"(single-host lake; not multi-host DO)",
-            file=out,
-        )
-
     else:
         provider = select_provider(config)
         backend = _select_backend(config)

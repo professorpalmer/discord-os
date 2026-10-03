@@ -885,9 +885,9 @@ class AgentOrchestrator:
                 )
         binding = self.store.get_binding(intake.workspace_id, intake.channel_id) or {}
         try:
-            from agent_discord.host.brain import format_brain_prompt_block
+            from agent_discord.host.memory import build_compact_recall_pack
 
-            brain_block = format_brain_prompt_block(
+            brain_block = build_compact_recall_pack(
                 binding,
                 store=self.store,
                 workspace_id=intake.workspace_id,
@@ -2662,7 +2662,7 @@ class AgentOrchestrator:
             # Wave 5 P1c: optional plan gallery journal (opt-in env or always-on thin)
             try:
                 import os
-                from agent_discord.host.brain import record_plan_gallery
+                from agent_discord.host.memory import record_plan_gallery
 
                 if str(os.environ.get("DISCORD_OS_PLAN_GALLERY") or "1").strip().lower() not in {
                     "0",

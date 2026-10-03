@@ -235,3 +235,69 @@ def envelope_from_metadata(meta: Mapping[str, Any] | None) -> Optional[HandoffEn
         roe_hint=str(meta.get("roe_hint") or "").strip(),
         brain_dri=str(meta.get("brain_dri") or "").strip(),
     )
+
+
+def format_handoff_preamble(
+    store: Any,
+    *,
+    workspace_id: str,
+    channel_id: str,
+    from_id: str,
+    to_id: str,
+    peer_prompt: str,
+    envelope: Any = None,
+) -> str:
+    """Lake-to-lake handoff context so humans are not the meat proxy.
+
+    Escalates to humans only on ROE (gates) — this block travels with the
+    JobPool peer task. ``envelope`` adds the typed handoff lines.
+    """
+
+    from agent_discord.host.memory import build_compact_recall_pack
+
+    binding: Mapping[str, Any] = {}
+    getter = getattr(store, "get_binding", None)
+    if callable(getter):
+        try:
+            binding = getter(workspace_id, channel_id) or {}
+        except Exception:
+            binding = {}
+    brain_block = build_compact_recall_pack(
+        binding, store=store, workspace_id=workspace_id
+    )
+    mem = ""
+    reader = getattr(store, "prompt_memory_block", None)
+    if callable(reader):
+        try:
+            mem = (reader(workspace_id) or "").strip()
+        except Exception:
+            mem = ""
+    env_lines: list[str] = []
+    if envelope is not None:
+        hid = str(getattr(envelope, "handoff_id", "") or "").strip()
+        if hid:
+            env_lines.append(f"handoff_id={hid}")
+        for attr in (
+            "constraints",
+            "expecting",
+            "freshness",
+            "supersedes",
+            "roe_hint",
+            "brain_dri",
+        ):
+            val = str(getattr(envelope, attr, "") or "").strip()
+            if val:
+                env_lines.append(f"{attr}={val}")
+    parts = [
+        f"[meat-proxy-cut] Handoff lake context from <@{from_id}> → <@{to_id}>.",
+        "Escalate to humans only on ROE (write/ask/plan gates) — do not meat-proxy via chat paste.",
+    ]
+    if env_lines:
+        parts.append("[handoff-envelope]\n" + "\n".join(env_lines))
+    parts.append(f"Task: {peer_prompt.strip()}")
+    if brain_block:
+        parts.append(brain_block)
+    if mem:
+        clipped = mem if len(mem) <= 600 else mem[:597] + "..."
+        parts.append("[desk-memory]\n" + clipped)
+    return "\n\n".join(parts)

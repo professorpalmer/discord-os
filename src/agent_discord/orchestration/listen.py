@@ -860,10 +860,10 @@ def drain_inbound(
                 )
                 continue
             
-            from agent_discord.host.brain import format_meat_proxy_handoff_preamble
             from agent_discord.orchestration.handoff_envelope import (
                 build_handoff_envelope,
                 find_live_handoff_claim,
+                format_handoff_preamble,
                 spoken_already_claimed,
             )
 
@@ -890,7 +890,7 @@ def drain_inbound(
                 )
                 continue
             try:
-                enriched_prompt = format_meat_proxy_handoff_preamble(
+                enriched_prompt = format_handoff_preamble(
                     store,
                     workspace_id=workspace_id,
                     channel_id=channel_id,
@@ -899,18 +899,6 @@ def drain_inbound(
                     peer_prompt=cleaned_prompt,
                     envelope=envelope,
                 )
-            except TypeError:
-                try:
-                    enriched_prompt = format_meat_proxy_handoff_preamble(
-                        store,
-                        workspace_id=workspace_id,
-                        channel_id=channel_id,
-                        from_id=author,
-                        to_id=peer_id,
-                        peer_prompt=cleaned_prompt,
-                    )
-                except Exception:
-                    enriched_prompt = cleaned_prompt
             except Exception:
                 enriched_prompt = cleaned_prompt
             handoff_meta = envelope.as_metadata()

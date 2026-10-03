@@ -48,7 +48,7 @@ Use a supervisor OS when you want fleet orchestration as the core. Use Discord O
 ## Wave 4 (board + brain lakes — still no fleet)
 
 - **Board catch-up** — Catch-up + `digest:` / `board catch-up:` schedules surface ADR/PR lane conflicts.
-- **Brain lake** — `discord-os add brain --dri` (strategy docs + transcripts + journal) on one Mac SQLite.
+- **Brain lake** — `discord-os add brain` (strategy docs + transcripts + journal) on one Mac SQLite.
 - **Meat-proxy cut** — handoff/peer carries lake context; humans Pair/gate on ROE only.
 - Still **not** multi-host brain lakes / Durable Objects clones.
 
