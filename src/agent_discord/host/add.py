@@ -225,6 +225,45 @@ def add_memory(
     }
 
 
+def add_capture(
+    store: Any,
+    *,
+    channel_id: str,
+    workspace_id: str = "default",
+    env_file: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Arm capture-first on one channel. Short thoughts stop becoming jobs."""
+
+    from agent_discord.orchestration.capture import (
+        CAPTURE_CHANNELS_ENV,
+        enable_capture_channel,
+    )
+
+    cid = (channel_id or "").strip()
+    if not cid:
+        raise ValueError("add capture needs --channel-id")
+    enable_capture_channel(store, workspace_id=workspace_id, channel_id=cid)
+    path = env_file or dotenv_path()
+    current = read_dotenv(path)
+    upsert_dotenv(
+        path,
+        {
+            CAPTURE_CHANNELS_ENV: merge_id_csv(
+                current.get(CAPTURE_CHANNELS_ENV)
+                or os.environ.get(CAPTURE_CHANNELS_ENV)
+                or "",
+                cid,
+            )
+        },
+    )
+    return {
+        "kind": "capture",
+        "channel_id": cid,
+        "env": str(path),
+        "live": True,
+    }
+
+
 def add_pm_inbox(
     store: Any,
     *,
@@ -520,10 +559,14 @@ def list_added(
         for item in load_host_tools(env=merged)
         if item.ready
     ]
+    from agent_discord.orchestration.capture import capture_channel_ids
     from agent_discord.orchestration.pm_inbox import pm_inbox_channel_id
 
     return {
         "env": str(path) if path.is_file() else "",
+        "capture": list(
+            capture_channel_ids(store, workspace_id=workspace_id, env=merged)
+        ),
         "pm_inbox": pm_inbox_channel_id(store, env=merged),
         "repos": [{"name": repo.name, "path": str(repo.path)} for repo in repos],
         "realms": realms,

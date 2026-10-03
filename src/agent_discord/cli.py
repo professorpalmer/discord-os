@@ -523,6 +523,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_add_pm_inbox.add_argument("--channel-id", required=True)
     p_add_pm_inbox.add_argument("--json", action="store_true")
+    p_add_capture = add_sub.add_parser(
+        "capture",
+        help="Capture short thoughts to memory instead of cooking them (opt-in)",
+    )
+    p_add_capture.add_argument("--channel-id", required=True)
+    p_add_capture.add_argument("--workspace-id", default="default")
+    p_add_capture.add_argument("--json", action="store_true")
     p_add_list = add_sub.add_parser("list", help="Show wired realms, memory, wiki, and tools")
     p_add_list.add_argument("--workspace-id", default="default")
     p_add_list.add_argument("--json", action="store_true")
@@ -997,6 +1004,7 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     out = out or sys.stdout
     from agent_discord.host.add import (
         add_brain,
+        add_capture,
         add_desk_pack,
         add_github,
         add_memory,
@@ -1038,6 +1046,18 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
             store.initialize()
             try:
                 payload = add_memory(
+                    store,
+                    channel_id=args.channel_id,
+                    workspace_id=args.workspace_id,
+                )
+            finally:
+                store.close()
+        elif command == "capture":
+            config = load_config()
+            store = SQLiteStore(config.database_path)
+            store.initialize()
+            try:
+                payload = add_capture(
                     store,
                     channel_id=args.channel_id,
                     workspace_id=args.workspace_id,
@@ -1130,8 +1150,8 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
             return 0
         else:
             print(
-                "add: realm, memory, pm-inbox, repo, wiki, tool, github, "
-                "desk-pack, brain, forum-tags, or list",
+                "add: realm, memory, capture, pm-inbox, repo, wiki, tool, "
+                "github, desk-pack, brain, forum-tags, or list",
                 file=sys.stderr,
             )
             return 2
@@ -1152,6 +1172,8 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
             print(f"realm:   {realm['name']} #{realm['channel_id']}", file=out)
         for channel_id in payload.get("memory") or ():
             print(f"memory:  #{channel_id}", file=out)
+        for channel_id in payload.get("capture") or ():
+            print(f"capture: #{channel_id}", file=out)
         if payload.get("pm_inbox"):
             print(f"pm-inbox: #{payload['pm_inbox']}", file=out)
         for tool in payload.get("tools") or ():
@@ -1165,6 +1187,12 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         print(f"added realm {payload['name']} #{payload['channel_id']}{cwd}{forum}", file=out)
     elif kind == "memory":
         print(f"added memory #{payload['channel_id']}", file=out)
+    elif kind == "capture":
+        print(
+            f"added capture #{payload['channel_id']} "
+            "(short thoughts become memory; do: still cooks)",
+            file=out,
+        )
     elif kind == "pm-inbox":
         print(
             f"added pm-inbox #{payload['channel_id']} "

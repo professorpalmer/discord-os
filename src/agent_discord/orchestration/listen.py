@@ -719,6 +719,30 @@ def drain_inbound(
                 store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
+        decision = _capture_decision(
+            store,
+            text=text,
+            channel_id=channel_id,
+            workspace_id=workspace_id,
+            in_job_thread=bool(follow_thread),
+            env=env,
+        )
+        text = decision.text or text
+        if decision.capture:
+            if _claim_inbound(store, discord, message, channel_id):
+                _absorb_capture(
+                    discord,
+                    store,
+                    message=message,
+                    text=text,
+                    channel_id=channel_id,
+                    workspace_id=workspace_id,
+                    guild_id=guild_id,
+                )
+            watermark = _advance_listen_watermark(
+                store, watermark_key, created_ms, message.message_id, watermark
+            )
+            continue
         if follow_thread and _thread_has_running_job(orchestrator, job_pool, follow_thread):
             if not _claim_inbound(store, discord, message, channel_id):
                 watermark = _advance_listen_watermark(
@@ -1385,6 +1409,63 @@ def _tick_morning_summary_best_effort(
         )
     except Exception:
         pass
+
+
+def _capture_decision(
+    store: Any,
+    *,
+    text: str,
+    channel_id: str,
+    workspace_id: str,
+    in_job_thread: bool,
+    env: Optional[Mapping[str, str]],
+) -> Any:
+    """Capture or cook. OFF unless the operator armed capture-first here."""
+
+    from agent_discord.orchestration.capture import (
+        IntakeDecision,
+        capture_first_enabled,
+        classify_intake,
+    )
+
+    try:
+        armed = capture_first_enabled(
+            store, channel_id, workspace_id=workspace_id, env=env
+        )
+    except Exception:
+        armed = False
+    try:
+        return classify_intake(
+            text, capture_first=armed, in_job_thread=in_job_thread
+        )
+    except Exception:
+        return IntakeDecision(capture=False, text=text, reason="error")
+
+
+def _absorb_capture(
+    discord: Any,
+    store: Any,
+    *,
+    message: DiscordMessage,
+    text: str,
+    channel_id: str,
+    workspace_id: str,
+    guild_id: Optional[str],
+) -> None:
+    """Memory plus one reaction. No card, no job, no spend."""
+
+    from agent_discord.orchestration.capture import acknowledge_capture, record_capture
+
+    record_capture(
+        store,
+        workspace_id=workspace_id,
+        channel_id=channel_id,
+        text=text,
+        author_id=message.author_id or "",
+        message_id=message.message_id or "",
+        guild_id=str(guild_id or ""),
+    )
+    acknowledge_capture(discord, channel_id, message.message_id or "")
 
 
 def _tick_pm_inbox_best_effort(

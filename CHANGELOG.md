@@ -243,6 +243,9 @@
 ### Puppetmaster job inbox (opt-in)
 - `discord-os add pm-inbox --channel-id ID` gives each Puppetmaster job started elsewhere on this Mac (Marionette, MCP, CLI) one live card in its own thread, edited as it changes. Approve/Reject when parked, and thread replies steer the job. Operator-only. There is no Cancel, since Puppetmaster has no cancel verb. Discovery limits are in `docs/jobs/pm-inbox.md`.
 
+### Capture-first intake (opt-in)
+- With capture-first on for a channel (`discord-os add capture --channel-id ID` or `DISCORD_OS_CAPTURE_FIRST=1`), a short top-level message that is not an instruction is saved to memory, redacted and cited by message link, and acknowledged with a reaction. No card, no job, no spend. `do:` or `cook:` always cooks. Commands, imperatives, long messages, repo-status questions and job-thread replies cook as before.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
