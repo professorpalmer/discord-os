@@ -109,6 +109,9 @@
 - The gateway RESUMEs (op 6) with session id, sequence and `resume_gateway_url`, honors op 7 Reconnect, and treats op 9 as resumable or a fresh IDENTIFY per its payload. Before, op 9 disarmed the host and exited.
 - Close codes surface. Only 4004 and 4010-4014 are fatal. 4007/4009 re-identify.
 
+### Gateway READY deadline
+- A socket that sends Hello but never READY is reconnected after 30 s.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

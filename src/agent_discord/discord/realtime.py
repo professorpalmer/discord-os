@@ -34,6 +34,9 @@ BACKOFF_FLOOR_S = 0.25
 # op 9 Invalid Session: Discord asks for a 1-5s pause before re-auth.
 INVALID_SESSION_MIN_S = 1.0
 INVALID_SESSION_MAX_S = 5.0
+# A socket that completes the handshake but never dispatches READY is a
+# zombie the old code waited on forever.
+DEFAULT_READY_DEADLINE_S = 30.0
 
 
 class GatewayClosed(RuntimeError):
@@ -156,6 +159,7 @@ def run_discord_gateway(
     ack_stale_s: Optional[float] = None,
     ready_grace_s: Optional[float] = None,
     session: Optional[GatewaySession] = None,
+    ready_deadline_s: float = DEFAULT_READY_DEADLINE_S,
 ) -> None:
     """Identify or resume, heartbeat, and forward DISPATCH events.
 
@@ -188,6 +192,8 @@ def run_discord_gateway(
     except Exception:
         pass
     seq: Optional[int] = state.seq
+    ready = False
+    ready_deadline: Optional[float] = None
     beat_stop = threading.Event()
     beater: Optional[threading.Thread] = None
     send_lock = threading.Lock()
@@ -201,6 +207,23 @@ def run_discord_gateway(
     try:
         while not halt.is_set():
             raw = sock.recv_text(timeout=1.0)
+            if (
+                raw is None
+                and not ready
+                and ready_deadline is not None
+                and time.monotonic() >= ready_deadline
+            ):
+                # Handshake fine, Hello taken, then silence: there is no ACK
+                # to go stale, so nothing else would ever reconnect this.
+                reason = "gateway never READY after Hello"
+                print("panel gateway stalled before READY — reconnecting", flush=True)
+                try:
+                    from agent_discord.discord.gateway_health import note_closed
+
+                    note_closed(reason)
+                except Exception:
+                    pass
+                raise GatewayClosed(reason, fatal=False)
             if raw is None:
                 # Zombie WS: TCP still up but Discord stopped ACKing. Force
                 # reconnect so the outer panel loop opens a fresh socket
@@ -279,6 +302,8 @@ def run_discord_gateway(
                         daemon=True,
                     )
                     beater.start()
+                if ready_deadline is None and not ready:
+                    ready_deadline = time.monotonic() + max(0.0, float(ready_deadline_s))
                 if resuming:
                     send(
                         {
@@ -338,6 +363,8 @@ def run_discord_gateway(
                 event = str(message.get("t") or "")
                 payload = data if isinstance(data, dict) else {}
                 if event in {"READY", "RESUMED"}:
+                    ready = True
+                    ready_deadline = None
                     if event == "READY":
                         state.note_ready(
                             session_id=str(payload.get("session_id") or ""),
