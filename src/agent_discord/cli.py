@@ -1682,7 +1682,7 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     store.initialize()
     stale = store.fail_stale_runs()
     if stale:
-        print(f"cleared {stale} leftover running job(s)", flush=True)
+        print(f"cleared {len(stale)} leftover running job(s)", flush=True)
     store.seed_owner_from_env()
     from agent_discord.orchestration.service import (
         seed_spend_cap_from_env,
@@ -1710,6 +1710,12 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         owner_id=f"{CLI_OWNER_PREFIX}{os.getpid()}-{uuid4().hex[:8]}",
         bot_token_fingerprint=config.bot_token_fingerprint or "local-dev",
     )
+    if stale:
+        from agent_discord.orchestration.orchestrator import repaint_stopped_cards
+
+        repainted = repaint_stopped_cards(discord, stale)
+        if repainted:
+            print(f"repainted {repainted} stopped job card(s)", flush=True)
     os.environ["PUPPETMASTER_STATE_DIR"] = str(config.workspace / "puppetmaster")
     orch = AgentOrchestrator(
         store=store,

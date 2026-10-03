@@ -115,6 +115,10 @@
 ### Doctor and liveness see a never-READY gateway
 - `discord-os host doctor` FAILs and the HOST Need shows `gateway BAD` when the panel gateway never reached READY past grace. The separate `doctor --notify` process no longer overwrites the host's gateway health file with its own snapshot.
 
+### Restart keeps parked approvals and repaints stopped cards
+- A host restart no longer fails parked write approvals. Their Approve button still starts the write.
+- Runs the restart did stop are failed as before, and their live cards are repainted to say so, with Retry. Before, the phone kept showing Working and Cancel. Each run's live card id is now recorded on first paint so the restart can find it.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

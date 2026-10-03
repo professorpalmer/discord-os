@@ -235,6 +235,42 @@ def _card_window(text: str) -> str:
     return _clip_to_limit(body, CARD_TEXT_LIMIT)
 
 
+STOPPED_BY_RESTART_SPOKEN = "Stopped: the host restarted while this ran. Retry to run it again."
+
+
+def repaint_stopped_cards(discord: Any, rows: Sequence[Mapping[str, Any]]) -> int:
+    """After a restart sweep, repaint each stopped run's live card as failed.
+
+    Without this the phone keeps showing Working and Cancel for a run that
+    no longer exists. Best-effort: a card that cannot be edited is skipped.
+    """
+
+    if discord is None:
+        return 0
+    painted = 0
+    for row in rows:
+        meta = row.get("metadata") if isinstance(row.get("metadata"), Mapping) else {}
+        message_id = str(meta.get("card_message_id") or "").strip()
+        dest = str(
+            meta.get("card_channel_id") or row.get("thread_id") or row.get("channel_id") or ""
+        ).strip()
+        if not message_id or not dest:
+            continue
+        receipt = RunReceipt(
+            task_id=str(row.get("task_id") or ""),
+            run_id=str(row.get("run_id") or ""),
+            status=TaskStatus.FAILED,
+            summary=STOPPED_BY_RESTART_SPOKEN,
+            error="host restarted",
+        )
+        try:
+            edit_card(discord, dest, message_id, receipt_card(receipt))
+            painted += 1
+        except Exception:
+            continue
+    return painted
+
+
 @dataclass
 class _RunScope:
     """What run_task has created so far, so a crash can settle exactly that."""
@@ -285,12 +321,18 @@ class _LiveCard:
                 should = True
         if should and _is_settle_worthy(prior):
             self.orch._settle_beat(self.channel_id, self.thread_id, prior)
+        first_post = self.message_id is None
         self.message_id = self.orch._post_or_edit_progress(
             self.channel_id,
             card,
             thread_id=self.thread_id,
             message_id=self.message_id,
         )
+        if first_post and self.message_id:
+            # A host restart repaints this card from SQLite (repaint_stopped_cards).
+            self.orch._remember_card(
+                self.run_id, self.message_id, self.thread_id or self.channel_id
+            )
         if stage:
             self.stage = stage
         if new_text:
@@ -3761,6 +3803,17 @@ class AgentOrchestrator:
             channel_id, text, message_id=message_id
         )
         return started
+
+    def _remember_card(self, run_id: str, message_id: str, dest: str) -> None:
+        run = self.store.get_run(run_id) or {}
+        task_id = str(run.get("task_id") or "")
+        merger = getattr(self.store, "merge_task_metadata", None)
+        if not task_id or not callable(merger):
+            return
+        try:
+            merger(task_id, {"card_message_id": message_id, "card_channel_id": dest})
+        except Exception:
+            pass
 
     def _post_or_edit_progress(
         self,

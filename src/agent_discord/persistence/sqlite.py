@@ -647,28 +647,52 @@ class SQLiteStore:
         )
         conn.commit()
 
-    def fail_stale_runs(self, *, reason: str = "host restarted") -> int:
-        """Mark leftover running rows failed. Lineage stays so Retry can parent a new run."""
+    def fail_stale_runs(self, *, reason: str = "host restarted") -> list[dict[str, Any]]:
+        """Fail runs a dead host left running; return them so cards can be repainted.
+
+        A parked write approval has no worker yet, so it survives a restart and
+        its Approve button still works. Lineage stays so Retry can parent a new run.
+        """
 
         conn = self._connection()
-        cur = conn.execute(
+        rows = conn.execute(
             """
-            UPDATE runs
-            SET status=?, error=?, updated_at=datetime('now')
-            WHERE status IN ('running', 'progress', 'pending')
-            """,
-            (TaskStatus.FAILED.value, reason),
-        )
-        conn.execute(
+            SELECT r.run_id, r.task_id, r.status, t.channel_id, t.thread_id, t.metadata_json
+            FROM runs r JOIN tasks t ON t.task_id = r.task_id
+            WHERE r.status IN ('running', 'progress', 'pending')
             """
-            UPDATE tasks
-            SET status=?, updated_at=datetime('now')
-            WHERE status IN ('running', 'progress', 'pending')
-            """,
-            (TaskStatus.FAILED.value,),
-        )
+        ).fetchall()
+        stale: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                meta = json.loads(row["metadata_json"] or "{}")
+            except json.JSONDecodeError:
+                meta = {}
+            if not isinstance(meta, dict):
+                meta = {}
+            parked_write = bool(meta.get("awaiting_approval")) and not meta.get("awaiting_gate")
+            if row["status"] == TaskStatus.PENDING.value and parked_write:
+                continue
+            stale.append(
+                {
+                    "run_id": row["run_id"],
+                    "task_id": row["task_id"],
+                    "channel_id": row["channel_id"],
+                    "thread_id": row["thread_id"],
+                    "metadata": meta,
+                }
+            )
+        for item in stale:
+            conn.execute(
+                "UPDATE runs SET status=?, error=?, updated_at=datetime('now') WHERE run_id=?",
+                (TaskStatus.FAILED.value, reason, item["run_id"]),
+            )
+            conn.execute(
+                "UPDATE tasks SET status=?, updated_at=datetime('now') WHERE task_id=?",
+                (TaskStatus.FAILED.value, item["task_id"]),
+            )
         conn.commit()
-        return int(cur.rowcount or 0)
+        return stale
 
     def update_run(
         self,

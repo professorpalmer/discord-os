@@ -354,3 +354,52 @@ def test_approve_cooks_in_jobpool_not_on_caller_thread(tmp_path: Path):
     assert receipts[0].status == TaskStatus.COMPLETED
     assert cook_threads and cook_threads[0] != threading.get_ident()
     store.close()
+
+
+def test_restart_sweep_keeps_parked_approval_and_approve_still_works(tmp_path: Path):
+    """Audit C4/A5: a host restart used to fail every parked Need."""
+
+    orch, store, fake, backend = _orch(tmp_path)
+    set_write_gate(store, True)
+    parked = orch.run_task(
+        TaskIntake(
+            text="implement the restart path",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="ask-restart",
+        )
+    )
+    assert parked.status == TaskStatus.PENDING
+    stale = store.fail_stale_runs()
+    assert parked.run_id not in [row["run_id"] for row in stale]
+    assert store.get_run(parked.run_id)["status"] == TaskStatus.PENDING.value
+    result = orch.apply_job_action("approve", parked.run_id)
+    assert result["status"] == TaskStatus.COMPLETED.value
+    assert backend.dispatch_count == 1
+    store.close()
+
+
+def test_restart_sweep_fails_running_run_and_repaints_its_card(tmp_path: Path):
+    from agent_discord.discord.layout import iter_component_text
+    from agent_discord.orchestration.orchestrator import (
+        STOPPED_BY_RESTART_SPOKEN,
+        repaint_stopped_cards,
+    )
+
+    orch, store, fake, backend = _orch(tmp_path)
+    set_write_gate(store, False)
+    done = orch.run_task(
+        TaskIntake(text="review the billing module", channel_id="ch", workspace_id="ws")
+    )
+    meta = store.task_metadata(done.task_id)
+    assert meta.get("card_message_id"), "live card id is persisted on first paint"
+    # Simulate the host dying mid-run.
+    store.update_run(done.run_id, status=TaskStatus.RUNNING)
+    stale = store.fail_stale_runs()
+    assert [row["run_id"] for row in stale] == [done.run_id]
+    assert store.get_run(done.run_id)["status"] == TaskStatus.FAILED.value
+    assert repaint_stopped_cards(orch.discord, stale) == 1
+    card = next(m for m in fake.sent if m.message_id == meta["card_message_id"])
+    text = "\n".join(iter_component_text((card.metadata or {}).get("components")))
+    assert STOPPED_BY_RESTART_SPOKEN in text
+    store.close()
