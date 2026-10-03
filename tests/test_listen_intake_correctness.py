@@ -406,3 +406,65 @@ def test_voice_transcription_does_not_block_the_drain(tmp_path: Path, monkeypatc
     listen_mod.join_voice_workers(timeout=10)
     assert "run the tests" in [i.text for i in pool.submitted]
     store.close()
+
+
+# --- B11: seed a destination when it is first polled ---
+
+
+def test_listen_cli_seeds_at_poll_time_not_process_start(
+    tmp_path: Path, monkeypatch, capsys
+):
+    from agent_discord import cli as cli_mod
+
+    monkeypatch.chdir(tmp_path)
+    ws = tmp_path / ".agent-discord"
+    monkeypatch.setenv("AGENT_DISCORD_WORKSPACE", str(ws))
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("PUPPETMASTER_MODEL", "openrouter/auto")
+    seen: list[object] = []
+    real = cli_mod.drain_inbound
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("since_ms", "missing"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(cli_mod, "drain_inbound", spy)
+    assert cli_mod.main(["listen", "--channel-id", "99", "--fake", "--once"]) == 0
+    capsys.readouterr()
+    # A process-start constant would replay everything since boot in a thread
+    # discovered hours later; None makes drain_inbound seed at poll time.
+    assert seen
+    assert all(value is None for value in seen)
+
+
+def test_late_destination_seeds_at_its_own_first_poll(tmp_path: Path, monkeypatch):
+    from agent_discord.orchestration import listen as listen_mod
+
+    provider = FakeDiscordMCPProvider()
+    boot_ms = 1_750_000_000_000
+    late_ms = boot_ms + 4 * 3_600_000
+    provider.inbox.append(
+        DiscordMessage(
+            channel_id="ch-early",
+            content="first ask",
+            message_id=_snowflake_at(boot_ms + 1_000),
+            author_id="human-1",
+        )
+    )
+    provider.inbox.append(
+        DiscordMessage(
+            channel_id="ch-late",
+            content="chatter from an hour ago",
+            message_id=_snowflake_at(boot_ms + 3_600_000),
+            author_id="human-1",
+        )
+    )
+    orch, store, facade, _backend = _orch(tmp_path, provider)
+    monkeypatch.setattr(listen_mod, "default_listen_since_ms", lambda: boot_ms)
+    assert len(
+        drain_inbound(orch, facade, channel_id="ch-early", workspace_id="ws")
+    ) == 1
+    monkeypatch.setattr(listen_mod, "default_listen_since_ms", lambda: late_ms)
+    assert drain_inbound(orch, facade, channel_id="ch-late", workspace_id="ws") == []
+    assert store.get_listen_watermark("ch-late")["last_created_ms"] == late_ms
+    store.close()

@@ -60,7 +60,6 @@ from agent_discord.host.service import (
     write_host_meta,
 )
 from agent_discord.orchestration.listen import (
-    LISTEN_HISTORY_SLACK_MS,
     drain_inbound,
     listen_destinations,
     publish_host_card,
@@ -1779,7 +1778,6 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     discord_down = threading.Event()
     # (channel_id, prompt, replay_of, requester_id)
     asks: Queue[tuple[str, str, str, str]] = Queue()
-    ignore_history_before_ms = int(time.time() * 1000) - LISTEN_HISTORY_SLACK_MS
     from agent_discord.host.memory import seed_memory_channels
     from agent_discord.host.realms import listen_channel_ids, seed_channel_realms
     from agent_discord.host.repos import load_host_repos
@@ -1952,7 +1950,10 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                             thread_id=drain_thread,
                             limit=args.limit,
                             workspace=config.workspace,
-                            since_ms=ignore_history_before_ms,
+                            # No since_ms: a destination is seeded when it is
+                            # first polled, not at process start, so a thread
+                            # discovered hours later does not replay the day.
+                            since_ms=None,
                             host_roots=(
                                 tuple(repo.path for repo in host_repos)
                                 + (config.puppetmaster_cwd, config.workspace)

@@ -148,6 +148,9 @@
 ### Schedules and voice memos run off the listen thread
 - Due schedules go through JobPool with the realm write key, so the live slot limit and write lock apply. Voice memo transcription runs in a worker thread, so one long whisper run no longer stalls every channel.
 
+### New listen destinations start at first poll
+- A thread or channel discovered after host start is seeded at the time it is first polled, not at process start, so it no longer replays everything since boot.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
