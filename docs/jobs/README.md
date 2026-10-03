@@ -26,6 +26,11 @@ Claude Code MCP server, a bare CLI) can get one live card each in an opt-in
 inbox channel. Observe only — those jobs never cook here. See
 [pm-inbox](pm-inbox.md).
 
+An operator reaction on a settled card is that run's recorded outcome: thumbs up
+good, shrug partial, thumbs down bad. Read over REST on a throttled tick, stored
+in SQLite, tallied on the HOST card and printed by `discord-os lineage`. See
+[outcomes](outcomes.md).
+
 ## Code
 
 - `src/agent_discord/orchestration/orchestrator.py` — `_ensure_job_thread` always-bind on channel-parent asks

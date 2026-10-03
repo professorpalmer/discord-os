@@ -248,6 +248,15 @@ CREATE TABLE IF NOT EXISTS pm_inbox_jobs (
     updated_ms INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_pm_inbox_thread ON pm_inbox_jobs(thread_id);
+
+CREATE TABLE IF NOT EXISTS run_outcomes (
+    run_id TEXT NOT NULL,
+    operator_id TEXT NOT NULL,
+    label TEXT NOT NULL,
+    created_ms INTEGER NOT NULL,
+    PRIMARY KEY (run_id, operator_id)
+);
+CREATE INDEX IF NOT EXISTS idx_run_outcomes_created ON run_outcomes(created_ms);
 """
 
 PREFERENCE_KINDS = frozenset({"preference", "style", "failure", "journal", "plan"})
@@ -277,6 +286,7 @@ class SQLiteStore:
         self._migrate_inbound_queue(conn)
         self._migrate_pending_intake(conn)
         self._migrate_pm_inbox(conn)
+        self._migrate_run_outcomes(conn)
         self._fts_enabled = self._try_enable_fts(conn)
         conn.commit()
 
@@ -518,6 +528,21 @@ class SQLiteStore:
             );
             CREATE INDEX IF NOT EXISTS idx_pm_inbox_thread
             ON pm_inbox_jobs(thread_id);
+            """
+        )
+
+    def _migrate_run_outcomes(self, conn: sqlite3.Connection) -> None:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS run_outcomes (
+                run_id TEXT NOT NULL,
+                operator_id TEXT NOT NULL,
+                label TEXT NOT NULL,
+                created_ms INTEGER NOT NULL,
+                PRIMARY KEY (run_id, operator_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_run_outcomes_created
+            ON run_outcomes(created_ms);
             """
         )
 
@@ -2151,6 +2176,140 @@ class SQLiteStore:
             return None
         return str(row["run_id"] or "") or None
 
+    # --- recorded outcomes ---
+
+    def list_settled_cards(
+        self,
+        *,
+        days: int = 7,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Settled runs whose card is still addressable: newest first.
+
+        One row per task (its latest run) with the card ids the live card left
+        in task metadata. Callers read reactions off those ids.
+        """
+
+        window = f"-{max(1, int(days))} days"
+        capped = max(1, min(int(limit), 200))
+        rows = self._connection().execute(
+            """
+            SELECT t.task_id, t.metadata_json, t.channel_id, t.thread_id,
+                   t.job_code, r.run_id, r.status AS run_status
+            FROM tasks t
+            JOIN runs r ON r.run_id = (
+                SELECT run_id FROM runs
+                WHERE task_id = t.task_id
+                ORDER BY created_at DESC, run_id DESC
+                LIMIT 1
+            )
+            WHERE r.status IN ('completed','failed','cancelled')
+              AND t.updated_at >= datetime('now', ?)
+            ORDER BY t.updated_at DESC
+            LIMIT ?
+            """,
+            (window, capped),
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            meta = _metadata_blob(row["metadata_json"])
+            message_id = str(meta.get("card_message_id") or "").strip()
+            if not message_id:
+                continue
+            channel = (
+                str(meta.get("card_channel_id") or "").strip()
+                or str(row["thread_id"] or "").strip()
+                or str(row["channel_id"] or "").strip()
+            )
+            if not channel:
+                continue
+            out.append(
+                {
+                    "run_id": str(row["run_id"] or ""),
+                    "task_id": str(row["task_id"] or ""),
+                    "job_code": str(row["job_code"] or ""),
+                    "status": str(row["run_status"] or ""),
+                    "card_message_id": message_id,
+                    "card_channel_id": channel,
+                }
+            )
+        return out
+
+    def record_run_outcome(
+        self,
+        *,
+        run_id: str,
+        operator_id: str,
+        label: str,
+        created_ms: Optional[int] = None,
+    ) -> bool:
+        """One label per operator per run. True when this write changed it."""
+
+        rid = (run_id or "").strip()
+        uid = (operator_id or "").strip()
+        value = (label or "").strip()
+        if not rid or not uid or not value:
+            return False
+        conn = self._connection()
+        cur = conn.execute(
+            """
+            INSERT INTO run_outcomes (run_id, operator_id, label, created_ms)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(run_id, operator_id) DO UPDATE SET
+                label=excluded.label,
+                created_ms=excluded.created_ms
+            WHERE run_outcomes.label != excluded.label
+            """,
+            (rid, uid, value, int(created_ms if created_ms is not None else time.time() * 1000)),
+        )
+        conn.commit()
+        return int(cur.rowcount or 0) > 0
+
+    def list_run_outcomes(self, run_id: str) -> list[dict[str, Any]]:
+        rid = (run_id or "").strip()
+        if not rid:
+            return []
+        rows = self._connection().execute(
+            """
+            SELECT run_id, operator_id, label, created_ms
+            FROM run_outcomes WHERE run_id=?
+            ORDER BY created_ms ASC
+            """,
+            (rid,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def outcome_tally(self, *, days: int = 7) -> dict[str, int]:
+        since = int((time.time() - max(1, int(days)) * 86400) * 1000)
+        rows = self._connection().execute(
+            """
+            SELECT label, COUNT(*) AS n FROM run_outcomes
+            WHERE created_ms >= ?
+            GROUP BY label
+            """,
+            (since,),
+        ).fetchall()
+        return {str(row["label"] or ""): int(row["n"] or 0) for row in rows if row["label"]}
+
+    def list_labeled_runs(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        """Labeled runs newest-label-first, with the ask text an eval replays."""
+
+        capped = max(1, min(int(limit), 500))
+        rows = self._connection().execute(
+            """
+            SELECT o.run_id, o.label, o.operator_id, o.created_ms,
+                   t.task_id, t.intake_text, t.channel_id, t.workspace_id,
+                   t.job_code, r.status AS run_status, r.summary
+            FROM run_outcomes o
+            JOIN runs r ON r.run_id = o.run_id
+            JOIN tasks t ON t.task_id = r.task_id
+            ORDER BY o.created_ms DESC
+            LIMIT ?
+            """,
+            (capped,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def list_objects(
         self,
         channel_id: str,
@@ -2687,6 +2846,14 @@ def _github_attention(raw: Any) -> str:
 def _github_last_summary(raw: Any) -> str:
     github = _github_blob(raw)
     return str(github.get("last_summary") or "").strip()
+
+
+def _metadata_blob(raw: Any) -> dict[str, Any]:
+    try:
+        meta = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return meta if isinstance(meta, dict) else {}
 
 
 def _github_blob(raw: Any) -> dict[str, Any]:

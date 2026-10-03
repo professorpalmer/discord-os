@@ -20,6 +20,7 @@ Surface README is first run plus this map. Feature pages live in their own folde
 | [realms/ci-watch](realms/ci-watch.md) | Red CI wake with a one-tap Fix CI button |
 | [jobs](jobs/README.md) | Parallel cooks, `DISCORD_OS_MAX_LIVE`, live session threads |
 | [jobs/pm-inbox](jobs/pm-inbox.md) | Opt-in cards for Puppetmaster jobs started outside Discord OS |
+| [jobs/outcomes](jobs/outcomes.md) | Operator reactions on a Done card as a labeled run outcome |
 | [tools](tools/README.md) | Named CLI/HTTP catalog |
 | [wiki](wiki/README.md) | Portable LLM wiki over HTTP |
 | [memory](memory/README.md) | Think-tank channels |

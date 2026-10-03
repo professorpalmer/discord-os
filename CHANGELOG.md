@@ -249,6 +249,9 @@
 ### Weekly capture digest
 - Once a week (default Monday at the morning hour, `DISCORD_OS_CAPTURE_DIGEST_DAY`), the HOST channel gets one card listing the week's captures, with a Cook this button on up to five. Operator-only, through JobPool. Silent when there were none.
 
+### Outcomes from reactions
+- An operator's thumbs up, shrug or thumbs down on a Done card is stored as that run's outcome (good, partial, bad). Reactions are read over REST, polled at most every 5 minutes for runs settled in the last 7 days. The HOST card shows a 7-day tally, and `discord-os lineage` shows each run's outcomes.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

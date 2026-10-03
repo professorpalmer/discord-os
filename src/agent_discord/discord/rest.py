@@ -612,6 +612,39 @@ def add_message_reaction(
     )
 
 
+def list_message_reactions(
+    *,
+    token: str,
+    channel_id: str,
+    message_id: str,
+    emoji: str,
+    limit: int = 100,
+    opener: Optional[UrlOpener] = None,
+) -> tuple[dict[str, Any], ...]:
+    """GET the users who reacted with one emoji. Emoji is URL-encoded.
+
+    Reading reactions over REST is how settled cards get an operator outcome:
+    the Gateway is only there for On/Off (lock 4), so there is no reaction
+    event to listen for.
+    """
+
+    cid = (channel_id or "").strip()
+    mid = (message_id or "").strip()
+    if not cid or not mid:
+        raise ToolInvocationError("Discord channel and message id required")
+    encoded = quote(emoji, safe="")
+    capped = max(1, min(int(limit), 100))
+    raw = call_discord_json(
+        token,
+        "GET",
+        f"/channels/{cid}/messages/{mid}/reactions/{encoded}?limit={capped}",
+        opener=opener,
+    )
+    if not isinstance(raw, list):
+        raise ToolInvocationError("Discord reaction list was not an array")
+    return tuple(item for item in raw if isinstance(item, dict))
+
+
 def patch_bot_avatar(
     *,
     token: str,

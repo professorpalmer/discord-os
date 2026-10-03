@@ -762,6 +762,7 @@ def cmd_lineage(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                 root_task = str(run.get("task_id") or "")
                 job_code = str(reader(root_task) or "")
         children = child_job_codes(store, nodes, root_task)
+        outcomes = store.list_run_outcomes(run_id) if run_id else []
         if args.json:
             print(
                 json.dumps(
@@ -769,6 +770,7 @@ def cmd_lineage(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                         "run_id": run_id,
                         "job_code": job_code,
                         "children": list(children),
+                        "outcomes": outcomes,
                         "nodes": [node_payload(node) for node in nodes],
                     },
                     indent=2,
@@ -784,6 +786,10 @@ def cmd_lineage(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
             print(f"job_code: {job_code}", file=out)
         if children:
             print("children: " + ", ".join(children), file=out)
+        if outcomes:
+            from agent_discord.orchestration.outcomes import format_run_outcomes
+
+            print("outcomes: " + format_run_outcomes(outcomes), file=out)
         print(format_nodes(nodes), file=out)
         return 0 if nodes else 1
     finally:

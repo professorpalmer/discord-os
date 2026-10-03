@@ -217,15 +217,36 @@ def mark_stale(store: Any, node_keys: Sequence[str]) -> int:
 
 
 def format_nodes(nodes: Sequence[LineageNode]) -> str:
+    """Numbered steps. The number is what ``fork from <N>`` in a thread means."""
+
     if not nodes:
         return "no lineage nodes"
-    lines = ["step  key              parents  artifact"]
-    for node in nodes:
+    lines = ["  #  step  key              parents  artifact"]
+    for index, node in enumerate(nodes, start=1):
         short = node.node_key[:12]
         parents = ",".join(p[:8] for p in node.parent_keys) or "-"
         art = (node.artifact_id or "-")[:12]
-        lines.append(f"{node.step:7} {short}  {parents:16}  {art}")
+        lines.append(f"{index:3}  {node.step:7} {short}  {parents:16}  {art}")
     return "\n".join(lines)
+
+
+def node_at_step(nodes: Sequence[LineageNode], step_number: int) -> Optional[LineageNode]:
+    """The node ``format_nodes`` printed as ``step_number`` (1-based)."""
+
+    index = int(step_number) - 1
+    if index < 0 or index >= len(nodes):
+        return None
+    return nodes[index]
+
+
+def node_by_key_prefix(nodes: Sequence[LineageNode], prefix: str) -> Optional[LineageNode]:
+    """The one node whose key starts with ``prefix``. Ambiguous prefixes resolve to none."""
+
+    token = (prefix or "").strip().lower()
+    if len(token) < 4:
+        return None
+    hits = [node for node in nodes if node.node_key.lower().startswith(token)]
+    return hits[0] if len(hits) == 1 else None
 
 
 def node_payload(node: LineageNode) -> dict[str, Any]:

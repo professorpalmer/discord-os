@@ -216,6 +216,19 @@ class DiscordFacade:
             return
         raise ToolInvocationError("provider cannot add a reaction")
 
+    def list_reactions(
+        self,
+        channel_id: str,
+        message_id: str,
+        emoji: str,
+    ) -> tuple[dict[str, Any], ...]:
+        """Users who reacted with one emoji. Empty when the provider cannot read them."""
+
+        method = getattr(self.provider, "list_reactions", None)
+        if not callable(method):
+            return ()
+        return tuple(method(channel_id, message_id, emoji) or ())
+
     def download_attachment(
         self,
         channel_id: str,

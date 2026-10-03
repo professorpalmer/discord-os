@@ -633,10 +633,12 @@ def _host_description(
     update_pill: str = "",
     paired: bool = True,
     empty_jobs: bool = False,
+    outcomes: str = "",
 ) -> str:
     """HOST card body: optional Update-available pill above the Jobs briefing line.
 
     Wave 7 P0a: unpaired + no jobs → one spoken tip (Pair → Ask → Done). No wizard.
+    The recorded-outcome tally sits under the briefing line when any run is labeled.
     """
 
     pill = (update_pill or "").strip()
@@ -644,10 +646,8 @@ def _host_description(
     tip = ""
     if empty_jobs and not paired:
         tip = "Tip: Pair → Ask → Done"
-    body = job or tip
-    if pill and body:
-        return f"{pill}\n{body}"
-    return pill or body
+    lines = [part for part in (pill, job or tip, (outcomes or "").strip()) if part]
+    return "\n".join(lines)
 
 
 def host_card(
@@ -671,6 +671,7 @@ def host_card(
     spend_known: bool = True,
     update_pill: str = "",
     empty_jobs: bool = False,
+    outcomes: str = "",
 ) -> CardMessage:
     _ = channel_id
     fields = _host_status_fields(
@@ -726,6 +727,7 @@ def host_card(
             update_pill=update_pill,
             paired=paired,
             empty_jobs=empty_jobs,
+            outcomes=outcomes,
         ),
         color=COLOR_FAIL if halted and armed else (COLOR_LIVE if armed else COLOR_IDLE),
         avatar_url=avatar_url,

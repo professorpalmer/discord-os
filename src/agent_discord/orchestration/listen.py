@@ -1059,6 +1059,7 @@ def drain_inbound(
                 env=env,
             )
         _tick_pm_inbox_best_effort(discord, store, env=env)
+        _tick_outcomes_best_effort(discord, store, env=env)
         _tick_host_liveness_best_effort(
             discord,
             store,
@@ -1345,7 +1346,13 @@ def _tick_ci_watch_best_effort(
 
     if not _channel_is_armed(store, channel_id):
         return
-    if not _ci_watch_due(store, channel_id, env):
+    if not _poll_due(
+        store,
+        f"ci_watch_next_at:{(channel_id or '').strip()}",
+        env=env,
+        env_name=CI_WATCH_INTERVAL_ENV,
+        default_s=CI_WATCH_DEFAULT_INTERVAL_S,
+    ):
         return
     try:
         from agent_discord.orchestration.ci_watch import tick_ci_watch
@@ -1365,10 +1372,24 @@ def _tick_ci_watch_best_effort(
 
 CI_WATCH_INTERVAL_ENV = "DISCORD_OS_CI_WATCH_INTERVAL_S"
 CI_WATCH_DEFAULT_INTERVAL_S = 300
+OUTCOMES_INTERVAL_ENV = "DISCORD_OS_OUTCOMES_INTERVAL_S"
+OUTCOMES_DEFAULT_INTERVAL_S = 300
 
 
-def _ci_watch_due(store: Any, channel_id: str, env: Optional[Mapping[str, str]]) -> bool:
-    """True at most once per interval per channel; the next slot persists in SQLite."""
+def _poll_due(
+    store: Any,
+    key: str,
+    *,
+    env: Optional[Mapping[str, str]],
+    env_name: str,
+    default_s: int,
+) -> bool:
+    """True at most once per interval; the next slot persists in SQLite.
+
+    Ticks that reach a rate-limited API (GitHub, Discord reaction reads) use
+    this instead of running on every listen tick. The slot is stored so a
+    restart does not burst.
+    """
 
     import os
 
@@ -1376,11 +1397,10 @@ def _ci_watch_due(store: Any, channel_id: str, env: Optional[Mapping[str, str]])
 
     source = env if env is not None else os.environ
     try:
-        interval = max(30, int(str(source.get(CI_WATCH_INTERVAL_ENV) or "").strip() or 0))
+        interval = max(30, int(str(source.get(env_name) or "").strip() or 0))
     except ValueError:
         interval = 0
-    interval = interval or CI_WATCH_DEFAULT_INTERVAL_S
-    key = f"ci_watch_next_at:{(channel_id or '').strip()}"
+    interval = interval or default_s
     now = int(time.time())
     try:
         due_at = int(str(store.get_preference(HOST_PREFS_WORKSPACE, key) or "0") or 0)
@@ -1390,6 +1410,34 @@ def _ci_watch_due(store: Any, channel_id: str, env: Optional[Mapping[str, str]])
     except Exception:
         return False
     return True
+
+
+def _tick_outcomes_best_effort(
+    discord: Any,
+    store: Any,
+    *,
+    env: Optional[Mapping[str, str]],
+) -> None:
+    """Operator reactions on recently settled cards → labeled outcomes.
+
+    One reaction read per emoji per card, so it is throttled
+    (DISCORD_OS_OUTCOMES_INTERVAL_S, default 300) like the CI watcher.
+    """
+
+    if not _poll_due(
+        store,
+        "outcomes_next_at",
+        env=env,
+        env_name=OUTCOMES_INTERVAL_ENV,
+        default_s=OUTCOMES_DEFAULT_INTERVAL_S,
+    ):
+        return
+    try:
+        from agent_discord.orchestration.outcomes import collect_outcomes
+
+        collect_outcomes(store, discord, env=env)
+    except Exception:
+        pass
 
 
 def _tick_morning_summary_best_effort(

@@ -40,6 +40,10 @@ class FakeDiscordMCPProvider:
     threads: dict[str, dict[str, str]] = field(default_factory=dict)
     persist_dir: Optional[Path] = None
     reactions: list[dict[str, str]] = field(default_factory=list)
+    # (channel_id, message_id, emoji) -> user objects a reaction read returns.
+    reaction_users: dict[tuple[str, str, str], list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
 
     def __post_init__(self) -> None:
         if self.persist_dir is not None:
@@ -233,6 +237,15 @@ class FakeDiscordMCPProvider:
                 "emoji": emoji,
             }
         )
+
+    def list_reactions(
+        self,
+        channel_id: str,
+        message_id: str,
+        emoji: str,
+    ) -> tuple[dict[str, Any], ...]:
+        key = (str(channel_id or ""), str(message_id or ""), str(emoji or ""))
+        return tuple(self.reaction_users.get(key, ()))
 
     def get_message(self, channel_id: str, message_id: str) -> DiscordMessage:
         for msg in (*self.sent, *self.inbox):

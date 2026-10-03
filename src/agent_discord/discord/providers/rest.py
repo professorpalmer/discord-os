@@ -13,6 +13,7 @@ from agent_discord.discord.rest import (
     edit_channel_message,
     fetch_channel_message,
     list_channel_messages,
+    list_message_reactions,
     send_channel_attachment,
     send_channel_message,
 )
@@ -178,6 +179,20 @@ class RestDiscordProvider:
 
     def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> None:
         add_message_reaction(
+            token=self._bot_token,
+            channel_id=channel_id,
+            message_id=message_id,
+            emoji=emoji,
+            opener=self._opener,
+        )
+
+    def list_reactions(
+        self,
+        channel_id: str,
+        message_id: str,
+        emoji: str,
+    ) -> tuple[dict[str, Any], ...]:
+        return list_message_reactions(
             token=self._bot_token,
             channel_id=channel_id,
             message_id=message_id,

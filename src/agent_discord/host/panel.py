@@ -651,6 +651,11 @@ def host_panel_payload(
         update_pill = update_available_pill()
     except Exception:
         update_pill = ""
+    outcomes = ""
+    if store is not None:
+        from agent_discord.orchestration.outcomes import outcome_tally_line
+
+        outcomes = outcome_tally_line(store)
     job_rows = [j for j in (jobs or []) if str(j.get("task_id") or "") != "host-liveness"]
     empty_jobs = not bool(job_rows) and not bool((last_job or "").strip())
     card = host_card(
@@ -673,6 +678,7 @@ def host_panel_payload(
         github=_panel_github(),
         update_pill=update_pill,
         empty_jobs=empty_jobs,
+        outcomes=outcomes,
     )
     # Discord-half P1: HOST Jobs chrome accent follows top Need/Live/Done bucket.
     if (
