@@ -682,6 +682,65 @@ def test_jobs_pick_answers_ephemerally_without_a_channel_post(tmp_path: Path):
     store.close()
 
 
+def test_github_option_answers_with_auth_state_and_command(tmp_path: Path, monkeypatch):
+    """Audit 2026-10-02 G1-12: More > GitHub only repainted the panel."""
+
+    from agent_discord.host import github
+
+    store = SQLiteStore(tmp_path / "gh.sqlite3")
+    store.initialize()
+    store.set_host_control("ch", armed=True)
+    store.add_operator("owner-7", role="owner")
+    monkeypatch.setattr(
+        github, "gh_auth_state", lambda **kwargs: github.GITHUB_UNAUTHENTICATED
+    )
+    bodies: list[dict] = []
+
+    def opener(request, timeout=10):
+        if getattr(request, "data", None):
+            bodies.append(json.loads(request.data.decode("utf-8")))
+        return _FakeResponse(b"{}")
+
+    action = handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix-gh",
+            "token": "tok",
+            "application_id": "app-1",
+            "user": {"id": "owner-7"},
+            "data": {"custom_id": MORE_ID, "values": [GITHUB_ID]},
+            "message": {"id": "panel-1"},
+        },
+        token="bot-token",
+        opener=opener,
+    )
+    assert action == "github"
+    assert len(bodies) == 1
+    assert bodies[0]["type"] == 4
+    assert bodies[0]["data"]["flags"] == 64
+    content = bodies[0]["data"]["content"]
+    assert github.GITHUB_UNAUTHED_LINE in content
+    assert "gh auth login" in content
+    assert github.GITHUB_HOST_ONLY_LINE in content
+    store.close()
+
+
+def test_github_panel_message_states():
+    from agent_discord.host.github import (
+        GITHUB_AUTHED,
+        GITHUB_AUTHED_LINE,
+        GITHUB_MISSING_BIN,
+        GITHUB_MISSING_LINE,
+        github_panel_message,
+    )
+
+    assert GITHUB_AUTHED_LINE in github_panel_message(GITHUB_AUTHED)
+    assert GITHUB_MISSING_LINE in github_panel_message(GITHUB_MISSING_BIN)
+    assert "gh auth login" in github_panel_message(GITHUB_AUTHED)
+
+
 def test_more_menu_names_halt_or_resume(tmp_path: Path):
     """Audit 2026-10-02 G1-1: one Halt label in both states hid the state."""
 

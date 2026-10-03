@@ -1187,6 +1187,20 @@ def handle_gateway_interaction(
         # A modal must be the first and only response to this interaction.
         _ack_interaction(payload, poll_modal_payload(), opener=opener)
         return action
+    if action == "github":
+        # Read-only state + the host command. Never an interactive login here.
+        _ack_interaction(
+            payload,
+            {
+                "type": CALLBACK_MESSAGE,
+                "data": {
+                    "content": _github_panel_content(),
+                    "flags": FLAG_EPHEMERAL,
+                },
+            },
+            opener=opener,
+        )
+        return action
     if action == "job":
         # Ephemeral read-only answer: the one live card stays in the job thread.
         try:
@@ -1848,6 +1862,21 @@ def _panel_bank(store: Any, channel_id: str) -> bool:
         return bool(channel_is_memory(store, channel_id))
     except Exception:
         return False
+
+
+def _github_panel_content() -> str:
+    """gh auth state for the HOST More > GitHub ephemeral. Fail soft.
+
+    The probe is on the interaction ACK path, so it gets a short timeout.
+    """
+
+    from agent_discord.host import github
+
+    try:
+        state = github.gh_auth_state(timeout_s=2.0)
+    except Exception:
+        state = ""
+    return github.github_panel_message(state)
 
 
 def _panel_github() -> str:

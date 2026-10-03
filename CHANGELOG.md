@@ -188,6 +188,9 @@
 ### Halt and Resume are separate, named actions
 - The More menu shows Halt when running and Resume when halted. Each sets the state outright instead of toggling one label.
 
+### More > GitHub reports gh sign-in state
+- More > GitHub replies with the host's `gh` auth state and the command to run on the Mac to sign in. Before, it did nothing. No interactive login starts from Discord.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
