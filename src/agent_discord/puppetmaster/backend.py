@@ -451,6 +451,11 @@ def resolved_state_dir(base: Optional[Mapping[str, str]] = None) -> str:
     return str(Path.home() / ".discord-os" / "puppetmaster")
 
 
+# Puppetmaster reads this allowlist ahead of the shared ~/.puppetmaster
+# platform.json (platform_lock.enabled_adapters, 1.27.39).
+PM_ONLY_ADAPTERS_ENV = "PUPPETMASTER_ONLY_ADAPTERS"
+
+
 # Workers run model-chosen tools, shell included. They get what a CLI needs to
 # run plus the GitHub tokens gh uses. The OpenRouter key is added by the
 # backend. Nothing else from the host environment reaches them.
@@ -494,6 +499,9 @@ def worker_env(base: Optional[Mapping[str, str]] = None) -> dict[str, str]:
     }
     env["PATH"] = host_path(source)
     env["PUPPETMASTER_STATE_DIR"] = resolved_state_dir(source)
+    # HARD lock 10 is agentic only. Forcing the allowlist means another tool
+    # disabling adapters in the shared platform.json cannot stop our cooks.
+    env[PM_ONLY_ADAPTERS_ENV] = "agentic"
     secrets = load_host_tool_secrets(env=None if base is None else base)
     for key, value in secrets.items():
         env.setdefault(key, value)

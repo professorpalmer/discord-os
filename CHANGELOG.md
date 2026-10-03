@@ -151,6 +151,9 @@
 ### New listen destinations start at first poll
 - A thread or channel discovered after host start is seeded at the time it is first polled, not at process start, so it no longer replays everything since boot.
 
+### A shared Puppetmaster platform lock cannot disable cooks
+- Workers run with `PUPPETMASTER_ONLY_ADAPTERS=agentic`, which Puppetmaster reads ahead of the shared `~/.puppetmaster/platform.json`. Before, another tool disabling adapters there failed Discord OS cooks with `adapter(s) agentic are disabled` (two production runs).
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

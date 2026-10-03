@@ -17,6 +17,26 @@ Vault: `{workspace}/keys/`. Key goes into the **subprocess env** as `OPENROUTER_
 
 Optional Marionette HTTP: `AGENT_DISCORD_BACKEND=marionette` plus `MARIONETTE_BASE_URL`. Unconfigured Marionette fails closed. Marionette uses the same `openrouter/auto` pin (or fails closed).
 
+## A shared platform lock cannot disable Discord OS
+
+`~/.puppetmaster` is shared with every other Puppetmaster host on this Mac.
+Marionette disabling adapters in the global `platform.json` failed two
+production Discord OS cooks with `adapter(s) agentic are disabled`. The worker
+env now forces `PUPPETMASTER_ONLY_ADAPTERS=agentic`, which Puppetmaster reads
+ahead of `platform.json` (checked against puppetmaster-ai 1.27.39,
+`platform_lock.enabled_adapters`). HARD lock 10 is agentic only, so a host-set
+allowlist cannot widen it. `PUPPETMASTER_STATE_DIR` is already
+`{workspace}/puppetmaster`. The model registry stays the shared one.
+
+## Puppetmaster version floor
+
+`pyproject.toml` declares `puppetmaster-ai>=1.27.30,<2` — the floor that has
+`steer`, `cost --json`, and `--emit-job-id-early`. Production once ran a stale
+1.22.15 because `dependencies` was empty and `resolve_puppetmaster_cli` prefers
+the CLI next to this Python. `discord-os host doctor` now prints the resolved
+CLI path and version and WARNs when it falls outside the declared range; the
+same version lands in run usage metadata as `pm_version`.
+
 ## Code
 
 - `src/agent_discord/config.py` — `resolve_compute` (agentic-or-fail)
