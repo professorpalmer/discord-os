@@ -19,6 +19,12 @@
 - Only a 17-20 digit role snowflake is accepted. The guild id (the @everyone role) is refused.
 - Prefix the id with `-` to remove an operator role from Discord.
 
+### GitHub wakes trust only the repo's own people
+- PR review and issue comments wake a job only when the author is OWNER, MEMBER or COLLABORATOR, or is on `DISCORD_OS_GITHUB_BOT_ALLOW`. The allowlist now works for `[bot]` logins too.
+- Rule cooks quote GitHub event text as data. A cook carrying a review comment or failed check names waits for the write gate instead of running pre-approved.
+- Failed check names are reduced to a safe label of at most 60 characters.
+- A PR URL in a job summary binds the job only when the repo is a GitHub remote of a host checkout, or is listed in `DISCORD_OS_GITHUB_REPOS`.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

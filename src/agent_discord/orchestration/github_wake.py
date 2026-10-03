@@ -11,7 +11,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping, Optional, Sequence
+from typing import Any, Callable, Collection, Mapping, Optional, Sequence
 
 from agent_discord.orchestration.cards import github_wake_card, send_card
 from agent_discord.orchestration.job_briefing import ATTENTION_NEED, ATTENTION_WAITING
@@ -23,6 +23,9 @@ KIND_REVIEW = "review"
 KIND_MERGED = "merged"
 
 _FAIL_CONCLUSIONS = frozenset({"failure", "cancelled", "timed_out", "action_required"})
+# GitHub author_association values that may wake a job with their text.
+TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+_CHECK_LABEL_UNSAFE = re.compile(r"[^A-Za-z0-9 ._/()-]+")
 _PR_URL = re.compile(
     r"https?://github\.com/([^/\s]+)/([^/\s]+)/pull/(\d+)",
     re.IGNORECASE,
@@ -43,6 +46,7 @@ class ReviewNote:
     author: str
     body: str
     is_bot: bool
+    association: str = ""
 
 
 @dataclass(frozen=True)
@@ -106,7 +110,8 @@ def wake_events(
         item for item in snapshot.checks if str(item.status).lower() == "completed"
     ]
     if failed:
-        names = ", ".join(item.name or "check" for item in failed[:4])
+        # Check names come from workflow files the PR head controls.
+        names = ", ".join(_check_label(item.name) for item in failed[:4])
         events.append(
             WakeEvent(
                 kind=KIND_CHECK_FAILED,
@@ -134,7 +139,7 @@ def wake_events(
             )
         )
     for note in snapshot.reviews:
-        if note.is_bot or is_bot_author(note.author, allowlisted=allowlisted_bots):
+        if not _trusted_note(note, allowlisted_bots):
             continue
         body = " ".join((note.body or "").split())
         if len(body) > 120:
@@ -159,7 +164,33 @@ def wake_events(
     return tuple(events)
 
 
-def discover_job_pull_requests(store: Any) -> None:
+def _trusted_note(note: ReviewNote, allowlisted_bots: Sequence[str]) -> bool:
+    """Allowlisted bots, or humans who own, are members of, or collaborate on the repo."""
+
+    allowed = {item.strip().lower() for item in allowlisted_bots if str(item).strip()}
+    if (note.author or "").strip().lower() in allowed:
+        return True
+    if note.is_bot or is_bot_author(note.author):
+        return False
+    return (note.association or "").strip().upper() in TRUSTED_ASSOCIATIONS
+
+
+def _check_label(name: str) -> str:
+    label = _CHECK_LABEL_UNSAFE.sub(" ", name or "").strip() or "check"
+    return label[:60]
+
+
+def discover_job_pull_requests(
+    store: Any,
+    *,
+    trusted_repos: Optional[Callable[[], Collection[str]]] = None,
+) -> None:
+    """Bind a job to a PR URL in its summary, only for repos this host owns.
+
+    Summaries are model output, so a URL alone is not trusted. ``trusted_repos``
+    is called once, on the first URL found.
+    """
+
     lister = getattr(store, "list_recent_jobs", None)
     binder = getattr(store, "bind_job_pull_request", None)
     if not callable(lister) or not callable(binder):
@@ -169,12 +200,21 @@ def discover_job_pull_requests(store: Any) -> None:
     except Exception:
         return
     bound = getattr(store, "job_for_pull_request", None)
+    trusted: Optional[Collection[str]] = None
     for job in jobs:
         summary = str(job.get("summary") or "")
         parsed = parse_pull_url(summary)
         if parsed is None:
             continue
         repo, number = parsed
+        if trusted is None:
+            loader = trusted_repos or _host_github_slugs
+            try:
+                trusted = {item.lower() for item in loader()}
+            except Exception:
+                trusted = set()
+        if repo.lower() not in trusted:
+            continue
         task_id = str(job.get("task_id") or "")
         if not task_id:
             continue
@@ -265,12 +305,13 @@ def wake_github_jobs(
     snapshotter: Optional[Snapshotter] = None,
     allowlisted_bots: Sequence[str] = (),
     refresh_host: bool = True,
+    trusted_repos: Optional[Callable[[], Collection[str]]] = None,
 ) -> list[dict[str, Any]]:
     """Follow bound PRs. Post check/review wakes into the job thread only."""
 
     if store is None:
         return []
-    discover_job_pull_requests(store)
+    discover_job_pull_requests(store, trusted_repos=trusted_repos)
     reader = getattr(store, "list_job_pull_requests", None)
     if not callable(reader):
         return []
@@ -322,6 +363,12 @@ def wake_github_jobs(
             if result is not None:
                 delivered.append(result)
     return delivered
+
+
+def _host_github_slugs() -> frozenset[str]:
+    from agent_discord.host.repos import host_github_slugs
+
+    return host_github_slugs()
 
 
 def bot_allowlist(*, env: Optional[Mapping[str, str]] = None) -> tuple[str, ...]:
@@ -528,6 +575,9 @@ def _reviews_from_payload(raw: Any) -> list[ReviewNote]:
                 author=author,
                 body=body,
                 is_bot=is_bot_author(author),
+                association=str(
+                    row.get("authorAssociation") or row.get("author_association") or ""
+                ),
             )
         )
     return notes
@@ -578,6 +628,7 @@ def _issue_comments(
                 author=login,
                 body=str(row.get("body") or ""),
                 is_bot=str(user_type).lower() == "bot" or is_bot_author(login),
+                association=str(row.get("author_association") or ""),
             )
         )
     return notes
