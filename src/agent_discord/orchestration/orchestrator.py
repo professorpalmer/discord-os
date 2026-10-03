@@ -25,13 +25,11 @@ from agent_discord.contracts import (
 from agent_discord.discord.facade import DiscordFacade
 from agent_discord.discord.object_store import DEFAULT_MAX_OBJECT_BYTES, DiscordObjectStore
 from agent_discord.host.memory import memory_reach_block, recall_think_tank, settle_think_tank
-from agent_discord.host.realms import realm_for_channel
 from agent_discord.host.repos import (
     HostRepo,
     association_block,
     host_reach_block,
     load_host_repos,
-    resolve_host_repo,
 )
 from agent_discord.host.tools import load_host_tools, tools_reach_block
 from agent_discord.orchestration.cards import (
@@ -950,19 +948,11 @@ class AgentOrchestrator:
                 root = Path(remote_host.target).expanduser()
                 if root.is_dir():
                     host_cwd = root.resolve()
-        channel_realm = realm_for_channel(
-            self.store,
-            intake.channel_id,
-            workspace_id=intake.workspace_id,
-            repos=repos,
+        from agent_discord.orchestration.jobs import resolve_run_checkout
+
+        chosen = resolve_run_checkout(
+            self.store, intake, repos, default_cwd=self.compute_cwd
         )
-        chosen = resolve_host_repo(
-            intake.text,
-            repos,
-            default_cwd=self.compute_cwd,
-        )
-        if chosen is None:
-            chosen = channel_realm
         run_cwd = chosen.path if chosen is not None else (host_cwd or self.compute_cwd)
         if run_cwd is not None:
             extra_meta["cwd"] = str(run_cwd)

@@ -128,3 +128,36 @@ def test_status_only_update_keeps_usage_and_error(tmp_path: Path) -> None:
     assert row["error"] == "swarm exited with incomplete tasks"
     assert json.loads(row["usage_json"])["cost_usd"] == 0.0123
     store.close()
+
+
+def test_write_lock_covers_the_repo_the_ask_names(tmp_path: Path) -> None:
+    """Audit A4: channel bound to X asking about Y must lock Y, not X."""
+
+    from agent_discord.host.realms import bind_channel_realm
+    from agent_discord.host.repos import HostRepo
+    from agent_discord.orchestration.jobs import _needs_write_lock, resolved_write_key
+
+    x = HostRepo(name="alpha", path=tmp_path / "alpha", aliases=("alpha",))
+    y = HostRepo(name="bravo", path=tmp_path / "bravo", aliases=("bravo",))
+    for repo in (x, y):
+        (repo.path / ".git").mkdir(parents=True)
+    store = SQLiteStore(tmp_path / "lock.sqlite3")
+    store.initialize()
+    bind_channel_realm(store, workspace_id="ws", channel_id="ch-x", name="alpha", repos=(x, y))
+    bind_channel_realm(store, workspace_id="ws", channel_id="ch-y", name="bravo", repos=(x, y))
+    orch = AgentOrchestrator(
+        store=store, backend=FakePuppetmasterBackend(), discord=None, host_repos=(x, y)
+    )
+
+    def key(channel: str, text: str) -> str:
+        return resolved_write_key(TaskIntake(text=text, channel_id=channel, workspace_id="ws"), orch)
+
+    assert key("ch-x", "implement the fix") == str(x.path)
+    assert key("ch-x", "implement the fix in bravo") == str(y.path)
+    assert key("ch-y", "implement the fix") == str(y.path)
+
+    swarm = TaskIntake(
+        text="look around", channel_id="ch-x", workspace_id="ws", metadata={"workers": 3}
+    )
+    assert _needs_write_lock(swarm)
+    store.close()

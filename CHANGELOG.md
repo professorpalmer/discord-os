@@ -75,6 +75,9 @@
 ### Tokens and cost come from `puppetmaster cost`
 - After each local cook the final receipt carries Puppetmaster's measured tokens and cost, read with `puppetmaster cost <job_id> --json`. Before, usage came from worker stdout, which has neither, so tokens were null on every run. Only measured numbers count. An unpriced job stays unknown, never `$0`.
 
+### Write lock covers the tree the worker writes
+- The JobPool write lock now keys on the same checkout `run_task` cooks in: a repo named in the ask, else the channel realm. Before, a channel bound to X asking to implement in Y locked X and wrote Y, so two writers could land in one checkout. A metadata-requested swarm now takes the lock too.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
