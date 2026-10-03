@@ -44,6 +44,7 @@ from agent_discord.orchestration.reactive import (
     reactive_working_card,
 )
 from agent_discord.orchestration.evaluate import is_eval_metadata
+from agent_discord.orchestration.fork import FORK_PARENT_META, fork_note
 from agent_discord.orchestration.routing import (
     MODE_ANALYZE,
     MODE_IMPLEMENT,
@@ -680,8 +681,12 @@ class AgentOrchestrator:
                 parent_keys=(prev_tip,) if prev_tip else (),
             )
         session_parents: tuple[str, ...] = ()
+        # A fork names its own lineage parent, so it does not take a thread tip.
+        fork_parent = str((intake.metadata or {}).get(FORK_PARENT_META) or "").strip()
+        if fork_parent:
+            session_parents = (fork_parent,)
         follow_tid = str(intake.thread_id or "").strip()
-        if follow_tid and not replay_of:
+        if follow_tid and not replay_of and not fork_parent:
             prev_reader = getattr(self.store, "latest_run_id_for_thread", None)
             if callable(prev_reader):
                 try:
@@ -812,7 +817,7 @@ class AgentOrchestrator:
             live.paint(
                 reactive_progress_card(
                     stage="start",
-                    message="On it.",
+                    message=fork_note(intake.metadata) or "On it.",
                     percent=1,
                     run_id=run_id,
                     job_code=job_code,

@@ -22,6 +22,7 @@ Surface README is first run plus this map. Feature pages live in their own folde
 | [jobs/pm-inbox](jobs/pm-inbox.md) | Opt-in cards for Puppetmaster jobs started outside Discord OS |
 | [jobs/outcomes](jobs/outcomes.md) | Operator reactions on a Done card as a labeled run outcome |
 | [jobs/eval](jobs/eval.md) | `discord-os eval`: replay labeled runs read-only, score win/loss/same |
+| [jobs/fork](jobs/fork.md) | `fork from N:` — a sibling thread parented at one lineage step |
 | [tools](tools/README.md) | Named CLI/HTTP catalog |
 | [wiki](wiki/README.md) | Portable LLM wiki over HTTP |
 | [memory](memory/README.md) | Think-tank channels |

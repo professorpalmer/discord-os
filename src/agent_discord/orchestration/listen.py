@@ -719,6 +719,22 @@ def drain_inbound(
                 store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
+        if _absorb_fork(
+            orchestrator,
+            discord,
+            store,
+            job_pool,
+            message=message,
+            text=text,
+            channel_id=channel_id,
+            thread_id=follow_thread,
+            workspace_id=workspace_id,
+            guild_id=guild_id,
+        ):
+            watermark = _advance_listen_watermark(
+                store, watermark_key, created_ms, message.message_id, watermark
+            )
+            continue
         decision = _capture_decision(
             store,
             text=text,
@@ -1073,6 +1089,83 @@ def drain_inbound(
 
 
 
+
+
+def _absorb_fork(
+    orchestrator: Any,
+    discord: Any,
+    store: Any,
+    job_pool: Optional[Any],
+    *,
+    message: DiscordMessage,
+    text: str,
+    channel_id: str,
+    thread_id: Optional[str],
+    workspace_id: str,
+    guild_id: Optional[str],
+) -> bool:
+    """``fork from <N>: <ask>`` in a job thread → a sibling thread off that node.
+
+    The new intake carries no thread id, so the orchestrator posts a starter in
+    the parent channel and opens its own thread next to this one. Minting a job
+    is a dispatch, so it is operator-only.
+    """
+
+    from agent_discord.orchestration.fork import (
+        fork_metadata,
+        parse_fork_command,
+        resolve_fork_parent,
+    )
+    from agent_discord.orchestration.lineage import job_code_for_run
+
+    tid = (thread_id or "").strip()
+    if not tid:
+        return False
+    asked = parse_fork_command(text)
+    if asked is None:
+        return False
+    if not author_may_dispatch(
+        store, message.author_id, role_ids=_author_role_ids(message)
+    ):
+        return True
+    if not _claim_inbound(store, discord, message, channel_id):
+        return True
+    run_id = ""
+    reader = getattr(store, "latest_run_id_for_thread", None)
+    if callable(reader):
+        try:
+            run_id = str(reader(tid) or "").strip()
+        except Exception:
+            run_id = ""
+    node, step_number, refusal = resolve_fork_parent(store, run_id, asked.token)
+    if node is None:
+        _post_host_deny(discord, channel_id, tid, refusal)
+        return True
+    meta = fork_metadata(
+        node,
+        run_id=run_id,
+        step_number=step_number,
+        job_code=job_code_for_run(store, run_id),
+    )
+    meta["parent_thread_id"] = tid
+    intake = TaskIntake(
+        text=asked.prompt,
+        channel_id=channel_id,
+        workspace_id=workspace_id,
+        guild_id=guild_id,
+        requester_id=message.author_id,
+        metadata=meta,
+    )
+    record_pending_intake(store, intake)
+    if job_pool is None:
+        orchestrator.run_task(intake)
+    else:
+        job_pool.submit(
+            orchestrator.run_task,
+            intake,
+            write_key=resolved_write_key(intake, orchestrator),
+        )
+    return True
 
 
 def _absorb_spoken_gate(

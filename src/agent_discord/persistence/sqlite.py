@@ -2118,11 +2118,14 @@ class SQLiteStore:
         conn.commit()
 
     def list_lineage_nodes(self, run_id: str) -> Sequence[Mapping[str, Any]]:
+        # rowid, not node_key, breaks the tie: created_at is whole seconds, so a
+        # fast run's nodes all share one, and `fork from <N>` needs the step
+        # numbers `discord-os lineage` prints to be execution order.
         rows = self._connection().execute(
             """
             SELECT * FROM lineage_nodes
             WHERE run_id=?
-            ORDER BY created_at ASC, node_key ASC
+            ORDER BY created_at ASC, rowid ASC
             """,
             (run_id,),
         ).fetchall()

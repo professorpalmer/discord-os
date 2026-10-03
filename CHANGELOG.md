@@ -255,6 +255,9 @@
 ### discord-os eval
 - `discord-os eval --limit N --yes` replays labeled runs read-only (analyze mode, no Discord posts) under the current or an allowlisted pin. It scores win, loss or same with a documented rubric and can write a JSON report. Without `--yes` it only prints the plan. A pin outside the allowlist exits 2.
 
+### Fork from a lineage step
+- `fork from <N>: <ask>` in a job thread opens a sibling thread whose run is parented at step N of that job, not its tip. `discord-os lineage` now numbers steps in execution order. Before, steps in the same second sorted by key hash. Operator-only.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

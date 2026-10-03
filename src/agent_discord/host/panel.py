@@ -1416,23 +1416,12 @@ def _pending_continue_key(channel_id: str) -> str:
 def _pending_continue_label(store: Any, channel_id: str) -> str:
     """Job code (else short run id) of the armed continue. "" when none."""
 
+    from agent_discord.orchestration.lineage import job_code_for_run
+
     run_id = pending_continue_run_id(store, channel_id)
     if not run_id:
         return ""
-    return _job_code_for_run(store, run_id) or run_id[:16]
-
-
-def _job_code_for_run(store: Any, run_id: str) -> str:
-    getter = getattr(store, "get_run", None)
-    task_getter = getattr(store, "get_task", None)
-    if not callable(getter) or not callable(task_getter):
-        return ""
-    try:
-        run = getter(run_id) or {}
-        task = task_getter(str(run.get("task_id") or "")) or {}
-    except Exception:
-        return ""
-    return str(task.get("job_code") or "").strip()
+    return job_code_for_run(store, run_id) or run_id[:16]
 
 
 def _handle_cook_click(

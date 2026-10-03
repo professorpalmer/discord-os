@@ -222,11 +222,11 @@ class DiscordFacade:
         message_id: str,
         emoji: str,
     ) -> tuple[dict[str, Any], ...]:
-        """Users who reacted with one emoji. Empty when the provider cannot read them."""
+        """Users who reacted with one emoji."""
 
         method = getattr(self.provider, "list_reactions", None)
         if not callable(method):
-            return ()
+            raise ToolInvocationError("provider cannot read reactions")
         return tuple(method(channel_id, message_id, emoji) or ())
 
     def download_attachment(

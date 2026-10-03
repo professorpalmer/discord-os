@@ -270,6 +270,20 @@ def latest_run_id(store: Any) -> Optional[str]:
     return str(found) if found else None
 
 
+def job_code_for_run(store: Any, run_id: str) -> str:
+    """The speakable DOS-* code for a run, or empty. The inverse of resolve_run_id."""
+
+    getter = getattr(store, "get_run", None)
+    reader = getattr(store, "task_job_code", None)
+    if not callable(getter) or not callable(reader) or not (run_id or "").strip():
+        return ""
+    try:
+        run = getter(run_id) or {}
+        return str(reader(str(run.get("task_id") or "")) or "").strip()
+    except Exception:
+        return ""
+
+
 def resolve_run_id(store: Any, token: str) -> str:
     """Run id, speakable job code, or latest."""
 
