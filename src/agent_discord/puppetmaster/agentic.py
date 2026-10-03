@@ -472,11 +472,11 @@ class AgenticPuppetmasterBackend:
             request, workdir=workdir, mode=mode, is_git=is_git, stream=stream
         )
         if stream:
-            # prepend_early_job_id wraps the full command; apply after handoff plan
-            # only for argv mode. File handoff uses PM python -c (no early job id
-            # prefix — job id still arrives on stdout from the worker).
+            # Both shapes ask for the job id up front, or live steer and deltas
+            # never start: argv mode via prepend_early_job_id, file mode baked
+            # into the bridge before the subcommand.
             handoff = plan_local_agentic_handoff(
-                cli=self.cli, prompt=prompt, flags=flags
+                cli=self.cli, prompt=prompt, flags=flags, early_job_id=True
             )
             if handoff.mode == "argv":
                 handoff.argv = prepend_early_job_id(list(handoff.argv))

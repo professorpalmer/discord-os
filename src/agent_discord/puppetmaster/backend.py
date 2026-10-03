@@ -1040,6 +1040,36 @@ def _parse_safe_cli_completion(stdout: str, stderr: str) -> dict[str, Any]:
     return strip_forbidden_keys(meta) if isinstance(meta, dict) else {}
 
 
+def _parse_json_object_line(text: str) -> Optional[dict[str, Any]]:
+    """A single output line as a JSON object, or None when the line is prose.
+
+    Strict on purpose: a markdown citation like ``[1] see {foo}`` is prose, not
+    an event. Only a line that parses whole counts as structured output.
+    """
+
+    raw = (text or "").strip()
+    if not raw or raw[:1] != "{":
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _is_json_output_line(text: str) -> bool:
+    """True when a whole line is a JSON object or array (not prose with braces)."""
+
+    raw = (text or "").strip()
+    if raw[:1] not in {"{", "["}:
+        return False
+    try:
+        json.loads(raw)
+    except json.JSONDecodeError:
+        return False
+    return True
+
+
 def _try_parse_json(text: str) -> Optional[Any]:
     text = (text or "").strip()
     if not text:
@@ -1162,8 +1192,8 @@ def _parse_token_line(
     raw = (line or "").strip()
     if not raw:
         return None
-    parsed = _try_parse_json(raw)
-    if not isinstance(parsed, dict):
+    parsed = _parse_json_object_line(raw)
+    if parsed is None:
         return None
     event_type = _normalize_token_event_type(parsed)
     if event_type not in _TOKEN_EVENT_TYPES:
@@ -1259,7 +1289,10 @@ def _prose_token_event(
     raw = (line or "").strip()
     if not raw or _is_skipped_worker_line(raw):
         return None
-    if raw[:1] in "{[":
+    # A whole line of JSON is structured output already handled above. A prose
+    # line that merely starts with '[' is a markdown link or a citation like
+    # "[1] ...", and dropping it lost the answer's references.
+    if _is_json_output_line(raw):
         return None
     chunk = redact_text_markers(raw)
     if not chunk.strip():
@@ -1468,8 +1501,8 @@ def _parse_progress_line(line: str, model: str) -> Optional[DispatchEvent]:
     if stage_match:
         stage = stage_match.group(1)
 
-    parsed = _try_parse_json(raw)
-    if isinstance(parsed, dict):
+    parsed = _parse_json_object_line(raw)
+    if parsed is not None:
         event_type = str(parsed.get("type") or parsed.get("kind") or "").strip().lower()
         if event_type in _TOKEN_EVENT_TYPES:
             return None

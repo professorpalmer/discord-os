@@ -29,17 +29,31 @@ SPOKEN_ARG_MAX = (
     "Discord OS could not hand it off via file/stdin."
 )
 
-# In-process bridge: prompt path is argv[1]; remaining argv are agentic flags.
-# Runs under Puppetmaster's own interpreter so import resolves. sys.argv is
-# rebuilt in-memory (no second execve with the prompt).
-AGENTIC_FILE_BRIDGE = (
-    "import sys\n"
-    "from pathlib import Path\n"
-    "from puppetmaster.cli import main\n"
-    "prompt = Path(sys.argv[1]).read_text(encoding='utf-8')\n"
-    "sys.argv = ['puppetmaster', 'agentic', prompt, *sys.argv[2:]]\n"
-    "raise SystemExit(main() or 0)\n"
-)
+# Global flags that must sit before the `agentic` subcommand.
+EARLY_JOB_ID_FLAG = "--emit-job-id-early"
+
+
+def agentic_file_bridge(*, global_flags: Sequence[str] = ()) -> str:
+    """In-process bridge source: prompt path is argv[1], rest are agentic flags.
+
+    Runs under Puppetmaster's own interpreter so the import resolves, and
+    rebuilds ``sys.argv`` in memory so the huge prompt never crosses a second
+    ``execve``. ``global_flags`` land before the subcommand, which is where
+    Puppetmaster accepts ``--emit-job-id-early``.
+    """
+
+    lead = "".join(f", {str(flag)!r}" for flag in global_flags)
+    return (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from puppetmaster.cli import main\n"
+        "prompt = Path(sys.argv[1]).read_text(encoding='utf-8')\n"
+        f"sys.argv = ['puppetmaster'{lead}, 'agentic', prompt, *sys.argv[2:]]\n"
+        "raise SystemExit(main() or 0)\n"
+    )
+
+
+AGENTIC_FILE_BRIDGE = agentic_file_bridge()
 
 
 def safe_argv_budget_bytes() -> int:
@@ -155,11 +169,14 @@ def plan_local_agentic_handoff(
     prompt: str,
     flags: Sequence[str],
     budget: Optional[int] = None,
+    early_job_id: bool = False,
 ) -> PromptHandoff:
     """Plan local agentic argv; spill prompt to a file when over budget.
 
     ``flags`` are everything after the prompt (``--provider``, ``--model``, …).
     Small prompts keep the historical ``[cli, agentic, prompt, *flags]`` shape.
+    ``early_job_id`` asks for the job id up front; the caller prepends it for
+    argv mode, and the file bridge bakes it in before the subcommand.
     """
 
     base = [cli, "agentic", prompt, *[str(f) for f in flags]]
@@ -170,8 +187,11 @@ def plan_local_agentic_handoff(
     if not pm_py:
         return PromptHandoff(mode="file", argv=[], prompt_file=None)
 
+    bridge = agentic_file_bridge(
+        global_flags=(EARLY_JOB_ID_FLAG,) if early_job_id else ()
+    )
     prompt_path = write_prompt_tempfile(prompt)
-    argv = [pm_py, "-c", AGENTIC_FILE_BRIDGE, str(prompt_path), *[str(f) for f in flags]]
+    argv = [pm_py, "-c", bridge, str(prompt_path), *[str(f) for f in flags]]
     if needs_prompt_handoff(argv, budget=budget):
         prompt_path.unlink(missing_ok=True)
         return PromptHandoff(mode="file", argv=[], prompt_file=None)

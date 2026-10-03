@@ -170,6 +170,9 @@
 ### Stream timeout is enforced
 - The streaming read loop now checks its deadline on every pass and kills the whole process group on timeout. Before, a grandchild holding stdout open kept the loop spinning forever, and the timeout path killed only the leader.
 
+### Prose lines starting with `[` or `{` survive
+- A stream line counts as JSON only when the whole line parses as a JSON object. Markdown links, `[1]` citations and sentences quoting JSON stay in the live text. Oversized prompts sent by file now also get the early job id, so live steer and deltas start for them too.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
