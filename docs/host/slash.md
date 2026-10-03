@@ -9,7 +9,26 @@ Phone autocomplete for bind / job / status / stop without replacing text listen.
 | `AGENT_DISCORD_INTERACTIONS` | `off` — no slash registration, no Interactions HTTP |
 | Text listen + HOST panel | Always the poverty path |
 
-Opt in only when you want Discord application-command autocomplete on phone:
+Two opt-in modes. `gateway` is the cheap one: no public URL, no public key.
+
+### `gateway` — slash on the Gateway the host already owns
+
+When the app has **no** Interactions Endpoint URL, Discord delivers
+APPLICATION_COMMAND (type 2) and AUTOCOMPLETE (type 4) as `INTERACTION_CREATE`
+on the Gateway. The panel listen socket already reads that event, so slash
+needs no second process and no tunnel. Still **one** Gateway (HARD lock 4).
+
+```bash
+AGENT_DISCORD_INTERACTIONS=gateway
+DISCORD_APPLICATION_ID=…      # registration POSTs against this; no public key
+# Host self-heals slash registration on listen (version-aware).
+discord-os listen --channel-id ID --announce-host
+```
+
+Leave the Developer Portal Interactions Endpoint URL **empty** — setting it
+flips Discord to HTTP delivery and the Gateway stops seeing commands.
+
+### `http` — public HTTPS endpoint
 
 ```bash
 AGENT_DISCORD_INTERACTIONS=http
@@ -21,9 +40,13 @@ discord-os interactions --serve
 # paste YOUR public HTTPS URL into Interactions Endpoint URL (not a chat paste)
 ```
 
+Either exposed mode hardens the operator allowlist (`require_operators`):
+state-changing slash commands need a paired operator. `discord-os host doctor`
+prints the resolved mode.
+
 ## Self-heal (policy #7)
 
-When `AGENT_DISCORD_INTERACTIONS` is exposed (`http` / public), the listen host
+When `AGENT_DISCORD_INTERACTIONS` is exposed (`http` / public / `gateway`), the listen host
 **self-heals** slash registration — same effect as
 `discord-os interactions --register`. It is **version-aware**: re-registers when
 the installed `discord-os` package version changes or the opt-in command-set
@@ -75,4 +98,11 @@ sees `autocomplete: true` on those options.
 
 Handlers open workspace SQLite and reuse power/bind parse + absorb helpers. HOST card paint stays on the Gateway listen loop. Slash ACK is ephemeral. `/job` never mutates job state.
 
-Code: `src/agent_discord/discord/interactions.py` (`maybe_self_heal_slash_registration`).
+In `gateway` mode `cli.py` `on_dispatch` sends type 2 / 4 payloads to
+`route_gateway_interaction`, which calls the same
+`handle_interaction_payload` the HTTP server uses and POSTs the returned
+callback dict to `/interactions/{id}/{token}/callback`. Component and modal
+interactions still fall through to the HOST panel's `custom_id` routing.
+
+Code: `src/agent_discord/discord/interactions.py`
+(`route_gateway_interaction`, `maybe_self_heal_slash_registration`).

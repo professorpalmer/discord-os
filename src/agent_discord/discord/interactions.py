@@ -3,8 +3,12 @@
 Default listen stays message-prefix (poverty path). This module is the same
 host verbs behind slash chrome. It does not open a second Gateway.
 
-Discord requires a public HTTPS URL and a 3s ACK. Bind loopback; tunnel if
-you opt in. Slash ``/connect`` never accepts a secret option.
+``AGENT_DISCORD_INTERACTIONS=http`` requires a public HTTPS URL and a 3s ACK.
+Bind loopback; tunnel if you opt in. ``=gateway`` skips both: Discord delivers
+APPLICATION_COMMAND / AUTOCOMPLETE as ``INTERACTION_CREATE`` on the existing
+panel Gateway (no Interactions Endpoint URL, no ``DISCORD_PUBLIC_KEY``), and
+``route_gateway_interaction`` POSTs the reply to the callback route. Still one
+Gateway (HARD lock 4). Slash ``/connect`` never accepts a secret option.
 
 P2.9 / Discord-half EXTRAS: slash aliases ``/bind`` ``/status`` ``/on``
 ``/off`` ``/stop`` plus read-only ``/job`` and ``/clear-needs`` when
@@ -164,7 +168,9 @@ OPT_IN_COMMANDS = (
 )
 
 SLASH_REGISTRATION_STATE = "slash_registration.json"
-_INTERACTIONS_EXPOSED = frozenset({"http", "https", "public", "on", "1", "true", "yes"})
+_INTERACTIONS_GATEWAY = frozenset({"gateway", "gw"})
+_INTERACTIONS_HTTP = frozenset({"http", "https", "public", "on", "1", "true", "yes"})
+_INTERACTIONS_EXPOSED = _INTERACTIONS_HTTP | _INTERACTIONS_GATEWAY
 
 
 @dataclass(frozen=True)
@@ -226,20 +232,57 @@ def save_slash_registration_state(
     )
 
 
+def _interactions_raw(
+    interactions: str = "",
+    *,
+    env: Optional[Mapping[str, str]] = None,
+) -> str:
+    raw = str(interactions or "").strip().lower()
+    if raw:
+        return raw
+    source = env if env is not None else os.environ
+    return str(source.get("AGENT_DISCORD_INTERACTIONS") or "").strip().lower()
+
+
+def interactions_mode(
+    interactions: str = "",
+    *,
+    env: Optional[Mapping[str, str]] = None,
+) -> str:
+    """Normalize the opt-in knob to ``off`` / ``http`` / ``gateway``."""
+
+    raw = _interactions_raw(interactions, env=env)
+    if raw in _INTERACTIONS_GATEWAY:
+        return "gateway"
+    if raw in _INTERACTIONS_HTTP:
+        return "http"
+    return "off"
+
+
 def interactions_exposed(
     interactions: str = "",
     *,
     env: Optional[Mapping[str, str]] = None,
 ) -> bool:
-    """True when slash Interactions are opted in (http/public path)."""
+    """True when slash Interactions are opted in (http/public or gateway)."""
 
-    raw = str(interactions or "").strip().lower()
-    if raw:
-        return raw in _INTERACTIONS_EXPOSED
-    source = env if env is not None else os.environ
-    return str(source.get("AGENT_DISCORD_INTERACTIONS") or "").strip().lower() in (
-        _INTERACTIONS_EXPOSED
-    )
+    return _interactions_raw(interactions, env=env) in _INTERACTIONS_EXPOSED
+
+
+def interactions_over_gateway(
+    interactions: str = "",
+    *,
+    env: Optional[Mapping[str, str]] = None,
+) -> bool:
+    """True for ``AGENT_DISCORD_INTERACTIONS=gateway``.
+
+    Discord delivers APPLICATION_COMMAND / AUTOCOMPLETE as
+    ``INTERACTION_CREATE`` on the Gateway when the app has no Interactions
+    Endpoint URL. Still one Gateway (HARD lock 4) — the panel listen socket
+    carries slash too; no public HTTPS URL and no ``DISCORD_PUBLIC_KEY``.
+    """
+
+    return _interactions_raw(interactions, env=env) in _INTERACTIONS_GATEWAY
 
 
 def maybe_self_heal_slash_registration(
@@ -287,7 +330,7 @@ def maybe_self_heal_slash_registration(
         warnings.append("DISCORD_BOT_TOKEN missing — slash self-heal skipped")
     if not app_id:
         warnings.append("DISCORD_APPLICATION_ID missing — slash self-heal skipped")
-    if not pub:
+    if not pub and not interactions_over_gateway(interactions, env=env):
         warnings.append(
             "DISCORD_PUBLIC_KEY missing — slash serve/verify unavailable "
             "(registration still needs token + application id)"
@@ -456,6 +499,60 @@ def handle_interaction_payload(
     if name == "clear-needs":
         return _handle_clear_needs_slash(payload, workspace=workspace)
     return _ephemeral("unknown command")
+
+
+def route_gateway_interaction(
+    payload: Mapping[str, Any],
+    *,
+    workspace: Path,
+    roots: Sequence[Path] = (),
+    interactions: str = "",
+    env: Optional[Mapping[str, str]] = None,
+    opener: Optional[Callable[..., Any]] = None,
+    runner: Optional[Callable[..., object]] = None,
+    browser_open: Optional[Callable[[str], object]] = None,
+) -> Optional[str]:
+    """Answer a slash / autocomplete interaction that arrived on the Gateway.
+
+    Returns ``None`` when the knob is not ``gateway`` or the payload is a
+    component / modal interaction — the caller then falls through to the HOST
+    panel's ``custom_id`` routing. Never raises: a failed callback POST is a
+    dropped reply, not a dead listen loop.
+    """
+
+    if not interactions_over_gateway(interactions, env=env):
+        return None
+    kind = int(payload.get("type") or 0)
+    if kind not in {
+        INTERACTION_APPLICATION_COMMAND,
+        INTERACTION_APPLICATION_COMMAND_AUTOCOMPLETE,
+    }:
+        return None
+    data = payload.get("data") if isinstance(payload.get("data"), Mapping) else {}
+    name = str(data.get("name") or "").lower()
+    reply = handle_interaction_payload(
+        payload,
+        workspace=workspace,
+        roots=list(roots),
+        env=env,
+        runner=runner,
+        browser_open=browser_open,
+    )
+    interaction_id = str(payload.get("id") or "").strip()
+    interaction_token = str(payload.get("token") or "").strip()
+    if interaction_id and interaction_token:
+        from agent_discord.discord.rest import callback_interaction
+
+        try:
+            callback_interaction(
+                interaction_id=interaction_id,
+                interaction_token=interaction_token,
+                payload=reply,
+                opener=opener,
+            )
+        except Exception as exc:  # noqa: BLE001 — listen must keep running
+            print(f"slash callback failed: {exc}", flush=True)
+    return f"slash:{name}" if name else "slash"
 
 
 def register_opt_in_commands(

@@ -18,7 +18,7 @@ See also: [host README](README.md), [ask-gate](../cards/ask-gate.md),
 | 6 | **Guild voice = local TTS / memo only** | Local Mac `say`/`espeak` TTS + voice memos (whisper CLI). Guild voice **join** stays Deny (DAVE / libdave not shipped). Guild speak/listen parked Deny. |
 | 7 | **Spend honesty-only** | Omitted OpenRouter `cost_usd` → **unknown**, never `$0`. Optional Halt / env cap may exist for operator control — not a product “spend caps” fleet. No invented hard-cap marketing. |
 | 8 | **Desk single-user OK** | Default soft first-armed-human seed. `DISCORD_OS_REQUIRE_OPERATORS=1` (or allowlist alias) hardens for shared / public interactions. Desk Mac with interactions off stays workable. |
-| 9 | **Slash self-heal when interactions exposed** | `AGENT_DISCORD_INTERACTIONS=http` → listen host version-aware re-registers slash (fail soft). Manual `--register` optional. Default interactions **off**. |
+| 9 | **Slash self-heal when interactions exposed** | `AGENT_DISCORD_INTERACTIONS=http` or `=gateway` → listen host version-aware re-registers slash (fail soft). Manual `--register` optional. Default interactions **off**. `gateway` rides the one panel Gateway (lock 4) — it is not a second socket. |
 | 10 | **CU / docker PARKED** | Computer-use, discord-os-computer, Automaton, Cursor compute, docker desktop fantasy — **not** implemented. Do not ship half-wired CU. |
 
 ## Also refuse (folds into the table)

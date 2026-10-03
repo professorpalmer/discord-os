@@ -1827,6 +1827,8 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                         if config.host_actions
                         else ()
                     ),
+                    workspace=config.workspace,
+                    interactions=getattr(config, "interactions", "") or "",
                 )
         while True:
             if discord_down.is_set():
@@ -2061,6 +2063,8 @@ def _start_panel_gateway(
     asks: Optional[Queue[tuple[str, str, str, str]]] = None,
     orch: Any = None,
     host_roots: tuple[Any, ...] = (),
+    workspace: Any = None,
+    interactions: str = "",
 ) -> None:
     # Panel gateway is expected — never-READY past grace becomes Need.
     try:
@@ -2097,7 +2101,8 @@ def _start_panel_gateway(
         data = payload.get("data")
         if isinstance(data, dict):
             custom_id = str(data.get("custom_id") or "")
-        print(f"panel click {custom_id}", flush=True)
+        if custom_id or int(payload.get("type") or 0) not in {2, 4}:
+            print(f"panel click {custom_id}", flush=True)
         from agent_discord.host.panel import interaction_channel_id
 
         ask_channel = interaction_channel_id(payload, channel_id)
@@ -2127,6 +2132,25 @@ def _start_panel_gateway(
                     pass
             if asks is not None:
                 asks.put((ask_channel, prompt, "", requester_id))
+
+        # Slash / autocomplete rides the same Gateway when the app has no
+        # Interactions Endpoint URL (AGENT_DISCORD_INTERACTIONS=gateway).
+        if workspace is not None and int(payload.get("type") or 0) in {2, 4}:
+            from agent_discord.discord.interactions import route_gateway_interaction
+
+            try:
+                label = route_gateway_interaction(
+                    payload,
+                    workspace=workspace,
+                    roots=list(host_roots),
+                    interactions=interactions,
+                )
+            except Exception as exc:  # noqa: BLE001 — listen must keep running
+                print(f"slash route failed: {exc}", flush=True)
+                label = None
+            if label:
+                print(label, flush=True)
+                return
 
         def on_job(action: str, run_id: str) -> None:
             if orch is not None:

@@ -627,11 +627,16 @@ REQUIRE_ALLOWLIST_ENV = "DISCORD_OS_REQUIRE_ALLOWLIST"
 
 
 def interactions_public(env: Optional[Mapping[str, str]] = None) -> bool:
-    """True when slash Interactions endpoint is opted in (public HTTPS path)."""
+    """True when slash Interactions are opted in.
+
+    ``gateway`` counts: slash over the existing Gateway is just as
+    phone/guild-visible as the HTTPS endpoint, so it hardens the operator
+    allowlist the same way.
+    """
 
     source = env if env is not None else os.environ
     raw = str(source.get("AGENT_DISCORD_INTERACTIONS") or "").strip().lower()
-    return raw in {"http", "https", "public", "on", "1", "true", "yes"}
+    return raw in {"http", "https", "public", "on", "1", "true", "yes", "gateway", "gw"}
 
 
 def require_operators(env: Optional[Mapping[str, str]] = None) -> bool:

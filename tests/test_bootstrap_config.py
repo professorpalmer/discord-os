@@ -146,7 +146,7 @@ def test_load_config_rejects_unknown_interactions(tmp_path: Path):
         load_config(
             env={
                 "AGENT_DISCORD_WORKSPACE": str(tmp_path),
-                "AGENT_DISCORD_INTERACTIONS": "gateway",
+                "AGENT_DISCORD_INTERACTIONS": "websocket",
             },
             dotenv_path=tmp_path / "missing.env",
         )

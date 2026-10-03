@@ -665,17 +665,28 @@ def _check_slash_self_heal(cfg: AppConfig, workspace: Path, lines: list[str]) ->
     from agent_discord.discord.interactions import (
         command_set_stamp,
         interactions_exposed,
+        interactions_mode,
         load_slash_registration_state,
     )
     from agent_discord.orchestration.service import interactions_public
 
-    exposed = interactions_exposed(getattr(cfg, "interactions", "") or "") or interactions_public()
+    raw = getattr(cfg, "interactions", "") or ""
+    exposed = interactions_exposed(raw) or interactions_public()
     if not exposed:
         return
 
+    mode = interactions_mode(raw) if raw else "http"
+    if mode == "gateway":
+        lines.append(
+            "OK interactions mode=gateway (slash on the existing Gateway; "
+            "no Interactions Endpoint URL, no public key)"
+        )
+    else:
+        lines.append("OK interactions mode=http (needs a public HTTPS endpoint)")
+
     token_ok = bool(str(getattr(cfg, "discord_bot_token", "") or "").strip())
     app_ok = bool(str(getattr(cfg, "discord_application_id", "") or "").strip())
-    pub_ok = bool(str(getattr(cfg, "discord_public_key", "") or "").strip())
+    pub_ok = bool(str(getattr(cfg, "discord_public_key", "") or "").strip()) or mode == "gateway"
     if not token_ok:
         lines.append("WARN slash self-heal: DISCORD_BOT_TOKEN missing (register skipped)")
     if not app_ok:

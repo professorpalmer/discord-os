@@ -216,6 +216,9 @@
 ### Loopback web dashboard removed
 - `discord-os host dashboard`, the `discord-os dashboard` alias, the `127.0.0.1:8765` page and its JSON endpoints, and `DISCORD_OS_DASHBOARD_HOST` / `_PORT` are gone. The HOST card shows the same facts. `/status` no longer runs doctor or probes SSH hosts on the repaint path.
 
+### Slash commands over the Gateway
+- `AGENT_DISCORD_INTERACTIONS=gateway` routes slash commands and autocomplete through the existing Gateway. No public HTTPS endpoint or `DISCORD_PUBLIC_KEY` needed. Still one Gateway (HARD lock 4). Default stays `off`. Gateway mode counts as exposed, so the operator allowlist is required like `http`.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

@@ -170,9 +170,10 @@ def load_config(
         max_object_bytes = 10_485_760
 
     interactions = (merged.get("AGENT_DISCORD_INTERACTIONS") or "off").strip().lower()
-    if interactions not in {"off", "http"}:
+    if interactions not in {"off", "http", "gateway"}:
         raise ConfigError(
-            f"AGENT_DISCORD_INTERACTIONS must be 'off' or 'http', got {interactions!r}"
+            "AGENT_DISCORD_INTERACTIONS must be 'off', 'http', or 'gateway', "
+            f"got {interactions!r}"
         )
     host_actions_raw = (merged.get("AGENT_DISCORD_HOST_ACTIONS") or "on").strip().lower()
     if host_actions_raw not in {"on", "off", "1", "0", "true", "false"}:
@@ -359,13 +360,17 @@ def check_config(config: AppConfig, *, require_token: bool = True) -> list[str]:
         problems.append("invalid DISCORD_MCP_PROVIDER")
     if config.compute not in {"auto", "agentic"}:
         problems.append("invalid AGENT_DISCORD_COMPUTE")
-    if config.interactions not in {"off", "http"}:
+    if config.interactions not in {"off", "http", "gateway"}:
         problems.append("invalid AGENT_DISCORD_INTERACTIONS")
     if config.interactions == "http":
         if not config.discord_application_id:
             problems.append("DISCORD_APPLICATION_ID is required when interactions=http")
         if not config.discord_public_key:
             problems.append("DISCORD_PUBLIC_KEY is required when interactions=http")
+    if config.interactions == "gateway" and not config.discord_application_id:
+        # Gateway mode needs no public key and no HTTPS URL — only the id that
+        # slash registration POSTs against.
+        problems.append("DISCORD_APPLICATION_ID is required when interactions=gateway")
     resolution = resolve_compute(config)
     if resolution.mode == "agentic" and not has_openrouter_key(config):
         problems.append(
