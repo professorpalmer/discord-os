@@ -1,4 +1,4 @@
-"""Band A — kagekit spike fail + thin HOST Page layout."""
+"""Band A — thin HOST Page layout."""
 
 from __future__ import annotations
 
@@ -6,15 +6,10 @@ from __future__ import annotations
 from agent_discord.discord.host_page import (
     host_page_enabled,
     host_v2_payload,
-    kagekit_spike_adopted,
     split_host_v2_components,
 )
 from agent_discord.discord.layout import TYPE_ACTION_ROW, TYPE_CONTAINER, action_row, button
 from agent_discord.orchestration.cards import host_card
-
-
-def test_kagekit_not_adopted():
-    assert kagekit_spike_adopted() is False
 
 
 def test_host_page_flag_default_on(monkeypatch):

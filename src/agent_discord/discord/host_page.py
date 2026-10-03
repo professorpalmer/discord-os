@@ -1,12 +1,7 @@
 """HOST Page-shaped CV2 layout (Band A thin fallback).
 
-Spike of ``discord-kagekit`` failed for Discord OS (Interaction-centric
-``LayoutView``, random Tab custom_ids, buttons disabled without handlers —
-fights REST/FakeDiscord + stable ``discord-os:*`` custom IDs).
-
-This module steals kagekit's **layout contract** only:
-tabs/status card inside Container(s); **action bar outside** the Container.
-Uses in-tree ``layout.py`` dicts — same JobPool/HOST custom IDs.
+Layout contract: status card inside Container(s); **action bar outside** the
+Container. Uses in-tree ``layout.py`` dicts — same JobPool/HOST custom IDs.
 """
 
 from __future__ import annotations
@@ -32,12 +27,6 @@ def host_page_enabled(env: Optional[Mapping[str, str]] = None) -> bool:
     source = env if env is not None else os.environ
     raw = str(source.get("DISCORD_OS_HOST_PAGE") or "1").strip().lower()
     return raw not in {"0", "false", "off", "no"}
-
-
-def kagekit_spike_adopted() -> bool:
-    """Always False after Band A spike — kept for docs/tests honesty."""
-
-    return False
 
 
 POWER_ON = "on"
@@ -83,7 +72,7 @@ def split_host_v2_components(
     updated_ts: Optional[int] = None,
     power: str = "",
 ) -> list[dict[str, Any]]:
-    """Build top-level CV2: status Container + outer action rows (kagekit-shaped)."""
+    """Build top-level CV2: status Container + outer action rows."""
 
     table_lines = host_power_lines(power or power_from_host_title(title))
     for name, value, _inline in fields:

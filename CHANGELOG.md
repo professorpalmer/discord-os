@@ -197,6 +197,9 @@
 ### saseq and braindao providers removed
 - Discord OS talks to Discord over REST only. The saseq and BrainDAO MCP adapters, their MCP transports, and `DISCORD_MCP_TRANSPORT` / `DISCORD_MCP_STDIO_COMMAND` / `SASEQ_MCP_HTTP_URL` / `BRAINDAO_MCP_HTTP_URL` are gone (about 1,800 lines). `DISCORD_MCP_PROVIDER` must be `rest`, and any other value is a config error that names the removal.
 
+### kagekit spike leftovers removed
+- The always-false `kagekit_spike_adopted()` and the `kagekit` extra are gone.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
