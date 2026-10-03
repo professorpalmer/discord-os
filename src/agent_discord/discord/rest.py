@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import errno
 import json
+import socket
 import time
 import uuid
 from typing import Any, Callable, Mapping, Optional, Sequence
@@ -30,7 +31,19 @@ VOICE_FETCH_MAX_BYTES = 25 * 1024 * 1024
 
 UrlOpener = Callable[..., Any]
 _TRANSIENT_HTTP = frozenset({502, 503, 504})
+# 500 means the origin ran the request, so only replay it when a replay is a
+# no-op. 502/503/504 come from the edge before Discord applied anything.
+_IDEMPOTENT_RETRY_HTTP = frozenset({500})
+_IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "PATCH", "DELETE"})
 _TRANSIENT_RETRY_SLEEPS = (0.25, 0.75)
+RATE_LIMIT_MAX_RETRIES = 3
+# A longer cooldown than this is not something a channel tick should sit on.
+RATE_LIMIT_MAX_WAIT_SECONDS = 60.0
+RATE_LIMIT_FALLBACK_WAIT_SECONDS = 1.0
+ERROR_BODY_MAX_CHARS = 400
+# Buckets are keyed by major parameter; everything else is a minor id.
+_MAJOR_PARAM_PARENTS = frozenset({"channels", "guilds", "webhooks"})
+_SNOWFLAKE_MIN_DIGITS = 15
 # macOS EADDRNOTAVAIL=49 ("Can't assign requested address") and cousins —
 # listen drain should retry honestly, not paint fake READY.
 _TRANSIENT_ERRNOS = frozenset(
@@ -110,6 +123,236 @@ def transient_network_label(exc: BaseException) -> str:
     if "unreachable" in text_s.lower():
         return "unreachable"
     return (text_s[:60] or "network").strip()
+
+
+# macOS/Linux codes that mean the socket never carried the request, so even a
+# POST may be replayed without posting a duplicate card.
+_NOT_SENT_ERRNOS = frozenset(
+    {
+        errno.ECONNREFUSED,
+        errno.EHOSTUNREACH,
+        errno.ENETUNREACH,
+        errno.EADDRNOTAVAIL,
+    }
+)
+
+
+def request_definitely_not_sent(exc: BaseException) -> bool:
+    """True only when the request provably never left this host."""
+
+    if isinstance(exc, socket.gaierror):
+        return True
+    if isinstance(exc, TimeoutError):
+        return False
+    if getattr(exc, "errno", None) in _NOT_SENT_ERRNOS:
+        return True
+    reason = getattr(exc, "reason", None)
+    if isinstance(reason, BaseException) and reason is not exc:
+        return request_definitely_not_sent(reason)
+    return False
+
+
+def _headers_of(source: Any) -> Any:
+    headers = getattr(source, "headers", None)
+    if headers is not None:
+        return headers
+    info = getattr(source, "info", None)
+    if callable(info):
+        try:
+            return info() or {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _header(headers: Any, name: str) -> str:
+    """Read one header case-insensitively from a Message, dict, or stub."""
+
+    getter = getattr(headers, "get", None)
+    if callable(getter):
+        try:
+            value = getter(name)
+        except Exception:
+            value = None
+        if value is not None:
+            return str(value).strip()
+    items = getattr(headers, "items", None)
+    if callable(items):
+        wanted = name.casefold()
+        try:
+            pairs = list(items())
+        except Exception:
+            pairs = ()
+        for key, value in pairs:
+            if str(key).casefold() == wanted:
+                return str(value).strip()
+    return ""
+
+
+def _as_float(text: str) -> Optional[float]:
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_int(text: str) -> Optional[int]:
+    value = _as_float(text)
+    return None if value is None else int(value)
+
+
+def route_bucket_key(method: str, url: str) -> str:
+    """Discord's bucket identity: method plus path with minor ids collapsed."""
+
+    path = urlparse(url).path or url
+    parts = path.split("/")
+    out: list[str] = []
+    for index, part in enumerate(parts):
+        if part.isdigit() and len(part) >= _SNOWFLAKE_MIN_DIGITS:
+            parent = parts[index - 1] if index else ""
+            out.append(part if parent in _MAJOR_PARAM_PARENTS else "{id}")
+        else:
+            out.append(part)
+    return f"{method.upper()} {'/'.join(out)}"
+
+
+class RestRateLimiter:
+    """Per-route bucket book-keeping plus 429 cooldowns.
+
+    Clock and sleeper are injectable so tests never wait on wall time. State is
+    process-local: Discord buckets are per-token, and one host owns one token.
+    """
+
+    def __init__(
+        self,
+        *,
+        sleeper: Optional[Callable[[float], None]] = None,
+        clock: Optional[Callable[[], float]] = None,
+    ) -> None:
+        self._sleeper = sleeper
+        self._clock = clock
+        self._bucket_of_route: dict[str, str] = {}
+        self._bucket_reset_at: dict[str, float] = {}
+        self._bucket_remaining: dict[str, int] = {}
+        self._global_until = 0.0
+        self.waits: list[float] = []
+
+    def now(self) -> float:
+        return float(self._clock() if self._clock is not None else time.monotonic())
+
+    def _sleep(self, seconds: float) -> None:
+        if seconds <= 0:
+            return
+        self.waits.append(float(seconds))
+        if self._sleeper is not None:
+            self._sleeper(float(seconds))
+        else:
+            _retry_sleep(seconds)
+
+    def reset(self) -> None:
+        self._bucket_of_route.clear()
+        self._bucket_reset_at.clear()
+        self._bucket_remaining.clear()
+        self._global_until = 0.0
+        self.waits.clear()
+
+    def acquire(self, route_key: str) -> None:
+        """Wait out a global cooldown and an exhausted bucket before sending."""
+
+        remaining_global = self._global_until - self.now()
+        if remaining_global > 0:
+            self._sleep(remaining_global)
+        bucket = self._bucket_of_route.get(route_key)
+        if not bucket:
+            return
+        if self._bucket_remaining.get(bucket, 1) > 0:
+            return
+        wait = self._bucket_reset_at.get(bucket, 0.0) - self.now()
+        if wait > 0:
+            self._sleep(wait)
+        # One request through; the response headers restore the real count.
+        self._bucket_remaining[bucket] = 1
+
+    def observe(self, route_key: str, headers: Any) -> None:
+        bucket = _header(headers, "X-RateLimit-Bucket")
+        if not bucket:
+            return
+        self._bucket_of_route[route_key] = bucket
+        remaining = _as_int(_header(headers, "X-RateLimit-Remaining"))
+        if remaining is not None:
+            self._bucket_remaining[bucket] = remaining
+        reset_after = _as_float(_header(headers, "X-RateLimit-Reset-After"))
+        if reset_after is not None:
+            self._bucket_reset_at[bucket] = self.now() + reset_after
+
+    def note_rate_limited(
+        self, route_key: str, retry_after: float, *, is_global: bool
+    ) -> None:
+        wait = max(0.0, float(retry_after))
+        now = self.now()
+        if is_global:
+            self._global_until = max(self._global_until, now + wait)
+        else:
+            bucket = self._bucket_of_route.setdefault(route_key, route_key)
+            self._bucket_remaining[bucket] = 0
+            self._bucket_reset_at[bucket] = now + wait
+        self._sleep(wait)
+
+
+_LIMITER = RestRateLimiter()
+
+
+def _retry_after_from_429(detail: str, headers: Any) -> tuple[float, bool]:
+    """Seconds to wait and whether the limit is global, body first."""
+
+    wait: Optional[float] = None
+    is_global = False
+    try:
+        parsed = json.loads(detail) if detail else None
+    except (TypeError, ValueError):
+        parsed = None
+    if isinstance(parsed, dict):
+        if parsed.get("retry_after") is not None:
+            wait = _as_float(str(parsed.get("retry_after")))
+        is_global = bool(parsed.get("global"))
+    if wait is None:
+        wait = _as_float(_header(headers, "Retry-After"))
+    if not is_global:
+        if _header(headers, "X-RateLimit-Global").lower() in {"true", "1"}:
+            is_global = True
+        if _header(headers, "X-RateLimit-Scope").lower() == "global":
+            is_global = True
+    if wait is None:
+        wait = RATE_LIMIT_FALLBACK_WAIT_SECONDS
+    return max(0.0, wait), is_global
+
+
+def _read_error_body(exc: HTTPError) -> str:
+    try:
+        raw = exc.read()
+    except Exception:
+        return ""
+    if not raw:
+        return ""
+    try:
+        text = bytes(raw).decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+    return " ".join(text.split())[:ERROR_BODY_MAX_CHARS]
+
+
+def _redact_token(text: str, token: str) -> str:
+    secret = (token or "").strip()
+    if secret and secret in text:
+        return text.replace(secret, "***")
+    return text
+
+
+def _http_error_text(code: int, detail: str, token: str) -> str:
+    body = _redact_token(detail, token)
+    if not body:
+        return f"Discord REST HTTP {code}"
+    return f"Discord REST HTTP {code} {body}"
 
 
 def call_discord_json(
@@ -963,31 +1206,69 @@ def _discord_request_bytes(
     if body is not None:
         headers["Content-Type"] = content_type
     do_open = opener or urlopen
-    last_error: Optional[ToolInvocationError] = None
-    attempts = 1 + len(_TRANSIENT_RETRY_SLEEPS)
-    for attempt in range(attempts):
-        if attempt:
-            _retry_sleep(_TRANSIENT_RETRY_SLEEPS[attempt - 1])
+    limiter = _LIMITER
+    route = route_bucket_key(method, url)
+    idempotent = method.upper() in _IDEMPOTENT_METHODS
+    transient_left = len(_TRANSIENT_RETRY_SLEEPS)
+    rate_limit_left = RATE_LIMIT_MAX_RETRIES
+    backoff = 0
+    while True:
+        limiter.acquire(route)
         request = Request(url, data=body, headers=headers, method=method)
         try:
             with do_open(request, timeout=60) as resp:
+                limiter.observe(route, _headers_of(resp))
                 return resp.read()
         except HTTPError as exc:
-            try:
-                exc.read()
-            except Exception:
-                pass
+            detail = _read_error_body(exc)
+            exc_headers = _headers_of(exc)
+            limiter.observe(route, exc_headers)
             code = int(getattr(exc, "code", 0) or 0)
-            last_error = ToolInvocationError(f"Discord REST HTTP {code}")
-            if code not in _TRANSIENT_HTTP:
-                raise last_error from None
-        except Exception as exc:
+            if code == 429:
+                # Discord rejected the call without applying it, so replaying is
+                # safe for every method including POST.
+                wait, is_global = _retry_after_from_429(detail, exc_headers)
+                if rate_limit_left <= 0 or wait > RATE_LIMIT_MAX_WAIT_SECONDS:
+                    raise ToolInvocationError(
+                        _http_error_text(
+                            429,
+                            f"retry_after {wait:.3f}s {'global' if is_global else route}"
+                            f" {detail}".strip(),
+                            token,
+                        )
+                    ) from None
+                rate_limit_left -= 1
+                limiter.note_rate_limited(route, wait, is_global=is_global)
+                continue
+            http_error = ToolInvocationError(_http_error_text(code, detail, token))
+            retryable = code in _TRANSIENT_HTTP or (
+                idempotent and code in _IDEMPOTENT_RETRY_HTTP
+            )
+            if not retryable or transient_left <= 0:
+                raise http_error from None
+            transient_left -= 1
+            _retry_sleep(_TRANSIENT_RETRY_SLEEPS[backoff])
+            backoff = min(backoff + 1, len(_TRANSIENT_RETRY_SLEEPS) - 1)
+        except OSError as exc:
             # TimeoutError is OSError but not URLError on 3.11+; Errno 49
             # (EADDRNOTAVAIL) often arrives as URLError(reason=OSError(49)).
-            if not is_transient_discord_network_error(exc):
-                raise
+            # URLError is an OSError, so one clause covers both.
             label = transient_network_label(exc)
-            last_error = ToolInvocationError(
-                f"Discord REST unreachable ({label})"
-            )
-    raise last_error or ToolInvocationError("Discord REST unreachable")
+            if not is_transient_discord_network_error(exc):
+                raise ToolInvocationError(
+                    f"Discord REST transport failed ({label})"
+                ) from exc
+            if not idempotent and not request_definitely_not_sent(exc):
+                # A timed-out POST may already have posted the card. Replaying
+                # it would double-post, so stop and let the caller decide.
+                raise ToolInvocationError(
+                    f"Discord REST unreachable ({label}) — "
+                    f"{method.upper()} not retried, request may have been sent"
+                ) from None
+            if transient_left <= 0:
+                raise ToolInvocationError(
+                    f"Discord REST unreachable ({label})"
+                ) from None
+            transient_left -= 1
+            _retry_sleep(_TRANSIENT_RETRY_SLEEPS[backoff])
+            backoff = min(backoff + 1, len(_TRANSIENT_RETRY_SLEEPS) - 1)

@@ -90,6 +90,11 @@
 ### Workspace and .env no longer depend on the current directory
 - With `AGENT_DISCORD_WORKSPACE` unset, the workspace is `~/discord-os/.agent-discord` when it exists, else `~/.discord-os/workspace`, and `.env` is read from beside it. Running `discord-os` from a checkout no longer creates a second database there.
 
+### Discord REST honors rate limits
+- 429 responses are retried after `retry_after` (body, else `Retry-After`), global and per-route. Exhausted `X-RateLimit-Bucket`s are waited out before sending. HTTP 500 is retried for idempotent methods.
+- A POST is no longer replayed after a timeout or reset, which could post duplicate cards. Only a request that provably never left the host is retried.
+- Discord error bodies are included in the raised error, with the bot token redacted.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

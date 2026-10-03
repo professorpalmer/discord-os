@@ -18,6 +18,7 @@ from agent_discord.discord.gateway_health import (
 )
 from agent_discord.discord.rest import (
     is_transient_discord_network_error,
+    list_channel_messages,
     send_channel_message,
     transient_network_label,
 )
@@ -60,6 +61,8 @@ def test_transient_classifier_errno_49_and_timeout() -> None:
 
 
 def test_rest_retries_timeout_then_succeeds(monkeypatch) -> None:
+    """Idempotent reads still ride out a timeout. POST does not (see D3)."""
+
     monkeypatch.setattr("agent_discord.discord.rest._retry_sleep", lambda _s: None)
     calls = {"n": 0}
 
@@ -69,14 +72,12 @@ def test_rest_retries_timeout_then_succeeds(monkeypatch) -> None:
             raise TimeoutError("timed out")
         return _FakeResponse(
             json.dumps(
-                {"id": "m-ok", "channel_id": "ch", "content": "hi"}
+                [{"id": "m-ok", "channel_id": "ch", "content": "hi"}]
             ).encode("utf-8")
         )
 
-    posted = send_channel_message(
-        token="tok", channel_id="ch", content="hi", opener=opener
-    )
-    assert posted.message_id == "m-ok"
+    listed = list_channel_messages(token="tok", channel_id="ch", opener=opener)
+    assert [msg.message_id for msg in listed] == ["m-ok"]
     assert calls["n"] == 2
 
 
