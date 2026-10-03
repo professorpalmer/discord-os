@@ -49,6 +49,7 @@ PANEL_DENIED_SPOKEN = "Denied. Only paired operators can use the HOST panel."
 MORE_ID = "discord-os:more"
 PAIR_ID = "discord-os:pair"
 HALT_ID = "discord-os:halt"
+RESUME_ID = "discord-os:resume"
 GATE_ID = "discord-os:gate"
 ROLES_ID = "discord-os:roles"
 ROLES_MODAL_ID = "discord-os:roles-modal"
@@ -96,6 +97,7 @@ def host_panel_components(
     jobs: Optional[list[dict[str, Any]]] = None,
     paired: bool = False,
     write_gate: bool = False,
+    halted: bool = False,
 ) -> list[dict[str, Any]]:
     if confirm_off:
         rows = [
@@ -170,6 +172,7 @@ def host_panel_components(
             armed=armed,
             paired=paired,
             write_gate=write_gate,
+            halted=halted,
         )
         if more:
             rows.append(
@@ -190,6 +193,7 @@ def _more_select_options(
     armed: bool,
     paired: bool,
     write_gate: bool,
+    halted: bool = False,
 ) -> list[dict[str, str]]:
     options: list[dict[str, str]] = []
     if not paired:
@@ -200,9 +204,18 @@ def _more_select_options(
                 "description": "First click becomes owner",
             }
         )
-    options.append(
-        {"label": "Halt", "value": HALT_ID, "description": "Stop new jobs"}
-    )
+    if halted:
+        options.append(
+            {
+                "label": "Resume",
+                "value": RESUME_ID,
+                "description": "Intake is halted — take new jobs again",
+            }
+        )
+    else:
+        options.append(
+            {"label": "Halt", "value": HALT_ID, "description": "Stop new jobs"}
+        )
     options.append(
         {
             "label": "Clear failed Needs",
@@ -703,6 +716,7 @@ def host_panel_payload(
             jobs=jobs,
             paired=paired,
             write_gate=write_gate,
+            halted=halted,
         )
     )
 
@@ -739,6 +753,8 @@ def panel_action_from_custom_id(custom_id: str) -> Optional[str]:
         return "roles-cancel"
     if raw == HALT_ID:
         return "halt"
+    if raw == RESUME_ID:
+        return "resume"
     if raw == CLEAR_NEEDS_ID:
         return "clear-needs"
     if raw == CLEAR_NEEDS_CONFIRM_ID:
@@ -1146,7 +1162,7 @@ def handle_gateway_interaction(
         return action
     from agent_discord.orchestration.service import (
         seed_owner_if_empty,
-        toggle_spend_halted,
+        set_spend_halted,
     )
 
     user_id = interaction_user_id(payload)
@@ -1181,8 +1197,9 @@ def handle_gateway_interaction(
             print(f"panel job pick failed: {exc}", flush=True)
         return action
     _ack_interaction(payload, {"type": CALLBACK_DEFERRED_UPDATE}, opener=opener)
-    if action == "halt":
-        toggle_spend_halted(store)
+    if action in {"halt", "resume"}:
+        # Named, idempotent: Halt stops intake, Resume takes jobs again.
+        set_spend_halted(store, action == "halt")
         _tick_rich_presence_best_effort(store, channel_id)
     if intent is not None:
         if _channel_armed(store, channel_id):

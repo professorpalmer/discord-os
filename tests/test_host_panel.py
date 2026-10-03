@@ -682,6 +682,65 @@ def test_jobs_pick_answers_ephemerally_without_a_channel_post(tmp_path: Path):
     store.close()
 
 
+def test_more_menu_names_halt_or_resume(tmp_path: Path):
+    """Audit 2026-10-02 G1-1: one Halt label in both states hid the state."""
+
+    from agent_discord.host.panel import RESUME_ID, panel_action_from_custom_id
+    from agent_discord.orchestration.service import is_spend_halted, set_spend_halted
+
+    quiet = host_panel_components(True)[1]["components"][0]["options"][1]
+    assert quiet["label"] == "Halt"
+    assert quiet["value"] == HALT_ID
+    stopped = host_panel_components(True, halted=True)[1]["components"][0]["options"][1]
+    assert stopped["label"] == "Resume"
+    assert stopped["value"] == RESUME_ID
+    assert "halted" in stopped["description"].lower()
+    assert panel_action_from_custom_id(RESUME_ID) == "resume"
+
+    store = SQLiteStore(tmp_path / "halt.sqlite3")
+    store.initialize()
+    store.set_host_control("ch", armed=True)
+    store.add_operator("owner-7", role="owner")
+    set_spend_halted(store, True)
+
+    def opener(request, timeout=10):
+        return _FakeResponse(b"{}")
+
+    resumed = handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix-resume",
+            "token": "tok",
+            "application_id": "app-1",
+            "user": {"id": "owner-7"},
+            "data": {"custom_id": MORE_ID, "values": [RESUME_ID]},
+            "message": {"id": "panel-1"},
+        },
+        opener=opener,
+    )
+    assert resumed == "resume"
+    assert is_spend_halted(store) is False
+    # Idempotent: Resume again stays resumed instead of toggling back to Halt.
+    handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix-resume-2",
+            "token": "tok",
+            "application_id": "app-1",
+            "user": {"id": "owner-7"},
+            "data": {"custom_id": MORE_ID, "values": [RESUME_ID]},
+            "message": {"id": "panel-1"},
+        },
+        opener=opener,
+    )
+    assert is_spend_halted(store) is False
+    store.close()
+
+
 def _continue_job_store(tmp_path: Path, name: str) -> SQLiteStore:
     store = SQLiteStore(tmp_path / name)
     store.initialize()

@@ -2140,6 +2140,7 @@ def publish_host_card(
         jobs=jobs,
         write_gate=write_gate,
         paired=paired,
+        halted=halted,
     )
     if card_id:
         try:

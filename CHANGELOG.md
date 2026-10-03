@@ -185,6 +185,9 @@
 ### Only Continue arms a continue
 - Viewing a failed or idle job no longer makes the next HOST Ask continue it. Only the Continue button does, and the Ask form names the job it will continue.
 
+### Halt and Resume are separate, named actions
+- The More menu shows Halt when running and Resume when halted. Each sets the state outright instead of toggling one label.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
