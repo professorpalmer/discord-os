@@ -911,10 +911,6 @@ def _is_skipped_worker_line(raw: str) -> bool:
     return any(lower.startswith(prefix) for prefix in _SUMMARY_SKIP_PREFIXES)
 
 
-def _first_visible_summary_line(text: str) -> str:
-    return usable_worker_text(text, limit=500) or "completed"
-
-
 def job_show_text(cli: str, job_id: str) -> str:
     ident = (job_id or "").strip()
     if not cli or not ident:

@@ -216,17 +216,6 @@ def mark_stale(store: Any, node_keys: Sequence[str]) -> int:
     return int(writer(keys) or 0)
 
 
-def cite_artifact(artifact: Mapping[str, Any] | None) -> str:
-    if not artifact:
-        return ""
-    kind = str(artifact.get("kind") or "blob")
-    digest = str(artifact.get("sha256") or "")[:12]
-    name = str(artifact.get("filename") or kind)
-    if digest:
-        return f"{name} {digest}"
-    return name
-
-
 def format_nodes(nodes: Sequence[LineageNode]) -> str:
     if not nodes:
         return "no lineage nodes"

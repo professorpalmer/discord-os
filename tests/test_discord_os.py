@@ -19,11 +19,9 @@ from agent_discord.contracts import (
     ObjectNotFoundError,
     ObjectTooLargeError,
     TaskIntake,
-    ToolInvocationResult,
     discord_jump_url,
 )
 from agent_discord.orchestration.listen import drain_inbound, should_dispatch_inbound
-from agent_discord.discord.errors import ToolInvocationError
 from agent_discord.discord.facade import DiscordFacade
 from agent_discord.discord.object_store import DiscordObjectStore
 from agent_discord.discord.providers.fake import FakeDiscordMCPProvider

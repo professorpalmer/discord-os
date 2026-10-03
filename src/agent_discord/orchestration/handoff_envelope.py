@@ -13,8 +13,6 @@ import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
-from agent_discord.orchestration.service import parse_handoff_command
-
 LIVE_HANDOFF_STATUSES = frozenset(
     {
         "pending",
@@ -237,11 +235,3 @@ def envelope_from_metadata(meta: Mapping[str, Any] | None) -> Optional[HandoffEn
         roe_hint=str(meta.get("roe_hint") or "").strip(),
         brain_dri=str(meta.get("brain_dri") or "").strip(),
     )
-
-
-def parse_handoff_with_envelope(
-    text: str,
-) -> Optional[tuple[str, str]]:
-    """Compat: peer_id + raw prompt (KV still inside prompt for build step)."""
-
-    return parse_handoff_command(text)

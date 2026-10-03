@@ -244,59 +244,6 @@ class DispatchResult:
 
 
 @runtime_checkable
-class DiscordMCPProvider(Protocol):
-    """Normalized Discord provider surface (REST or fake)."""
-
-    name: str
-
-    def list_tools(self) -> Sequence[ToolDescriptor]: ...
-
-    def invoke_tool(self, name: str, arguments: Mapping[str, Any]) -> ToolInvocationResult: ...
-
-    def send_message(
-        self,
-        channel_id: str,
-        content: str,
-        *,
-        thread_id: Optional[str] = None,
-    ) -> DiscordMessage: ...
-
-    def read_messages(
-        self,
-        channel_id: str,
-        *,
-        limit: int = 20,
-        thread_id: Optional[str] = None,
-    ) -> Sequence[DiscordMessage]: ...
-
-    def post_thread_task(
-        self,
-        channel_id: str,
-        title: str,
-        content: str,
-    ) -> DiscordMessage: ...
-
-    def send_attachment(
-        self,
-        channel_id: str,
-        filename: str,
-        data: bytes,
-        *,
-        content: str = "",
-        thread_id: Optional[str] = None,
-    ) -> DiscordMessage: ...
-
-    def get_message(self, channel_id: str, message_id: str) -> DiscordMessage: ...
-
-    def download_attachment(
-        self,
-        channel_id: str,
-        message_id: str,
-        attachment_id: str,
-    ) -> bytes: ...
-
-
-@runtime_checkable
 class GatewayOwnerRegistry(Protocol):
     """One active Gateway owner per bot token."""
 
@@ -318,23 +265,6 @@ class PuppetmasterBackend(Protocol):
     def cancel(self, run_id: str) -> bool: ...
 
     def status(self, run_id: str) -> TaskStatus: ...
-
-
-@runtime_checkable
-class EventStore(Protocol):
-    def append_event(
-        self,
-        *,
-        task_id: str,
-        run_id: str,
-        kind: EventKind,
-        summary: str,
-        payload: Mapping[str, Any],
-        source: str,
-        provenance: Mapping[str, Any],
-    ) -> int: ...
-
-    def list_events(self, run_id: str) -> Sequence[Mapping[str, Any]]: ...
 
 
 @runtime_checkable
@@ -394,59 +324,3 @@ class ResearchLease:
     expires_at: str
 
 
-@runtime_checkable
-class ResearchMemory(Protocol):
-    """Optional research seam — claims, leases, negatives; not required for normal tasks."""
-
-    def fingerprint_for(self, claim_text: str, scope: str) -> str: ...
-
-    def upsert_claim(
-        self,
-        *,
-        workspace_id: str,
-        scope: str,
-        claim_text: str,
-        status: ClaimStatus,
-        provenance: Mapping[str, Any],
-        evidence: Sequence[Mapping[str, Any]] = (),
-        claim_id: Optional[str] = None,
-    ) -> ResearchClaim: ...
-
-    def get_claim(self, fingerprint: str) -> Optional[ResearchClaim]: ...
-
-    def list_claims(
-        self,
-        *,
-        workspace_id: str,
-        status: Optional[ClaimStatus] = None,
-        limit: int = 50,
-    ) -> Sequence[ResearchClaim]: ...
-
-    def list_negative_findings(
-        self,
-        *,
-        workspace_id: str,
-        scope: Optional[str] = None,
-        limit: int = 50,
-    ) -> Sequence[ResearchClaim]: ...
-
-    def acquire_lease(
-        self,
-        fingerprint: str,
-        owner_id: str,
-        *,
-        ttl_seconds: int = 300,
-    ) -> bool: ...
-
-    def release_lease(self, fingerprint: str, owner_id: str) -> bool: ...
-
-    def get_lease(self, fingerprint: str) -> Optional[ResearchLease]: ...
-
-
-@runtime_checkable
-class Orchestrator(Protocol):
-    def run_task(self, intake: TaskIntake) -> RunReceipt: ...
-
-    def cancel(self, run_id: str) -> bool: ...
-
-    def status(self, run_id: str) -> TaskStatus: ...

@@ -200,6 +200,9 @@
 ### kagekit spike leftovers removed
 - The always-false `kagekit_spike_adopted()` and the `kagekit` extra are gone.
 
+### Dead code removed
+- 22 top-level functions and classes that nothing in `src` referenced are gone (about 400 lines), including two never-registered import hooks in the gate inject. Test seams and helpers that drive live paths in tests stay.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

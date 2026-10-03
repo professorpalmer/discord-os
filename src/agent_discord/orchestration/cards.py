@@ -322,18 +322,6 @@ def github_wake_card(summary: str, *, kind: str = "") -> CardMessage:
     )
 
 
-def render_progress_card(
-    *,
-    stage: str,
-    message: str,
-    percent: Optional[float] = None,
-    run_id: str = "",
-) -> str:
-    return progress_card(
-        stage=stage, message=message, percent=percent, run_id=run_id
-    ).text
-
-
 def progress_card(
     *,
     stage: str,
@@ -490,10 +478,6 @@ def job_action_row(run_id: str, *, actions: str = "parked", job_code: str = "") 
     return action_row(items)
 
 
-def render_receipt_card(receipt: RunReceipt, *, max_progress: int = 5) -> str:
-    return receipt_card(receipt, max_progress=max_progress).text
-
-
 def receipt_card(
     receipt: RunReceipt,
     *,
@@ -641,14 +625,6 @@ def open_card(
         description=detail,
         color=COLOR_LIVE,
     )
-
-
-def render_host_card(
-    *,
-    armed: bool,
-    channel_id: str = "",
-) -> str:
-    return host_card(armed=armed, channel_id=channel_id).text
 
 
 def _host_description(
@@ -811,45 +787,6 @@ def note_card(text: str, *, source_channel: str = "") -> CardMessage:
         title="Note",
         description=body or "Empty note.",
         color=COLOR_IDLE,
-    )
-
-
-def render_overflow_card(
-    *,
-    filename: str,
-    sha256: str,
-    size: int,
-    jump_url: str,
-    local_stash: str = "",
-) -> str:
-    return overflow_card(
-        filename=filename,
-        sha256=sha256,
-        size=size,
-        jump_url=jump_url,
-        local_stash=local_stash,
-    ).text
-
-
-def overflow_card(
-    *,
-    filename: str,
-    sha256: str,
-    size: int,
-    jump_url: str,
-    local_stash: str = "",
-) -> CardMessage:
-    _ = sha256
-    fields: list[tuple[str, str, bool]] = [("Size", format_size(size), True)]
-    if local_stash:
-        fields.append(("Host copy", local_stash, False))
-    return CardMessage(
-        kind="OVERFLOW",
-        title="Too large for Discord",
-        description=filename,
-        color=COLOR_FAIL,
-        fields=tuple(fields),
-        link_url=jump_url,
     )
 
 

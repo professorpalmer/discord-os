@@ -225,12 +225,6 @@ def set_spend_halted(store: Any, halted: bool) -> None:
             pass
 
 
-def toggle_spend_halted(store: Any) -> bool:
-    next_halted = not _truthy(_host_pref(store, SPEND_HALT_KEY))
-    set_spend_halted(store, next_halted)
-    return next_halted
-
-
 def writes_need_approval(store: Any) -> bool:
     return _truthy(_host_pref(store, WRITE_GATE_KEY))
 

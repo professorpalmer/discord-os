@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from agent_discord.discord.host_page import (
     host_page_enabled,
-    host_v2_payload,
     split_host_v2_components,
 )
 from agent_discord.discord.layout import TYPE_ACTION_ROW, TYPE_CONTAINER, action_row, button

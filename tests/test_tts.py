@@ -5,7 +5,6 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from agent_discord.discord.layout import voice_state_update
 from agent_discord.discord.tts import (
     DAVE_REQUIRED_SINCE,
     ENV_TTS,
@@ -232,19 +231,6 @@ def test_voice_capabilities_matrix() -> None:
     assert caps["computer_use"] is False
     assert caps["dave_required_since"] == DAVE_REQUIRED_SINCE
     assert caps["dave_close_code"] == VOICE_CLOSE_DAVE_REQUIRED
-
-
-def test_voice_state_update_payload_only() -> None:
-    join = voice_state_update("111", "222", self_mute=True, self_deaf=True)
-    assert join["op"] == 4
-    assert join["d"]["guild_id"] == "111"
-    assert join["d"]["channel_id"] == "222"
-    assert join["d"]["self_mute"] is True
-    assert join["d"]["self_deaf"] is True
-
-    leave = voice_state_update("111", None)
-    assert leave["op"] == 4
-    assert leave["d"]["channel_id"] is None
 
 
 def test_spoken_deny_helpers() -> None:

@@ -11,7 +11,6 @@ from typing import Any, Mapping, Optional, Sequence
 
 from agent_discord import PRODUCT_NAME
 from agent_discord.discord.layout import (
-    FLAG_COMPONENTS_V2,
     container,
     discord_time,
     section,
@@ -111,29 +110,3 @@ def split_host_v2_components(
     return top
 
 
-def host_v2_payload(
-    *,
-    title: str,
-    description: str,
-    fields: Sequence[tuple[str, str, bool]] = (),
-    color: Optional[int] = None,
-    action_rows: Optional[list[dict[str, Any]]] = None,
-    update_pill: str = "",
-    avatar_url: str = "",
-    updated_ts: Optional[int] = None,
-    power: str = "",
-) -> dict[str, Any]:
-    return {
-        "flags": FLAG_COMPONENTS_V2,
-        "components": split_host_v2_components(
-            title=title,
-            description=description,
-            fields=fields,
-            color=color,
-            action_rows=action_rows,
-            update_pill=update_pill,
-            avatar_url=avatar_url,
-            updated_ts=updated_ts,
-            power=power,
-        ),
-    }

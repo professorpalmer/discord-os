@@ -78,19 +78,6 @@ def spoken_ssh_gates_bridge_denied(host_id: str, *, detail: str = "") -> str:
     )
 
 
-def write_gate_blocks_ssh(*, store: Any = None) -> bool:
-    """True when HOST write-gate is on (SSH should speak Need / fail-close writes)."""
-
-    if store is None:
-        return False
-    try:
-        from agent_discord.orchestration.service import writes_need_approval
-
-        return bool(writes_need_approval(store))
-    except Exception:
-        return False
-
-
 # The remote wrapper makes its queue with mktemp -d (0700, unpredictable) and
 # reports the path back on every pending line. Writeback accepts only that shape.
 REMOTE_GATE_DIR_TEMPLATE = "/tmp/discord-os-ssh-gate.XXXXXXXX"

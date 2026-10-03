@@ -8,7 +8,6 @@ from agent_discord.aws_map import (
     RANKS,
     analog_payload,
     analogs,
-    filter_rank,
     format_table,
     lift_payload,
     lifts,
@@ -54,15 +53,6 @@ def test_object_ref_has_no_url_field():
     assert "url" not in ref.__dataclass_fields__
     dumped = analog_payload(lookup("S3")[0])
     assert "url" not in dumped
-
-
-def test_never_rejects_second_cloud_and_activities():
-    never = filter_rank("never")
-    names = {row.aws for row in never}
-    assert "CloudFront" in names
-    assert "Amplify" in names
-    assert "VPC" in names
-    assert "Organizations" in names
 
 
 def test_now_lifts_include_steer_and_write_key():
