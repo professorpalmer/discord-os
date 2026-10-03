@@ -386,3 +386,29 @@ def test_orchestrator_stamps_ssh_gate_mode(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("DISCORD_OS_SSH_GATES", "bridge")
     assert cook().get("ssh_gate_bridge") is True
     store.close()
+
+
+def _as_sshd(argv: list[str]) -> list[str]:
+    """What sshd runs for ``ssh ... -- target args...``: one joined shell string."""
+
+    tail = argv[argv.index("--") + 2 :]
+    return ["bash", "-c", " ".join(tail)]
+
+
+def test_ssh_argv_survives_remote_shell_without_workdir() -> None:
+    """Audit E2-8: a wrapped bash -lc script must reach the remote whole."""
+
+    import subprocess
+
+    from agent_discord.host.runners import RemoteHost, host_runner_argv
+
+    script = 'printf "PID=%s\\n" "$$"; echo "two words"'
+    cmd = ["bash", "-c", script]
+    for workdir in ("", "/tmp"):
+        host = RemoteHost(id="lab", label="Lab", kind="ssh", target="cary@lab.local", workdir=workdir)
+        argv = host_runner_argv(host, cmd)
+        assert argv[argv.index("--") + 1] == "cary@lab.local"
+        assert len(argv) == argv.index("--") + 3, argv
+        out = subprocess.run(_as_sshd(argv), capture_output=True, text=True, timeout=10).stdout
+        assert out.splitlines()[0].startswith("PID=") and out.splitlines()[0] != "PID=", out
+        assert "two words" in out, out

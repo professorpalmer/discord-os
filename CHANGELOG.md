@@ -42,6 +42,9 @@
 - The remote gate queue is a fresh `mktemp -d` directory (0700), not a predictable `/tmp/discord-os-ssh-gate-<run_id>` made with `mkdir -p`. Pending lines already report the real path back.
 - Writeback accepts only that path shape, and writes only into a queue the SSH user owns and that is not a symlink.
 
+### SSH remote command is one quoted string
+- Without a host workdir, the remote argv went to ssh as separate words. sshd re-split it, so the `bash -lc` PID/trap/watchdog prelude ran in the wrong shell and Cancel/orphan reaping broke. The remote command is now always one shell-quoted string, and `--` precedes the target.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
