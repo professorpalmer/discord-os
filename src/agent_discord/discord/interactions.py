@@ -669,15 +669,13 @@ def _handle_power_slash(
     store = None
     try:
         store = _open_store(workspace)
+        from agent_discord.orchestration.service import set_host_armed
+
         if parsed.action == "on":
-            writer = getattr(store, "set_host_control", None)
-            if callable(writer):
-                writer(channel_id, armed=True)
+            set_host_armed(store, channel_id, True)
             return _ephemeral("On")
         if parsed.action == "off":
-            writer = getattr(store, "set_host_control", None)
-            if callable(writer):
-                writer(channel_id, armed=False)
+            set_host_armed(store, channel_id, False)
             label = "Stopped" if name == "stop" else "Off"
             return _ephemeral(label)
         # status — read-only; never mutates power

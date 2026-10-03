@@ -307,6 +307,16 @@ def clear_write_session_allow(store: Any, scope_id: str) -> None:
     writer(HOST_PREFS_WORKSPACE, write_session_allow_key(scope), "0")
 
 
+def set_host_armed(store: Any, channel_id: str, armed: bool) -> dict[str, Any]:
+    """Arm or disarm a channel. Every Off path revokes all Always grants."""
+
+    writer = getattr(store, "set_host_control", None)
+    result = dict(writer(channel_id, armed=armed) or {}) if callable(writer) else {}
+    if not armed:
+        clear_write_session_allows(store)
+    return result
+
+
 def clear_write_session_allows(store: Any) -> None:
     """Drop every Always-allow preference (HOST Off), including tool-class."""
 

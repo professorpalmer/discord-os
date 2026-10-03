@@ -41,6 +41,7 @@ from agent_discord.orchestration.service import (
     seed_spend_cap_from_env,
     seed_write_gate_from_env,
     session_spend_usd,
+    set_host_armed,
     spend_cap_usd,
     writes_need_approval,
 )
@@ -1496,9 +1497,8 @@ def _absorb_power(
             "Denied: only paired operators can turn the host on or off.",
         )
         return
-    writer = getattr(store, "set_host_control", None)
-    if parsed.action in {"on", "off"} and callable(writer):
-        writer(channel_id, armed=parsed.action == "on")
+    if parsed.action in {"on", "off"} and store is not None:
+        set_host_armed(store, channel_id, parsed.action == "on")
     publish_host_card(discord, store, channel_id, thread_id=thread_id)
     # P2.7: /status and On push RO dashboard facts to Discord (phone). Read-only.
     if parsed.action in {"on", "status"}:

@@ -732,9 +732,12 @@ def panel_action_from_interaction(payload: Mapping[str, Any]) -> Optional[str]:
 
 
 def apply_panel_action(store: Any, channel_id: str, action: str) -> dict[str, Any]:
-    writer = getattr(store, "set_host_control", None)
-    if action in {"on", "off-confirm"} and callable(writer):
-        return writer(channel_id, armed=action == "on")
+    if action in {"on", "off-confirm"} and callable(
+        getattr(store, "set_host_control", None)
+    ):
+        from agent_discord.orchestration.service import set_host_armed
+
+        return set_host_armed(store, channel_id, action == "on")
     reader = getattr(store, "get_host_control", None)
     if callable(reader):
         current = reader(channel_id)
@@ -1234,13 +1237,6 @@ def handle_gateway_interaction(
     confirm_off = action == "off"
     if action in {"on", "off-confirm"}:
         apply_panel_action(store, channel_id, action)
-        if action == "off-confirm":
-            try:
-                from agent_discord.orchestration.service import clear_write_session_allows
-
-                clear_write_session_allows(store)
-            except Exception:
-                pass
         if callable(on_power):
             try:
                 on_power(action == "on")

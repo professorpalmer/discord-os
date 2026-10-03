@@ -2181,7 +2181,9 @@ def _start_panel_gateway(
                 print(f"panel gateway closed: {exc}", flush=True)
                 if exc.fatal:
                     try:
-                        store.set_host_control(channel_id, armed=False)
+                        from agent_discord.orchestration.service import set_host_armed
+
+                        set_host_armed(store, channel_id, False)
                     except Exception:
                         pass
                     discord_down.set()

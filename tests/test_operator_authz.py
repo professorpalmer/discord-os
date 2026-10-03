@@ -291,3 +291,56 @@ def test_slash_status_stays_open(tmp_path: Path) -> None:
         _slash("status", "stranger-9"), workspace=tmp_path, roots=[tmp_path]
     )
     assert not reply["data"]["content"].startswith("Denied")
+
+
+def _grant_always(store: SQLiteStore) -> None:
+    from agent_discord.orchestration.service import (
+        set_tool_class_session_allow,
+        set_write_session_allow,
+    )
+
+    set_write_session_allow(store, "ch")
+    set_tool_class_session_allow(store, "shell", "ch")
+
+
+def _grants_live(store: SQLiteStore) -> bool:
+    from agent_discord.orchestration.service import (
+        tool_class_session_allows,
+        write_session_allows_writes,
+    )
+
+    return write_session_allows_writes(store, "ch") or tool_class_session_allows(
+        store, "shell", "ch"
+    )
+
+
+def test_text_off_revokes_always_grants(tmp_path: Path) -> None:
+    store = _store(tmp_path, owner="owner-1")
+    _grant_always(store)
+    assert _grants_live(store)
+    orch, facade, fake = _orch(tmp_path, store)
+    now_ms = 1_750_000_000_000
+    fake.inbox.append(
+        DiscordMessage(
+            channel_id="ch",
+            content="/off",
+            message_id=_snowflake_at(now_ms + 1_000),
+            author_id="owner-1",
+        )
+    )
+    drain_inbound(orch, facade, channel_id="ch", workspace_id="ws", since_ms=now_ms)
+    assert store.host_is_armed("ch") is False
+    assert not _grants_live(store)
+    store.close()
+
+
+def test_slash_off_revokes_always_grants(tmp_path: Path) -> None:
+    store = _store(tmp_path, owner="owner-1")
+    _grant_always(store)
+    store.close()
+    handle_interaction_payload(_slash("stop", "owner-1"), workspace=tmp_path, roots=[tmp_path])
+    store = SQLiteStore(tmp_path / "agent_discord.sqlite3")
+    store.initialize()
+    assert store.host_is_armed("ch") is False
+    assert not _grants_live(store)
+    store.close()

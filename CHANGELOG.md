@@ -9,6 +9,9 @@
 - Slash `/connect`, `/open`, `/on`, `/off`, `/stop`, `/bind`, `/job` and `/clear-needs` need an operator. `/status` stays open.
 - Unpaired desk default (HARD lock 8) is unchanged.
 
+### Every Off path revokes Always grants
+- Text `/off`, slash `/off` and `/stop`, and a fatal gateway close now clear Always-allow grants, like the panel Off button already did. One helper, `set_host_armed`, owns arm/disarm.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
