@@ -2626,7 +2626,7 @@ def _doctor_notify(
         doctor_notify_should_post,
         filter_doctor_notify_lines,
     )
-    from agent_discord.host.liveness import notify_doctor_failure
+    from agent_discord.host.status import notify_doctor_failure
     from agent_discord.host.service import read_host_meta
     from agent_discord.persistence.sqlite import SQLiteStore
 

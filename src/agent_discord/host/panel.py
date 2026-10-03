@@ -1471,7 +1471,7 @@ def _post_status_digest_on_arm(
     if not (token or "").strip():
         return
     try:
-        from agent_discord.host.status_digest import tick_status_digest
+        from agent_discord.host.status import tick_status_digest
     except Exception:
         return
     workspace = None
@@ -1907,7 +1907,7 @@ def _panel_jobs(store: Any, channel_id: str) -> list[dict[str, Any]]:
     try:
         from pathlib import Path as _Path
 
-        from agent_discord.host.liveness import (
+        from agent_discord.host.status import (
             last_digest_from_state,
             merge_host_need_jobs,
             resolve_digest_for_panel,

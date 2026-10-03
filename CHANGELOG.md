@@ -210,6 +210,9 @@
 - The brain lake is now a prompt block in host memory (`[brain-lake]` inject and `discord-os brain show` stay). DRI and role binding metadata are gone: `add brain --dri/--role`, the `DRI:` / `Role SOP:` lines, and the cross-DRI `Lanes:` footer on HOST Jobs.
 - Fixes `discord-os run` without `--fake`, which could raise NameError from a misplaced `add brain` print.
 
+### Liveness and status digest are one module
+- `host/liveness.py` and `host/status_digest.py` became `host/status.py`, with one snapshot type and no duplicated helpers (about 200 fewer lines). The HOST Need lines, the digest the panel shows, `host doctor`, and the never-post-to-Discord rule are unchanged.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

@@ -10,8 +10,8 @@ from agent_discord.host.doctor import (
     doctor_notify_should_post,
     filter_doctor_notify_lines,
 )
-from agent_discord.host.status_digest import (
-    MIN_CHECK_INTERVAL_S,
+from agent_discord.host.status import (
+    DIGEST_MIN_CHECK_INTERVAL_S,
     TERMINAL_JOB_STATUSES,
     digest_signature,
 )
@@ -69,7 +69,7 @@ def test_progress_card_includes_steer_footer():
 
 
 def test_digest_ignores_failed_and_interval_raised():
-    assert MIN_CHECK_INTERVAL_S >= 120.0
+    assert DIGEST_MIN_CHECK_INTERVAL_S >= 120.0
     assert "failed" in TERMINAL_JOB_STATUSES
     assert "error" in TERMINAL_JOB_STATUSES
     base = {

@@ -1,9 +1,18 @@
-# Host liveness
+# Host status
 
-P0.2. Desk `doctor` and the loopback dashboard stay on the Mac. Unhealthy
-digest ranks as a HOST **Need**. Discord OS does **not** post doctor / liveness
-lines to the host channel. Discord mobile pushes on channel posts — that
-vendor is removed (0.5.87). 0.5.60 debounce was not enough.
+One module, `src/agent_discord/host/status.py`, holds both halves:
+
+- **Liveness** (P0.2) — `power` / `pid` / `doctor` / `gateway` digest that ranks
+  as a HOST **Need**.
+- **Status digest** (P2.7) — the read-only facts the panel speaks on **On** and
+  `/status`.
+
+## Liveness
+
+Desk `doctor` stays on the Mac. An unhealthy digest ranks as a HOST **Need**.
+Discord OS does **not** post doctor / liveness lines to the host channel.
+Discord mobile pushes on channel posts — that vendor is removed (0.5.87).
+0.5.60 debounce was not enough.
 
 ## What the phone sees
 
@@ -13,25 +22,25 @@ vendor is removed (0.5.87). 0.5.60 debounce was not enough.
 | Host channel post | Never. Listen tick and `doctor --notify` refresh state only. |
 | `doctor --notify` | Same. `--notify` / watchdog / cron do not send a Discord message. |
 
-Spoken format (Need / CLI / tests only — not a channel post):
+Need-line format:
 
 ```text
-Discord OS host · power OK · pid DEAD · doctor FAIL · host.pid dead · Discord OS
+Need: HOST power OK · pid DEAD · doctor FAIL · host.pid dead
 ```
 
 No bot tokens, SSH targets, or credentials in Need lines.
 
 ## Debounce
 
-Listen-loop checks are rate-limited (default 60s). State updates on that
-interval. No Discord announce.
+Listen-loop checks are rate-limited (default 60s,
+`LIVENESS_MIN_CHECK_INTERVAL_S`). State updates on that interval. No Discord
+announce.
 
 ## Code
 
-- `src/agent_discord/host/liveness.py` — digest, Need line, tick, `--notify`
+- `src/agent_discord/host/status.py` — digest, Need line, tick, `--notify`
 - Listen poll: `drain_inbound` → `tick_host_liveness` (state only)
 - HOST panel Jobs: `merge_host_need_jobs`
-- Companion dashboard JSON may include a read-only `liveness` field (no write API)
 
 ## Desk usage
 
@@ -105,13 +114,70 @@ reconnecting, not a second gateway.
   socket; both `WebSocketClient` and the gateway's `send` serialize behind a
   lock so frames cannot interleave (Discord closes 4002).
 
+## Discord RO status digest (P2.7)
+
+The phone needs the **read-only facts** — power, spend, jobs, allowlist ids —
+as a Discord post (mobile already pushes on channel posts). This is the other
+half of the same module; it is not doctor FAIL.
+
+| Trigger | Behavior |
+|---|---|
+| HOST **On** (panel or `/on`) | Force-post a spoken RO digest to the host channel (or status thread). |
+| `/status` / `!status` | Force-post the same digest (does **not** change power). |
+| Listen interval | Debounced on-change only (default 120s check). First baseline stays quiet. |
+
+Example post:
+
+```text
+Discord OS status · v0.5.35 · power on · running · spend 0.0123/1.0000 · jobs DOS-10001:running · hosts lab · Discord OS
+```
+
+No bot tokens, SSH targets, workdirs, or credentials in posts.
+
+### Debounce
+
+Signature over `power` / running / spend / job code:status / allowlist **ids**.
+Posts only on signature change (or force from On / `/status`). Terminal job
+statuses (cancelled/succeeded/completed/failed/error/…) are omitted from the
+signature so settled-job churn does not spam the channel (0.5.60). Same posture
+as liveness.
+
+Optional:
+
+```bash
+# Post into a Discord thread instead of the channel root
+DISCORD_OS_STATUS_THREAD_ID=THREAD_SNOWFLAKE
+
+# Interval between checks (seconds). Default 120.
+DISCORD_OS_STATUS_DIGEST_INTERVAL_S=120
+```
+
+### Fail closed
+
+| Rule | Behavior |
+|---|---|
+| Read-only | Digest path never calls `set_host_control` / On / Off / Halt. |
+| Snapshot | Reuses `build_status_snapshot`. `readonly: false` payloads are refused. |
+| Secrets | Allowlist ids / labels / kinds only — never `target` / ssh user@host. |
+
+### Spend honesty
+
+When OpenRouter / PM-adapter usage omits `cost_usd`, the digest and Halt card
+show **unknown** — never `$0`. Real provider costs still display when present.
+
+### Code
+
+- `src/agent_discord/host/status.py` — signature, format, debounced tick
+- Listen poll: after liveness → `tick_status_digest`
+- Power text: `/on` and `/status` force-post
+- HOST panel On: REST post via bot token
+
 ## Not this
 
 - Not a second product / status board
 - Not Activities
-- Not Puppetmaster (cook backend) — liveness is inline
-- Dashboard stays read-only
-- Status digest (`/status`, On) is a separate RO facts post — not doctor FAIL
+- Not Puppetmaster (cook backend) — both halves are inline
+- The RO digest does not replace the thin liveness Need — that stays for FAIL / pid
 
 ## Quiet listen drain (timeout / Errno 49)
 

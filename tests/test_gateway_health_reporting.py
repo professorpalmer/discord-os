@@ -26,7 +26,7 @@ from agent_discord.discord.gateway_health import (
     snapshot_gateway_health,
 )
 from agent_discord.host.doctor import _check_gateway_ws
-from agent_discord.host.liveness import (
+from agent_discord.host.status import (
     DOCTOR_FAIL,
     GATEWAY_BAD,
     GATEWAY_NA,

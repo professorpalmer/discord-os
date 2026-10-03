@@ -138,9 +138,9 @@ with spoken `Expired. Write was not started.` Set `0` or `off` to disable.
 
 ## Phone-visible host liveness (P0.2)
 
-Desk doctor + loopback dashboard stay on the Mac. A thin digest (`power` /
-`pid` / `doctor`) ranks as a HOST **Need** line. It does **not** post to the
-host channel (0.5.87). See [liveness.md](liveness.md).
+Desk doctor stays on the Mac. A thin digest (`power` / `pid` / `doctor` /
+`gateway`) ranks as a HOST **Need** line. It does **not** post to the host
+channel (0.5.87). See [status.md](status.md).
 
 ## Companion dashboard (read-only)
 
@@ -164,10 +164,10 @@ JSON: `GET /api/status`. HTML: `GET /`. Code: `src/agent_discord/host/dashboard.
 
 ## Discord RO status digest (P2.7)
 
-Phone-visible copy of the dashboard RO facts (power / spend / jobs / allowlist
-ids). Posts to the host channel (or `DISCORD_OS_STATUS_THREAD_ID`) on **On**,
-`/status`, and listen on-change. Debounced. Never mutates power. See
-[status-digest.md](status-digest.md).
+Phone-visible read-only facts (power / spend / jobs / allowlist ids). Posts to
+the host channel (or `DISCORD_OS_STATUS_THREAD_ID`) on **On**, `/status`, and
+listen on-change. Debounced. Never mutates power. See
+[status.md](status.md).
 
 
 ## Other host verbs
@@ -215,8 +215,7 @@ Not a product feature. Optional extra `discord-os[debug]`. Default **off.** `DIS
 - `src/agent_discord/orchestration/service.py` — operators / REQUIRE_OPERATORS
 - `src/agent_discord/host/doctor.py` — operators require check
 - `src/agent_discord/host/dashboard.py` — read-only companion web dashboard
-- `src/agent_discord/host/liveness.py` — phone-visible digest / HOST Need (P0.2)
-- `src/agent_discord/host/status_digest.py` — Discord RO status digest from dashboard (P2.7)
+- `src/agent_discord/host/status.py` — HOST Need digest (P0.2) + Discord RO status digest (P2.7)
 - `src/agent_discord/discord/tts.py` — local TTS + voice join/leave honesty (DAVE Deny)
 - `src/agent_discord/host/install.py` — login item
 - `src/agent_discord/host/logstream.py` — timestamped host.log lines + copy-truncate rotation

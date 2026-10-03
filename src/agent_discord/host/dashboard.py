@@ -166,7 +166,7 @@ def build_status_snapshot(
         else:
             doctor = {"ok": True, "lines": []}
         try:
-            from agent_discord.host.liveness import last_digest_from_state, resolve_digest_for_panel
+            from agent_discord.host.status import last_digest_from_state, resolve_digest_for_panel
 
             digest = resolve_digest_for_panel(
                 workspace=ws, store=db, channel_id=channel_id

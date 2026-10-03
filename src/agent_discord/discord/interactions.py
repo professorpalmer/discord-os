@@ -696,7 +696,7 @@ def _status_line(*, workspace: Path, store: object, armed: bool) -> str:
     power = "on" if armed else "off"
     try:
         from agent_discord.host.dashboard import build_status_snapshot
-        from agent_discord.host.status_digest import format_status_digest
+        from agent_discord.host.status import format_status_digest
 
         snap = build_status_snapshot(workspace=workspace)
         if isinstance(snap, Mapping):

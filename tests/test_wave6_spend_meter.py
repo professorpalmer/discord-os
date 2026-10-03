@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 from agent_discord.discord.layout import progress_bar
-from agent_discord.host.status_digest import format_status_digest
+from agent_discord.host.status import format_status_digest
 from agent_discord.orchestration.cards import _host_status_fields
 from agent_discord.orchestration.service import format_spend_meter
 

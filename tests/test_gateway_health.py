@@ -16,7 +16,7 @@ from agent_discord.discord.gateway_health import (
     reset_gateway_health_for_tests,
     snapshot_gateway_health,
 )
-from agent_discord.host.liveness import GATEWAY_BAD, HostDigest, host_need_line
+from agent_discord.host.status import GATEWAY_BAD, HostDigest, host_need_line
 
 
 def setup_function() -> None:

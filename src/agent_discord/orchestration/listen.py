@@ -1289,7 +1289,7 @@ def _tick_host_liveness_best_effort(
     if workspace is None:
         return
     try:
-        from agent_discord.host.liveness import tick_host_liveness
+        from agent_discord.host.status import tick_host_liveness
 
         tick_host_liveness(
             discord,
@@ -1328,7 +1328,7 @@ def _tick_status_digest_best_effort(
     if workspace is None:
         return
     try:
-        from agent_discord.host.status_digest import tick_status_digest
+        from agent_discord.host.status import tick_status_digest
 
         tick_status_digest(
             discord,
@@ -2046,7 +2046,7 @@ def publish_host_card(
         except Exception:
             jobs = []
     try:
-        from agent_discord.host.liveness import (
+        from agent_discord.host.status import (
             last_digest_from_state,
             merge_host_need_jobs,
             resolve_digest_for_panel,

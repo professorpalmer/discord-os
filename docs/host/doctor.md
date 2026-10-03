@@ -13,4 +13,4 @@ discord-os host doctor --notify --verbose # still no Discord post
 ```
 
 Slash/voice **WARN** lines stay on stderr.
-See [liveness](liveness.md) and [status-digest](status-digest.md).
+See [status](status.md) — liveness Need plus the RO status digest.
