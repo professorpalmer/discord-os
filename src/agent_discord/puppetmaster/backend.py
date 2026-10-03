@@ -414,13 +414,49 @@ def resolved_state_dir(base: Optional[Mapping[str, str]] = None) -> str:
     return str(Path.home() / ".discord-os" / "puppetmaster")
 
 
+# Workers run model-chosen tools, shell included. They get what a CLI needs to
+# run plus the GitHub tokens gh uses. The OpenRouter key is added by the
+# backend. Nothing else from the host environment reaches them.
+_WORKER_ENV_KEYS = frozenset(
+    {
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "LANG",
+        "TERM",
+        "TMPDIR",
+        "TZ",
+        "NO_COLOR",
+        "SSH_AUTH_SOCK",
+        "GH_HOST",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "__CF_USER_TEXT_ENCODING",
+    }
+)
+_WORKER_ENV_PREFIXES = ("LC_", "XDG_", "GIT_", "PUPPETMASTER_", "DISCORD_OS_GATE")
+
+
 def worker_env(base: Optional[Mapping[str, str]] = None) -> dict[str, str]:
     from agent_discord.host.github import load_host_tool_secrets
     from agent_discord.host.repos import host_path
 
-    env = dict(os.environ if base is None else base)
-    env["PATH"] = host_path(env)
-    env["PUPPETMASTER_STATE_DIR"] = resolved_state_dir(env)
+    source = dict(os.environ if base is None else base)
+    env = {
+        key: value
+        for key, value in source.items()
+        if key in _WORKER_ENV_KEYS or key.startswith(_WORKER_ENV_PREFIXES)
+    }
+    env["PATH"] = host_path(source)
+    env["PUPPETMASTER_STATE_DIR"] = resolved_state_dir(source)
     secrets = load_host_tool_secrets(env=None if base is None else base)
     for key, value in secrets.items():
         env.setdefault(key, value)

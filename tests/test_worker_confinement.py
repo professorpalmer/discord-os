@@ -162,3 +162,60 @@ def test_gate_queue_lives_where_listen_drains(tmp_path: Path) -> None:
     drained_root = resolve_gate_root(workspace=workspace, env={})
     assert run_dir.parent == drained_root
     assert list_pending(drained_root / run_dir.name)
+
+
+def test_worker_env_is_an_allowlist(tmp_path: Path) -> None:
+    """Audit E2-3: host secrets other than gh tokens never reach the worker."""
+
+    from agent_discord.puppetmaster.backend import worker_env
+
+    host = {
+        "PATH": "/usr/bin",
+        "HOME": "/Users/x",
+        "LANG": "en_US.UTF-8",
+        "LC_ALL": "en_US.UTF-8",
+        "SSH_AUTH_SOCK": "/tmp/agent.sock",
+        "AGENT_DISCORD_WORKSPACE": str(tmp_path / ".agent-discord"),
+        "PUPPETMASTER_MODEL_REGISTRY": "/x/models.json",
+        "DISCORD_OS_GATE_INJECT": "1",
+        "GH_TOKEN": "ghp_not_real",
+        "DISCORD_BOT_TOKEN": "not-real-bot-token",
+        "AWS_SECRET_ACCESS_KEY": "not-real-aws",
+        "ANTHROPIC_API_KEY": "not-real-anthropic",
+        "OPENROUTER_API_KEY": "not-real-or",
+        "DISCORD_OS_REPOS": "x:/y",
+    }
+    env = worker_env(host)
+    for kept in ("HOME", "LANG", "LC_ALL", "SSH_AUTH_SOCK", "PUPPETMASTER_MODEL_REGISTRY",
+                 "DISCORD_OS_GATE_INJECT", "GH_TOKEN"):
+        assert env[kept] == host[kept], kept
+    for dropped in ("DISCORD_BOT_TOKEN", "AWS_SECRET_ACCESS_KEY", "ANTHROPIC_API_KEY",
+                    "OPENROUTER_API_KEY", "AGENT_DISCORD_WORKSPACE", "DISCORD_OS_REPOS"):
+        assert dropped not in env, dropped
+    assert env["PUPPETMASTER_STATE_DIR"] == str(tmp_path / ".agent-discord" / "puppetmaster")
+    assert "/usr/bin" in env["PATH"].split(":")
+
+
+def test_agentic_child_env_has_only_the_vault_key(tmp_path: Path, monkeypatch) -> None:
+    from agent_discord.keys.vault import KeyVault
+
+    vault = KeyVault(tmp_path / "keys")
+    vault.put("openrouter", "sk-or-v1-from-vault", "test")
+    backend = AgenticPuppetmasterBackend(
+        cli="puppetmaster",
+        pin=AGENTIC_MODEL_PIN,
+        vault=vault,
+        env={"HOME": "/Users/x", "DISCORD_BOT_TOKEN": "not-real"},
+    )
+    captured: dict[str, dict[str, str]] = {}
+
+    def fake_spawn(handoff, *, workdir, child_env):
+        captured["env"] = dict(child_env)
+        raise OSError("stop after env capture")
+
+    monkeypatch.setattr(backend, "_spawn_agentic_popen", fake_spawn)
+    monkeypatch.setattr(backend, "available", lambda: True)
+    backend.dispatch(_request(cwd=str(tmp_path)))
+    env = captured["env"]
+    assert env["OPENROUTER_API_KEY"] == "sk-or-v1-from-vault"
+    assert "DISCORD_BOT_TOKEN" not in env

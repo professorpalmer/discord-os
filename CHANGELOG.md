@@ -32,6 +32,9 @@
 ### Gate queue always under the host workspace
 - Local cooks stamped the ask-gate queue at `<checkout>/gates/<run>`, while listen drained `<workspace>/gates`. Held tool calls in a realm checkout never parked a card and self-denied after the timeout. The queue now always lives under the host workspace, outside the worker's checkout.
 
+### Worker environment is an allowlist
+- Local workers no longer inherit the whole host environment. They get locale, home, shell, proxy and CA settings, `SSH_AUTH_SOCK`, `GIT_*`, `PUPPETMASTER_*`, the gate stamps, and `GH_TOKEN` / `GITHUB_TOKEN` for `gh`. The backend adds the OpenRouter key. `DISCORD_BOT_TOKEN`, cloud keys and other host variables stay out.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
