@@ -1792,8 +1792,8 @@ PAUSED_HALTED = "halted"
 _PAUSED_SPOKEN = {
     PAUSED_OFF: "Host is Off, so this ask was not started. Press On on the HOST card, then send it again.",
     PAUSED_HALTED: (
-        "Spend is halted, so this ask was not started. Choose Halt in the HOST card's "
-        "More menu to resume (or raise DISCORD_OS_SPEND_CAP_USD), then send it again."
+        "Spend is halted, so this ask was not started. Choose Resume in the HOST card's "
+        "More menu (or raise DISCORD_OS_SPEND_CAP_USD), then send it again."
     ),
 }
 
