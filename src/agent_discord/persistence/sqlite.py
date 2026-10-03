@@ -218,6 +218,19 @@ CREATE TABLE IF NOT EXISTS inbound_queue (
     created_ms INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_inbound_queue_open ON inbound_queue(thread_id, status);
+
+CREATE TABLE IF NOT EXISTS pending_intake (
+    message_id TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL DEFAULT '',
+    workspace_id TEXT NOT NULL DEFAULT 'default',
+    guild_id TEXT NOT NULL DEFAULT '',
+    requester_id TEXT NOT NULL DEFAULT '',
+    text TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    created_ms INTEGER NOT NULL
+);
 """
 
 PREFERENCE_KINDS = frozenset({"preference", "style", "failure", "journal", "plan"})
@@ -245,6 +258,7 @@ class SQLiteStore:
         self._migrate_lineage_nodes(conn)
         self._migrate_job_queue(conn)
         self._migrate_inbound_queue(conn)
+        self._migrate_pending_intake(conn)
         self._fts_enabled = self._try_enable_fts(conn)
         conn.commit()
 
@@ -445,6 +459,24 @@ class SQLiteStore:
             );
             CREATE INDEX IF NOT EXISTS idx_inbound_queue_open
             ON inbound_queue(thread_id, status);
+            """
+        )
+
+    def _migrate_pending_intake(self, conn: sqlite3.Connection) -> None:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS pending_intake (
+                message_id TEXT PRIMARY KEY,
+                channel_id TEXT NOT NULL,
+                thread_id TEXT NOT NULL DEFAULT '',
+                workspace_id TEXT NOT NULL DEFAULT 'default',
+                guild_id TEXT NOT NULL DEFAULT '',
+                requester_id TEXT NOT NULL DEFAULT '',
+                text TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                attempts INTEGER NOT NULL DEFAULT 0,
+                created_ms INTEGER NOT NULL
+            );
             """
         )
 
@@ -2022,6 +2054,9 @@ class SQLiteStore:
             """,
             (task_id, run_id, channel_id, message_id),
         )
+        # The task row exists, so this claim can no longer be lost: the
+        # pending-intake replay row has done its job.
+        conn.execute("DELETE FROM pending_intake WHERE message_id=?", (message_id,))
         conn.commit()
 
     def get_inbound_message(self, message_id: str) -> Optional[dict[str, Any]]:
@@ -2031,6 +2066,104 @@ class SQLiteStore:
             "SELECT * FROM seen_messages WHERE message_id=?", (message_id,)
         ).fetchone()
         return dict(row) if row else None
+
+    # --- pending intake (claimed, not yet a task row) ---
+
+    def record_pending_intake(
+        self,
+        *,
+        message_id: str,
+        channel_id: str,
+        text: str,
+        thread_id: str = "",
+        workspace_id: str = "default",
+        guild_id: str = "",
+        requester_id: str = "",
+        metadata: Optional[Mapping[str, Any]] = None,
+        created_ms: Optional[int] = None,
+    ) -> None:
+        """Durable replay row for a claimed message that has no task row yet."""
+
+        mid = (message_id or "").strip()
+        body = (text or "").strip()
+        if not mid or not body:
+            return
+        now = int(created_ms if created_ms is not None else time.time() * 1000)
+        conn = self._connection()
+        conn.execute(
+            """
+            INSERT INTO pending_intake (
+                message_id, channel_id, thread_id, workspace_id, guild_id,
+                requester_id, text, metadata_json, attempts, created_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+            ON CONFLICT(message_id) DO UPDATE SET
+                channel_id=excluded.channel_id,
+                thread_id=excluded.thread_id,
+                workspace_id=excluded.workspace_id,
+                guild_id=excluded.guild_id,
+                requester_id=excluded.requester_id,
+                text=excluded.text,
+                metadata_json=excluded.metadata_json
+            """,
+            (
+                mid,
+                (channel_id or "").strip(),
+                (thread_id or "").strip(),
+                (workspace_id or "default").strip() or "default",
+                (guild_id or "").strip(),
+                (requester_id or "").strip(),
+                body,
+                json.dumps(dict(metadata or {})),
+                now,
+            ),
+        )
+        conn.commit()
+
+    def list_pending_intake(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        capped = max(1, min(int(limit), 200))
+        rows = self._connection().execute(
+            """
+            SELECT * FROM pending_intake
+            ORDER BY created_ms ASC, message_id ASC
+            LIMIT ?
+            """,
+            (capped,),
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["metadata"] = json.loads(item.pop("metadata_json") or "{}")
+            except json.JSONDecodeError:
+                item.pop("metadata_json", None)
+                item["metadata"] = {}
+            out.append(item)
+        return out
+
+    def clear_pending_intake(self, message_id: str) -> None:
+        mid = (message_id or "").strip()
+        if not mid:
+            return
+        conn = self._connection()
+        conn.execute("DELETE FROM pending_intake WHERE message_id=?", (mid,))
+        conn.commit()
+
+    def note_pending_intake_attempt(self, message_id: str) -> int:
+        """Count one replay. Returns the new attempt count (0 when unknown)."""
+
+        mid = (message_id or "").strip()
+        if not mid:
+            return 0
+        conn = self._connection()
+        conn.execute(
+            "UPDATE pending_intake SET attempts=attempts+1 WHERE message_id=?",
+            (mid,),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT attempts FROM pending_intake WHERE message_id=?", (mid,)
+        ).fetchone()
+        return int(row["attempts"]) if row is not None else 0
 
     def enqueue_inbound(
         self,

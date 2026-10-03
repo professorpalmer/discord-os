@@ -142,6 +142,9 @@
 ### Listen paginates from the watermark
 - Each poll reads forward from the last seen message with `after=`, 100 per page and up to 10 pages per tick. A burst of more than 20 messages between polls is no longer lost.
 
+### A claimed ask survives a crash or restart
+- A durable pending-intake row covers the window between claiming a message and creating its task row. Host start replays any left behind, up to three tries.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

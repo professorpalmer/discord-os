@@ -231,6 +231,110 @@ def should_dispatch_inbound(message: DiscordMessage) -> bool:
     return True
 
 
+def record_pending_intake(store: Any, intake: TaskIntake) -> None:
+    """Durably remember a claimed ask until its task row exists.
+
+    The claim (seen_messages) is what stops a second dispatch of the same
+    Discord message, and it lands before the worker starts. Without this row a
+    crash or restart between claim and ``create_task`` would drop the ask for
+    good, because the claim makes the next poll skip it.
+    """
+
+    if store is None or not intake.message_id:
+        return
+    writer = getattr(store, "record_pending_intake", None)
+    if not callable(writer):
+        return
+    try:
+        writer(
+            message_id=intake.message_id,
+            channel_id=str(intake.channel_id or ""),
+            text=intake.text,
+            thread_id=str(intake.thread_id or ""),
+            workspace_id=str(intake.workspace_id or "default"),
+            guild_id=str(intake.guild_id or ""),
+            requester_id=str(intake.requester_id or ""),
+            metadata=dict(intake.metadata or {}),
+        )
+    except Exception:
+        pass
+
+
+def replay_pending_intakes(
+    orchestrator: Any,
+    *,
+    job_pool: Optional[Any] = None,
+    max_attempts: int = 3,
+) -> list[RunReceipt]:
+    """Re-dispatch claimed asks that never reached a task row. Call on start.
+
+    A row survives only the window between claim and ``create_task``, so this
+    runs at host start, when that window can only be a crashed or killed
+    process. Rows that keep failing are dropped after ``max_attempts`` so a
+    poisoned ask cannot replay forever.
+    """
+
+    store = getattr(orchestrator, "store", None)
+    lister = getattr(store, "list_pending_intake", None)
+    if not callable(lister):
+        return []
+    try:
+        rows = list(lister())
+    except Exception:
+        return []
+    receipts: list[RunReceipt] = []
+    for row in rows:
+        message_id = str(row.get("message_id") or "")
+        text = str(row.get("text") or "").strip()
+        if not message_id or not text:
+            _clear_pending(store, message_id)
+            continue
+        counter = getattr(store, "note_pending_intake_attempt", None)
+        attempts = 0
+        if callable(counter):
+            try:
+                attempts = int(counter(message_id))
+            except Exception:
+                attempts = 0
+        if attempts > max_attempts:
+            _clear_pending(store, message_id)
+            continue
+        meta = dict(row.get("metadata") or {})
+        meta["inbound_claimed"] = True
+        meta["intake_replayed"] = True
+        intake = TaskIntake(
+            text=text,
+            channel_id=str(row.get("channel_id") or ""),
+            workspace_id=str(row.get("workspace_id") or "default"),
+            guild_id=str(row.get("guild_id") or "") or None,
+            thread_id=str(row.get("thread_id") or "") or None,
+            message_id=message_id,
+            requester_id=str(row.get("requester_id") or "") or None,
+            metadata=meta,
+        )
+        try:
+            if job_pool is not None:
+                job_pool.submit(
+                    orchestrator.run_task,
+                    intake,
+                    write_key=resolved_write_key(intake, orchestrator),
+                )
+            else:
+                receipts.append(orchestrator.run_task(intake))
+        except Exception:
+            continue
+    return receipts
+
+
+def _clear_pending(store: Any, message_id: str) -> None:
+    clearer = getattr(store, "clear_pending_intake", None)
+    if callable(clearer) and message_id:
+        try:
+            clearer(message_id)
+        except Exception:
+            pass
+
+
 def _read_inbound_backlog(
     discord: Any,
     channel_id: str,
@@ -753,6 +857,7 @@ def drain_inbound(
             requester_id=message.author_id,
             metadata=extra_meta,
         )
+        record_pending_intake(store, intake)
         if job_pool is not None:
             job_pool.submit(
                 orchestrator.run_task,

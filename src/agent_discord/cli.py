@@ -1801,6 +1801,14 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     )
     job_pool = JobPool(max_live=resolve_max_live())
     orch.job_pool = job_pool
+    # Asks claimed by a process that died before their task row existed. The
+    # claim already hides them from the next poll, so replay is the only way back.
+    try:
+        from agent_discord.orchestration.listen import replay_pending_intakes
+
+        replay_pending_intakes(orch, job_pool=job_pool)
+    except Exception as exc:  # noqa: BLE001 — start must not die on replay
+        print(f"pending intake replay failed: {exc}", flush=True)
     try:
         try:
             from agent_discord.host.webhook import notify_host_start

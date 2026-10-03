@@ -5,13 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional, Sequence
 
-from agent_discord.contracts import DiscordMessage
+from agent_discord.contracts import DiscordMessage, TaskIntake
 from agent_discord.discord.facade import DiscordFacade
 from agent_discord.discord.providers.fake import FakeDiscordMCPProvider
 from agent_discord.orchestration.cards import CARD_PREFIX
 from agent_discord.orchestration.listen import (
     DISCORD_EPOCH_MS,
     drain_inbound,
+    replay_pending_intakes,
 )
 from agent_discord.orchestration.orchestrator import AgentOrchestrator
 from agent_discord.persistence.sqlite import SQLiteStore
@@ -198,4 +199,99 @@ def test_pagination_stops_and_keeps_watermark_semantics(tmp_path: Path):
     assert anchored[0]["after"] == _snowflake_at(now_ms)
     watermark = store.get_listen_watermark("ch")
     assert watermark["last_message_id"] == _snowflake_at(now_ms)
+    store.close()
+
+
+# --- B7: a claimed ask survives a crash before its task row ---
+
+
+class LostJobPool:
+    """Accepts submits and never runs them, like a process killed mid-queue."""
+
+    def __init__(self) -> None:
+        self.submitted: list[TaskIntake] = []
+
+    def submit(self, runner, intake, *, write_key: str = "") -> str:
+        self.submitted.append(intake)
+        return f"job-{len(self.submitted)}"
+
+
+def test_claimed_ask_is_replayed_after_a_restart(tmp_path: Path):
+    provider = FakeDiscordMCPProvider()
+    now_ms = 1_750_000_000_000
+    provider.inbox.append(
+        DiscordMessage(
+            channel_id="ch",
+            content="ship the thing",
+            message_id=_snowflake_at(now_ms),
+            author_id="human-1",
+        )
+    )
+    orch, store, facade, backend = _orch(tmp_path, provider)
+    pool = LostJobPool()
+    assert drain_inbound(
+        orch,
+        facade,
+        channel_id="ch",
+        workspace_id="ws",
+        since_ms=0,
+        job_pool=pool,
+    ) == []
+    assert len(pool.submitted) == 1
+    # Claimed, so a second poll will never offer it again.
+    assert store.get_inbound_message(_snowflake_at(now_ms)) is not None
+    assert drain_inbound(
+        orch, facade, channel_id="ch", workspace_id="ws", since_ms=0, job_pool=pool
+    ) == []
+    assert len(pool.submitted) == 1
+    pending = store.list_pending_intake()
+    assert [row["text"] for row in pending] == ["ship the thing"]
+
+    receipts = replay_pending_intakes(orch)
+    assert len(receipts) == 1
+    assert "ship the thing" in (receipts[0].summary or "")
+    assert store.list_pending_intake() == []
+    store.close()
+
+
+def test_pending_intake_clears_once_the_task_row_exists(tmp_path: Path):
+    provider = FakeDiscordMCPProvider()
+    now_ms = 1_750_000_000_000
+    provider.inbox.append(
+        DiscordMessage(
+            channel_id="ch",
+            content="run the tests",
+            message_id=_snowflake_at(now_ms),
+            author_id="human-1",
+        )
+    )
+    orch, store, facade, _backend = _orch(tmp_path, provider)
+    receipts = drain_inbound(
+        orch, facade, channel_id="ch", workspace_id="ws", since_ms=0
+    )
+    assert len(receipts) == 1
+    assert store.list_pending_intake() == []
+    assert replay_pending_intakes(orch) == []
+    store.close()
+
+
+def test_poisoned_pending_intake_stops_replaying(tmp_path: Path):
+    provider = FakeDiscordMCPProvider()
+    orch, store, _facade, _backend = _orch(tmp_path, provider)
+    store.record_pending_intake(
+        message_id="m-poison",
+        channel_id="ch",
+        text="boom",
+        workspace_id="ws",
+    )
+
+    def explode(_intake):
+        raise RuntimeError("worker refuses")
+
+    orch.run_task = explode  # type: ignore[assignment]
+    for _attempt in range(3):
+        assert replay_pending_intakes(orch) == []
+    assert store.list_pending_intake() != []
+    assert replay_pending_intakes(orch) == []
+    assert store.list_pending_intake() == []
     store.close()
