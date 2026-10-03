@@ -21,6 +21,11 @@ Each run writes a SQLite lineage DAG (`node_key = sha256(step, input, parents)`)
 
 A job that opened a GitHub PR (or is bound as last pusher) gets check conclusions and human review comments in **that job thread**. HOST ranks a failing check as Need. In-flight checks are Waiting, which is not failed. Speakable ids are `DOS-` codes next to the Discord snowflake. A stacked PR whose base is another job's head is a child in that lineage DAG (`discord-os lineage DOS-10001` lists the child). Stored GitHub rules cook a stored prompt: `new` mints a job thread when no bind exists, `single` enqueues into the owning job (steer if live, otherwise a cook in that thread). Bound PRs still wake in place.
 
+Puppetmaster jobs the operator started **outside** Discord OS (Marionette, the
+Claude Code MCP server, a bare CLI) can get one live card each in an opt-in
+inbox channel. Observe only — those jobs never cook here. See
+[pm-inbox](pm-inbox.md).
+
 ## Code
 
 - `src/agent_discord/orchestration/orchestrator.py` — `_ensure_job_thread` always-bind on channel-parent asks
@@ -29,6 +34,7 @@ A job that opened a GitHub PR (or is bound as last pusher) gets check conclusion
 - `src/agent_discord/persistence/sqlite.py` — session thread ids, parent channel, tip run, DOS-* mint
 - `src/agent_discord/orchestration/github_wake.py` — PR/CI wake into the owning thread
 - `src/agent_discord/orchestration/github_rules.py` — unbound GitHub events as job threads
+- `src/agent_discord/orchestration/pm_inbox.py` — observed Puppetmaster jobs ([pm-inbox](pm-inbox.md))
 - `src/agent_discord/orchestration/job_briefing.py` — Need / Waiting / Live / Last (failed → Need; dismissed/cancelled → Last)
 - `src/agent_discord/host/panel.py` — `refresh_host_jobs_panel` after dismiss/cancel ranking flips
 - `src/agent_discord/orchestration/lineage.py` — DAG nodes, stacked descendants
