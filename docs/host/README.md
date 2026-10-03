@@ -83,6 +83,19 @@ discord-os host stop
 discord-os host start --channel-id ID
 ```
 
+## Host log
+
+`.agent-discord/logs/host.log` is the LaunchAgent's `StandardOutPath` **and**
+`StandardErrorPath`. The host process wraps `sys.stdout` / `sys.stderr` once at
+startup (`src/agent_discord/host/logstream.py`) so every bare `print()` line in
+the codebase lands with an ISO-8601 local timestamp. Call sites stay plain.
+
+| Rule | Behavior |
+|---|---|
+| Who stamps | Only the long-running `host run` / `listen` entry point. One-shot CLI commands print plain. |
+| Foreground | No-op when both streams are a terminal. |
+| Partial line | Held until its newline, so one logical line is never split across two stamps. |
+
 ## Approval timeout (P0.3)
 
 Parked write-gate Allow / Always allow / Deny does not sit forever. After
@@ -172,6 +185,7 @@ Not a product feature. Optional extra `discord-os[debug]`. Default **off.** `DIS
 - `src/agent_discord/host/status_digest.py` — Discord RO status digest from dashboard (P2.7)
 - `src/agent_discord/discord/tts.py` — local TTS + voice join/leave honesty (DAVE Deny)
 - `src/agent_discord/host/install.py` — login item
+- `src/agent_discord/host/logstream.py` — timestamped host.log lines
 - `src/agent_discord/host/actions.py` — Terminal / files / browser
 - `src/agent_discord/cli.py` — `cmd_host_*`, `cmd_setup`
 

@@ -78,6 +78,9 @@
 ### Write lock covers the tree the worker writes
 - The JobPool write lock now keys on the same checkout `run_task` cooks in: a repo named in the ask, else the channel realm. Before, a channel bound to X asking to implement in Y locked X and wrote Y, so two writers could land in one checkout. A metadata-requested swarm now takes the lock too.
 
+### host.log lines carry a timestamp
+- The long-running host wraps stdout and stderr so every complete line in `host.log` starts with a local ISO-8601 timestamp. One-shot `--once` / `--json` output stays plain.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

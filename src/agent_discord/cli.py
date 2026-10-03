@@ -1662,8 +1662,15 @@ def cmd_note(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
 
 
 def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
-    out = out or sys.stdout
+    from agent_discord.host.logstream import install_host_logging
     from agent_discord.host.repos import host_path
+
+    # Stamp before anything can fail: a bad token or ConfigError has to land in
+    # host.log with a time on it, not as a bare line in a respawn loop. Only the
+    # long-running loop stamps; --once / --json are one-shot machine output.
+    if not getattr(args, "once", False) and not getattr(args, "json", False):
+        install_host_logging()
+    out = out or sys.stdout
 
     os.environ["PATH"] = host_path()
     config = apply_runtime_secrets(load_config())
