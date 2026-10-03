@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import threading
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence
 from uuid import uuid4
@@ -237,6 +237,16 @@ def _card_window(text: str) -> str:
     return _clip_to_limit(body, CARD_TEXT_LIMIT)
 
 
+@dataclass
+class _RunScope:
+    """What run_task has created so far, so a crash can settle exactly that."""
+
+    task_id: str = ""
+    run_id: str = ""
+    thread_id: str = ""
+    live: Optional["_LiveCard"] = None
+
+
 class _LiveCard:
     """One editable card. Persist-then-settle on beat change / Done."""
 
@@ -447,6 +457,72 @@ class AgentOrchestrator:
         self._lineage_tips: dict[str, str] = {}
 
     def run_task(self, intake: TaskIntake) -> RunReceipt:
+        scope = _RunScope()
+        try:
+            return self._run_task(intake, scope)
+        except Exception as exc:
+            if not scope.run_id:
+                raise
+            return self._settle_crashed_run(intake, scope, exc)
+
+    def _settle_crashed_run(
+        self, intake: TaskIntake, scope: _RunScope, exc: Exception
+    ) -> RunReceipt:
+        """Fail the run, finish its card and free its thread after a crash."""
+
+        import traceback
+
+        traceback.print_exception(exc)
+        error = f"internal error: {type(exc).__name__}: {exc}"[:500]
+        spoken = "Failed. Discord OS hit an internal error (see host.log)."
+        row = self.store.get_run(scope.run_id) or {}
+        settled = str(row.get("status") or "") in {
+            TaskStatus.COMPLETED.value,
+            TaskStatus.FAILED.value,
+            TaskStatus.CANCELLED.value,
+        }
+        status = TaskStatus(row["status"]) if settled else TaskStatus.FAILED
+        if not settled:
+            try:
+                self.store.update_run(
+                    scope.run_id, status=TaskStatus.FAILED, summary=spoken, error=error
+                )
+            except Exception:
+                pass
+            self._run_status[scope.run_id] = TaskStatus.FAILED
+        receipt = RunReceipt(
+            task_id=scope.task_id,
+            run_id=scope.run_id,
+            status=status,
+            summary=str(row.get("summary") or "") if settled else spoken,
+            error=None if settled else error,
+        )
+        thread_id = (scope.live.thread_id if scope.live else None) or scope.thread_id
+        if (
+            not settled
+            and scope.live is not None
+            and self.post_progress_to_discord
+            and self.discord is not None
+        ):
+            try:
+                scope.live.finish(
+                    _receipt_card_for_intake(
+                        receipt, intake=intake, store=self.store, has_thread=bool(thread_id)
+                    ),
+                    summary=spoken,
+                )
+            except Exception:
+                pass
+        self._release_live_thread(thread_id, scope.run_id)
+        self._cook_backends.pop(scope.run_id, None)
+        try:
+            self._react_terminal(intake, status, thread_id=thread_id)
+        except Exception:
+            pass
+        self._set_presence("idle", "Discord OS")
+        return receipt
+
+    def _run_task(self, intake: TaskIntake, scope: _RunScope) -> RunReceipt:
         pin = self.backend.resolve_model(self.model)
         if intake.message_id:
             already = bool((intake.metadata or {}).get("inbound_claimed"))
@@ -488,6 +564,7 @@ class AgentOrchestrator:
             status=TaskStatus.RUNNING,
         )
         self._run_status[run_id] = TaskStatus.RUNNING
+        scope.task_id, scope.run_id = task_id, run_id
         self._set_presence("dnd", intake.text)
         replay_of = str((intake.metadata or {}).get("replay_of") or "").strip()
         if replay_of:
@@ -616,8 +693,10 @@ class AgentOrchestrator:
 
             note_origin_thread(job_thread_id)
             self._mark_thread_live(job_thread_id, run_id)
+            scope.thread_id = job_thread_id
             self._sync_forum_ticket_tags(intake, job_thread_id, TaskStatus.RUNNING)
         live = _LiveCard(self, intake.channel_id, job_thread_id, run_id)
+        scope.live = live
         resume_card = str((intake.metadata or {}).get("card_message_id") or "").strip()
         if resume_card:
             live.message_id = resume_card

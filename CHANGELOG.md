@@ -52,6 +52,9 @@
 - Always on a shell tool remembers the command prefix (`git status`, `pytest`, `npm run`), not the whole tool. Other shell commands still park a card.
 - Compound commands (`;`, `&&`, pipes, redirects, `$(...)`) and interpreters (`bash`, `python -c`, `env`, `curl`, ...) are allowed once and never remembered.
 
+### A crash inside a job settles it
+- Any exception inside `run_task` after the run exists now fails the run with an `internal error` reason, finishes the live card, and frees the job thread. Before, the run stayed RUNNING, the card froze, and every later message in that thread was swallowed as a steer until restart. JobPool receipts now carry the real run id.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
