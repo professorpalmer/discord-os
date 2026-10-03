@@ -341,3 +341,30 @@ def test_collector_reads_canned_gh_json(tmp_path: Path):
     ]
     assert failures[0].event_id == f"ci-watch:{SLUG}#68:abc123def4567890"
     assert failures[1].event_id == f"ci-watch:{SLUG}@master:9999aaaabbbbcccc"
+
+
+def test_ci_watch_tick_is_throttled_per_channel(tmp_path, monkeypatch):
+    from agent_discord.orchestration import listen as listen_mod
+    from agent_discord.persistence.sqlite import SQLiteStore
+
+    store = SQLiteStore(tmp_path / "throttle.sqlite3")
+    store.initialize()
+    store.set_host_control("ch", armed=True)
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "agent_discord.orchestration.ci_watch.tick_ci_watch",
+        lambda *a, **k: calls.append(k.get("channel_id")) or [],
+    )
+
+    class _Orch:
+        host_repos = ()
+
+    for _ in range(3):
+        listen_mod._tick_ci_watch_best_effort(
+            _Orch(), None, store, channel_id="ch", workspace_id="ws", env={}
+        )
+    listen_mod._tick_ci_watch_best_effort(
+        _Orch(), None, store, channel_id="other", workspace_id="ws", env={}
+    )
+    assert calls == ["ch", "other"]
+    store.close()

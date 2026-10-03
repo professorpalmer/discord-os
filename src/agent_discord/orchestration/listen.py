@@ -1305,9 +1305,15 @@ def _tick_ci_watch_best_effort(
     workspace_id: str,
     env: Optional[Mapping[str, str]],
 ) -> None:
-    """Red CI on this channel's bound checkout → one Fix CI wake. Best-effort."""
+    """Red CI on this channel's bound checkout → one Fix CI wake. Best-effort.
+
+    Each poll runs gh against GitHub, so it is throttled per channel
+    (DISCORD_OS_CI_WATCH_INTERVAL_S, default 300) rather than run every tick.
+    """
 
     if not _channel_is_armed(store, channel_id):
+        return
+    if not _ci_watch_due(store, channel_id, env):
         return
     try:
         from agent_discord.orchestration.ci_watch import tick_ci_watch
@@ -1323,6 +1329,35 @@ def _tick_ci_watch_best_effort(
         )
     except Exception:
         pass
+
+
+CI_WATCH_INTERVAL_ENV = "DISCORD_OS_CI_WATCH_INTERVAL_S"
+CI_WATCH_DEFAULT_INTERVAL_S = 300
+
+
+def _ci_watch_due(store: Any, channel_id: str, env: Optional[Mapping[str, str]]) -> bool:
+    """True at most once per interval per channel; the next slot persists in SQLite."""
+
+    import os
+
+    from agent_discord.orchestration.service import HOST_PREFS_WORKSPACE
+
+    source = env if env is not None else os.environ
+    try:
+        interval = max(30, int(str(source.get(CI_WATCH_INTERVAL_ENV) or "").strip() or 0))
+    except ValueError:
+        interval = 0
+    interval = interval or CI_WATCH_DEFAULT_INTERVAL_S
+    key = f"ci_watch_next_at:{(channel_id or '').strip()}"
+    now = int(time.time())
+    try:
+        due_at = int(str(store.get_preference(HOST_PREFS_WORKSPACE, key) or "0") or 0)
+        if now < due_at:
+            return False
+        store.set_preference(HOST_PREFS_WORKSPACE, key, str(now + interval))
+    except Exception:
+        return False
+    return True
 
 
 def _tick_morning_summary_best_effort(
