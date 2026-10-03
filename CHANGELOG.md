@@ -66,6 +66,9 @@
 ### Asks while Off or halted get one reply
 - A typed ask or a HOST Ask-modal ask that arrives while the host is Off or spend-halted now gets one reply saying why it did not start, plus the HOST card with On / More > Halt. Repeats stay quiet until an ask runs again. Before, these asks were dropped silently.
 
+### Lineage keys are per run
+- `node_key` now includes the run id. Two runs with the same ask text used to share the intake node, so the second run's lineage was pinned to the first run and `discord-os lineage` showed it empty. Existing rows keep their keys.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

@@ -1,7 +1,8 @@
 """Execution lineage DAG. SQLite on this Mac, not a Temporal cluster.
 
-node_key = sha256(step, input hash, parent keys). A steer or retry is an
-upstream edit: descendants are the only steps that need another run.
+node_key = sha256(run_id, step, input hash, parent keys). Two runs with the
+same ask get their own nodes. A steer or retry is an upstream edit:
+descendants are the only steps that need another run.
 """
 
 from __future__ import annotations
@@ -42,11 +43,14 @@ def input_sha256(body: str) -> str:
     return hashlib.sha256((body or "").encode("utf-8")).hexdigest()
 
 
-def node_key(step: str, digest: str, parent_keys: Sequence[str] = ()) -> str:
+def node_key(
+    step: str, digest: str, parent_keys: Sequence[str] = (), *, run_id: str
+) -> str:
     payload = json.dumps(
         {
             "input": digest,
             "parents": list(parent_keys),
+            "run": run_id,
             "step": step,
         },
         separators=(",", ":"),
@@ -66,11 +70,11 @@ def record_node(
     artifact_id: str = "",
     status: str = "complete",
 ) -> str:
-    """Idempotent insert. Returns the node key."""
+    """Idempotent insert within one run. Returns the node key."""
 
     digest = input_sha256(body)
     parents = tuple(k for k in parent_keys if k)
-    key = node_key(step, digest, parents)
+    key = node_key(step, digest, parents, run_id=run_id)
     writer = getattr(store, "upsert_lineage_node", None)
     if callable(writer):
         writer(

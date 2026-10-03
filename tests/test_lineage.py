@@ -27,10 +27,28 @@ from agent_discord.puppetmaster.fake import FakePuppetmasterBackend
 def test_node_key_is_stable():
     assert "intake" in LINEAGE_STEPS
     digest = input_sha256("hello")
-    first = node_key("intake", digest, ())
-    second = node_key("intake", digest, ())
+    first = node_key("intake", digest, (), run_id="r1")
+    second = node_key("intake", digest, (), run_id="r1")
     assert first == second
-    assert first != node_key("settle", digest, ())
+    assert first != node_key("settle", digest, (), run_id="r1")
+    assert first != node_key("intake", digest, (), run_id="r2")
+
+
+def test_same_ask_in_two_runs_keeps_both_lineages(tmp_path: Path):
+    """Audit C1: the second run's intake node used to collide with the first."""
+
+    store = SQLiteStore(tmp_path / "collide.sqlite3")
+    store.initialize()
+    for run in ("run-a", "run-b"):
+        intake = record_node(store, run_id=run, task_id=f"t-{run}", step="intake", body="ship it")
+        record_node(
+            store, run_id=run, task_id=f"t-{run}", step="settle", body="done", parent_keys=(intake,)
+        )
+    for run in ("run-a", "run-b"):
+        nodes = list_nodes(store, run)
+        assert sorted(n.step for n in nodes) == ["intake", "settle"], run
+        assert all(n.run_id == run for n in nodes)
+    store.close()
 
 
 def test_descendants_to_replay_skips_unrelated(tmp_path: Path):
