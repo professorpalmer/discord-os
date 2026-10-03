@@ -35,6 +35,9 @@
 ### Worker environment is an allowlist
 - Local workers no longer inherit the whole host environment. They get locale, home, shell, proxy and CA settings, `SSH_AUTH_SOCK`, `GIT_*`, `PUPPETMASTER_*`, the gate stamps, and `GH_TOKEN` / `GITHUB_TOKEN` for `gh`. The backend adds the OpenRouter key. `DISCORD_BOT_TOKEN`, cloud keys and other host variables stay out.
 
+### Gate knows every Puppetmaster tool
+- `apply_hashline` maps to edit and `browser_*` tools map to browser. Before, the gate denied them as an unknown class on every local cook.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

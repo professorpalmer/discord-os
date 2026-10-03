@@ -219,3 +219,51 @@ def test_agentic_child_env_has_only_the_vault_key(tmp_path: Path, monkeypatch) -
     env = captured["env"]
     assert env["OPENROUTER_API_KEY"] == "sk-or-v1-from-vault"
     assert "DISCORD_BOT_TOKEN" not in env
+
+
+# Tool names puppetmaster-ai 1.27.39 AgenticAdapter._execute_tool dispatches.
+PUPPETMASTER_AGENTIC_TOOLS = {
+    "read_file": "read",
+    "read_offload": "read",
+    "list_dir": "read",
+    "search_code": "read",
+    "graph_search": "read",
+    "graph_context": "read",
+    "write_file": "write",
+    "edit_file": "edit",
+    "apply_hashline": "edit",
+    "delete_file": "write",
+    "run_terminal": "shell",
+    "web_fetch": "network",
+    "browser_navigate": "browser",
+    "browser_snapshot": "browser",
+    "browser_click": "browser",
+    "browser_type": "browser",
+    "browser_scroll": "browser",
+    "browser_back": "browser",
+    "browser_get_text": "browser",
+    "browser_network": "browser",
+    "browser_screenshot": "browser",
+    "browser_auth_handoff": "browser",
+}
+
+
+def test_every_puppetmaster_tool_has_a_gate_class() -> None:
+    """Audit E2-9: an unmapped tool fails closed on every local cook."""
+
+    from agent_discord.orchestration.ask_gate import normalize_tool_class
+
+    for name, klass in PUPPETMASTER_AGENTIC_TOOLS.items():
+        assert normalize_tool_class(name) == klass, name
+
+
+def test_installed_puppetmaster_tools_are_all_mapped() -> None:
+    """When puppetmaster-ai is importable, diff its live tool names too."""
+
+    import pytest
+
+    agentic = pytest.importorskip("puppetmaster.adapters.agentic")
+    from agent_discord.orchestration.ask_gate import normalize_tool_class
+
+    for name in getattr(agentic, "_BROWSER_TOOL_NAMES", ()):
+        assert normalize_tool_class(name) == "browser", name

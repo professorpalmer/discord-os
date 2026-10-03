@@ -88,6 +88,7 @@ _TOOL_CLASS_ALIASES = {
     "deletefile": "write",
     "edit_file": "edit",
     "editfile": "edit",
+    "apply_hashline": "edit",
     "run_terminal": "shell",
     "runterminal": "shell",
     "web_fetch": "network",
@@ -157,6 +158,9 @@ def normalize_tool_class(raw: str) -> Optional[str]:
     mapped = _TOOL_CLASS_ALIASES.get(text)
     if mapped is not None:
         return mapped
+    # Puppetmaster browser tools: browser_navigate, browser_click, ...
+    if text.startswith("browser_"):
+        return "browser"
     # Strip provider prefixes like mcp__server__tool
     if "__" in text:
         tail = text.rsplit("__", 1)[-1]
