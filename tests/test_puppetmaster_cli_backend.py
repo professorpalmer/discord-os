@@ -240,8 +240,11 @@ def test_provider_failure_spoken_adapter_lock_missing_cli_no_model():
     from agent_discord.puppetmaster.backend import provider_failure_spoken
 
     lock = provider_failure_spoken("platform lock: cursor-only host")
-    assert "OpenRouter" in lock
-    assert "connect" in lock.lower()
+    assert "platform lock" in lock.lower()
+    assert "agentic adapter disabled" in lock.lower()
+    # Audit 2026-10-02 F3: discord-os connect cannot re-enable an adapter.
+    assert "discord-os connect" not in lock.lower()
+    assert "puppetmaster platform enable agentic" in lock
     assert "locked to Cursor" not in lock
     assert "Unlock" not in lock
 

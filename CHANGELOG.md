@@ -154,6 +154,9 @@
 ### A shared Puppetmaster platform lock cannot disable cooks
 - Workers run with `PUPPETMASTER_ONLY_ADAPTERS=agentic`, which Puppetmaster reads ahead of the shared `~/.puppetmaster/platform.json`. Before, another tool disabling adapters there failed Discord OS cooks with `adapter(s) agentic are disabled` (two production runs).
 
+### Platform-lock failures name the real fix
+- A Puppetmaster platform-lock refusal now says to run `puppetmaster platform enable agentic` on the host that cooked. Before, it said to run `discord-os connect`, which only stores a key.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

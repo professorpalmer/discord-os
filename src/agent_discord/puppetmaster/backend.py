@@ -648,9 +648,11 @@ def provider_failure_spoken(text: str) -> str:
         or "locked to cursor" in lower
         or "cursor-only" in lower
     ):
+        # Not a key problem: discord-os connect cannot re-enable an adapter.
         return (
-            "OpenRouter agentic compute is required on this host. "
-            "Run discord-os connect, then retry."
+            "Puppetmaster's platform lock has the agentic adapter disabled. "
+            "On the host that cooked, run `puppetmaster platform enable agentic`, "
+            "then retry."
         )
     if (
         "missing_cli" in lower
