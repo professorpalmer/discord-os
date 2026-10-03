@@ -585,6 +585,43 @@ def test_roles_modal_adds_operator_role(tmp_path: Path):
     store.close()
 
 
+def test_poll_opens_the_modal_as_the_only_response(tmp_path: Path):
+    """Audit 2026-10-02 G1-7: a deferred ACK first meant the form never opened."""
+
+    from agent_discord.host.panel import POLL_MODAL_ID
+
+    store = SQLiteStore(tmp_path / "poll.sqlite3")
+    store.initialize()
+    store.set_host_control("ch", armed=True)
+    store.add_operator("owner-7", role="owner")
+    bodies: list[dict] = []
+
+    def opener(request, timeout=10):
+        if getattr(request, "data", None):
+            bodies.append(json.loads(request.data.decode("utf-8")))
+        return _FakeResponse(b"")
+
+    action = handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix",
+            "token": "tok",
+            "application_id": "app-1",
+            "user": {"id": "owner-7"},
+            "data": {"custom_id": MORE_ID, "values": [POLL_ID]},
+            "message": {"id": "panel-1"},
+        },
+        opener=opener,
+    )
+    assert action == "poll"
+    assert len(bodies) == 1
+    assert bodies[0]["type"] == 9
+    assert bodies[0]["data"]["custom_id"] == POLL_MODAL_ID
+    store.close()
+
+
 def test_panel_last_job_names_need_live_or_last(tmp_path: Path):
     store = SQLiteStore(tmp_path / "focus.sqlite3")
     store.initialize()

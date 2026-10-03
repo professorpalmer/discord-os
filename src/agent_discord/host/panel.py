@@ -1142,6 +1142,10 @@ def handle_gateway_interaction(
         content=PANEL_DENIED_SPOKEN,
     ):
         return "denied"
+    if action == "poll":
+        # A modal must be the first and only response to this interaction.
+        _ack_interaction(payload, poll_modal_payload(), opener=opener)
+        return action
     _ack_interaction(payload, {"type": CALLBACK_DEFERRED_UPDATE}, opener=opener)
     if action == "halt":
         toggle_spend_halted(store)
@@ -1163,10 +1167,6 @@ def handle_gateway_interaction(
             _publish_job_card(store, channel_id, payload, token=token, opener=opener)
         except Exception as exc:
             print(f"panel job card failed: {exc}", flush=True)
-        return action
-
-    if action == "poll":
-        _ack_interaction(payload, poll_modal_payload(), opener=opener)
         return action
 
     if action == "clear-needs":

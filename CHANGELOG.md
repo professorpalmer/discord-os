@@ -176,6 +176,9 @@
 ### Non-operator panel taps get a Denied reply
 - A non-operator tapping a HOST panel action now gets an ephemeral Denied instead of a silent no-op. Who may act is unchanged.
 
+### Preference poll form opens
+- More > Post preference poll opens its form as the only response. Before, it acknowledged the tap first, then tried to open the form as a second response, which Discord rejected.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
