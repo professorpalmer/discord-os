@@ -127,7 +127,7 @@ class AgenticPuppetmasterBackend:
         secret = self._resolve_secret()
         if secret:
             child_env["OPENROUTER_API_KEY"] = secret
-        self._attach_gate_env(child_env, request, workdir)
+        self._attach_gate_env(child_env, request)
 
         try:
             proc = self._spawn_agentic_popen(
@@ -309,7 +309,7 @@ class AgenticPuppetmasterBackend:
         secret = self._resolve_secret()
         if secret:
             child_env["OPENROUTER_API_KEY"] = secret
-        self._attach_gate_env(child_env, request, workdir)
+        self._attach_gate_env(child_env, request)
 
         try:
             proc = self._spawn_agentic_popen(
@@ -483,16 +483,20 @@ class AgenticPuppetmasterBackend:
         confirmed = self._statuses.get(rid) == TaskStatus.CANCELLED
         return cancel_receipt(confirmed=confirmed, run_id=rid)
 
-    def _attach_gate_env(
-        self, child_env: dict[str, str], request: DispatchRequest, workdir: Optional[str]
-    ) -> None:
-        """Stamp the live ask-gate file-queue so a PreToolUse hook can hold."""
+    def _attach_gate_env(self, child_env: dict[str, str], request: DispatchRequest) -> None:
+        """Stamp the live ask-gate file-queue so a PreToolUse hook can hold.
+
+        The queue lives under the host workspace, where listen drains it. Never
+        under the worker's checkout: listen would not see it, and the worker
+        could write its own results there.
+        """
 
         try:
             from agent_discord.orchestration.gate_hook import attach_gate_env
 
-            ws = workdir or (str(self.cwd) if self.cwd else None)
-            attach_gate_env(child_env, run_id=request.run_id, workspace=ws)
+            attach_gate_env(
+                child_env, run_id=request.run_id, workspace=self._host_workspace()
+            )
         except Exception:
             pass
 

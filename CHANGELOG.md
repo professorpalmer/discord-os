@@ -29,6 +29,9 @@
 - When a run's cwd would be the state dir (`.agent-discord`), anything inside it, or the non-repo directory that holds it and `.env`, the worker runs in an owner-only scratch dir instead (`~/.discord-os/scratch`, or `DISCORD_OS_SCRATCH_DIR`).
 - The gate hook refuses read tools on `.env` / `.env.*` (templates excepted), `.netrc`, `.git-credentials`, key files, SQLite files, and anything under `.agent-discord`, `.ssh`, `.aws` or `.gnupg`.
 
+### Gate queue always under the host workspace
+- Local cooks stamped the ask-gate queue at `<checkout>/gates/<run>`, while listen drained `<workspace>/gates`. Held tool calls in a realm checkout never parked a card and self-denied after the timeout. The queue now always lives under the host workspace, outside the worker's checkout.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

@@ -135,3 +135,30 @@ def test_repo_reach_line_names_scratch(tmp_path: Path) -> None:
     text = host_reach_block(repos=(), cwd=tmp_path / "scratch")
     assert "Discord OS runtime" not in text
     assert "scratch" in text
+
+
+def test_gate_queue_lives_where_listen_drains(tmp_path: Path) -> None:
+    """Audit E2-4: a realm checkout cwd must not move the gate queue."""
+
+    from agent_discord.orchestration.gate_hook import (
+        ENV_GATE_DIR,
+        build_request,
+        enqueue_request,
+        list_pending,
+        resolve_gate_root,
+    )
+
+    _root, workspace = _runtime(tmp_path)
+    repo = tmp_path / "realm"
+    repo.mkdir()
+    backend = AgenticPuppetmasterBackend(
+        cli="puppetmaster", pin=AGENTIC_MODEL_PIN, cwd=repo, workspace=workspace, env={}
+    )
+    child_env: dict[str, str] = {}
+    backend._attach_gate_env(child_env, _request(cwd=str(repo)))
+    run_dir = Path(child_env[ENV_GATE_DIR])
+    assert not str(run_dir).startswith(str(repo))
+    enqueue_request(run_dir, build_request(run_id="run-1", tool_name="write_file"))
+    drained_root = resolve_gate_root(workspace=workspace, env={})
+    assert run_dir.parent == drained_root
+    assert list_pending(drained_root / run_dir.name)
