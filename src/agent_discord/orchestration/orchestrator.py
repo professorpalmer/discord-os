@@ -530,6 +530,8 @@ class AgentOrchestrator:
         # Deterministic "status of <repo>" answer. cli listen wires the real
         # collector; unset means every status ask still cooks.
         self.repo_status_collector: Optional[Callable[..., Any]] = None
+        # Red-CI poll for bound realms. None uses the real gh collector.
+        self.ci_failure_collector: Optional[Callable[..., Any]] = None
         self.retry_backoff_s = float(retry_backoff_s)
         self.presence = presence
         # Injectable SSH runner for Path A remote cook tests (argv, *, timeout_seconds).

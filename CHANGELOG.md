@@ -234,6 +234,9 @@
 ### Repo status without a cook
 - "Any open PRs on X?", "issues on X" and "status of X" for a bound or named repo now answer with one card built from `gh` and git (branch, ahead/behind, last commit, CI, open PRs with checks, open issues). No worker runs and no OpenRouter spend. Also `discord-os repo status [NAME] [--json]`.
 
+### CI watcher with Fix CI
+- A red check on an open PR to main/dev, or a red default branch, on a bound realm's repo posts one card per failing commit with a Fix CI button. The button is operator-only and starts an implement job through JobPool and the write gate, not pre-approved. Default on. `DISCORD_OS_CI_WATCH=0` disables it.
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord

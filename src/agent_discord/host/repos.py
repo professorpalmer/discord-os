@@ -104,6 +104,12 @@ def host_github_slugs(
     return frozenset(slugs)
 
 
+def github_slugs_for(path: Path | str) -> tuple[str, ...]:
+    """Lowercase owner/repo of one checkout's GitHub remotes."""
+
+    return tuple(sorted(_github_remote_slugs(Path(path).expanduser())))
+
+
 def _github_remote_slugs(path: Path) -> set[str]:
     try:
         proc = subprocess.run(

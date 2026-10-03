@@ -923,6 +923,11 @@ def handle_gateway_interaction(
     custom_id = ""
     if isinstance(data, dict):
         custom_id = str(data.get("custom_id") or "")
+    fix_ci = _handle_fix_ci_click(
+        store, payload, custom_id, opener=opener, on_ask=on_ask
+    )
+    if fix_ci is not None:
+        return fix_ci
     confirm = ask_confirm_action_from_custom_id(custom_id)
     if confirm is not None:
         if not _operator_may_click(store, payload, "ask-confirm", opener=opener):
@@ -1410,6 +1415,54 @@ def _job_code_for_run(store: Any, run_id: str) -> str:
     except Exception:
         return ""
     return str(task.get("job_code") or "").strip()
+
+
+def _handle_fix_ci_click(
+    store: Any,
+    payload: Mapping[str, Any],
+    custom_id: str,
+    *,
+    opener: Any,
+    on_ask: Optional[Callable[[str, str], None]],
+) -> Optional[str]:
+    """Fix CI / morning Cook: operator-only, then the ask goes through JobPool.
+
+    The prompt is never pre-approved here — ``on_ask`` enqueues it like a typed
+    ask, so the write gate holds it exactly as it holds any other cook.
+    """
+
+    from agent_discord.orchestration.ci_watch import (
+        parse_fix_ci_custom_id,
+        stored_fix_ci_prompt,
+    )
+
+    action = parse_fix_ci_custom_id(custom_id)
+    if action is None:
+        return None
+    if not _operator_may_click(store, payload, "fix-ci", opener=opener):
+        return "denied"
+    interaction_id, ix_token = interaction_ids(payload)
+    if interaction_id and ix_token:
+        try:
+            from agent_discord.discord.rest import callback_interaction
+
+            callback_interaction(
+                interaction_id=interaction_id,
+                interaction_token=ix_token,
+                payload={"type": CALLBACK_DEFERRED_UPDATE},
+                opener=opener,
+            )
+        except Exception:
+            pass
+    prompt = stored_fix_ci_prompt(store, action)
+    if not prompt:
+        return "fix-ci-expired"
+    if callable(on_ask):
+        try:
+            on_ask(prompt, interaction_user_id(payload))
+        except Exception:
+            pass
+    return "fix-ci"
 
 
 def _operator_may_click(

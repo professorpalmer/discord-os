@@ -1007,6 +1007,14 @@ def drain_inbound(
             )
         except Exception:
             pass
+        _tick_ci_watch_best_effort(
+            orchestrator,
+            discord,
+            store,
+            channel_id=channel_id,
+            workspace_id=workspace_id,
+            env=env,
+        )
         _tick_host_liveness_best_effort(
             discord,
             store,
@@ -1272,6 +1280,35 @@ def _post_queued_ack(discord: Any, channel_id: str, thread_id: Optional[str]) ->
                 "Queued. Will apply when this cook can take it.",
                 thread_id=thread_id,
             )
+    except Exception:
+        pass
+
+
+def _tick_ci_watch_best_effort(
+    orchestrator: Any,
+    discord: Any,
+    store: Any,
+    *,
+    channel_id: str,
+    workspace_id: str,
+    env: Optional[Mapping[str, str]],
+) -> None:
+    """Red CI on this channel's bound checkout → one Fix CI wake. Best-effort."""
+
+    if not _channel_is_armed(store, channel_id):
+        return
+    try:
+        from agent_discord.orchestration.ci_watch import tick_ci_watch
+
+        tick_ci_watch(
+            store,
+            discord,
+            channel_id=channel_id,
+            workspace_id=workspace_id,
+            repos=getattr(orchestrator, "host_repos", None) or (),
+            env=env,
+            collector=getattr(orchestrator, "ci_failure_collector", None),
+        )
     except Exception:
         pass
 
