@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.1
 
 ### Workers can run jobs on Puppetmaster 1.22.19 and later
 - Puppetmaster refuses a pinned model that its registry does not list as enabled. The shared `~/.puppetmaster/models.json` usually does not list the Discord OS pin, so 0.6.0 workers failed before they started. Discord OS now writes its own one-entry registry for its pinned model into its Puppetmaster state folder and gives it to each worker. An operator `PUPPETMASTER_MODELS_PATH` still wins.
