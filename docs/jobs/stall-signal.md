@@ -1,4 +1,4 @@
-# Wave 6 — Live stall one-liner (opt-in)
+# Live stall line (opt-in)
 
 After **N steers without progress**, the Live card may show one quiet stall line.
 

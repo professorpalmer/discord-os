@@ -93,7 +93,6 @@ Puppetmaster may exit `swarm exited with incomplete tasks` after an analyze-only
 answer as Completed (not a false failed Need). Provider auth / missing-CLI
 failures still fail closed.
 
-
 ## ARG_MAX / oversized prompts
 
 Huge Discord prompts can exceed OS ``ARG_MAX`` when Discord OS spawns

@@ -12,9 +12,7 @@ _ALLOWED = re.compile(r"never\s+\"?graham", re.IGNORECASE)
 
 def _product_text_files():
     yield from (ROOT / "src").rglob("*.py")
-    for path in (ROOT / "docs").rglob("*.md"):
-        if "co-work" not in path.parts:
-            yield path
+    yield from (ROOT / "docs").rglob("*.md")
     for name in ("README.md", "README.pypi.md", "AGENTS.md"):
         yield ROOT / name
 

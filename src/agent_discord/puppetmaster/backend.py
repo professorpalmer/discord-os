@@ -438,6 +438,45 @@ def resolved_state_dir(base: Optional[Mapping[str, str]] = None) -> str:
     return str(Path.home() / ".discord-os" / "puppetmaster")
 
 
+PM_MODELS_PATH_ENV = "PUPPETMASTER_MODELS_PATH"
+WORKER_REGISTRY_NAME = "models.json"
+
+
+def ensure_worker_registry(state_dir: str | Path, model: str) -> str:
+    """Write a one-entry Puppetmaster registry for the pinned model. Return its path.
+
+    Puppetmaster 1.22.19+ refuses an explicit pin that its registry does not
+    list as enabled, and the shared ``~/.puppetmaster/models.json`` belongs to
+    the operator. Discord OS keeps its own registry in its PM state dir, the
+    way Marionette does. An operator ``PUPPETMASTER_MODELS_PATH`` still wins.
+    """
+
+    name = (model or "").strip()
+    path = Path(state_dir).expanduser() / WORKER_REGISTRY_NAME
+    entry = {
+        "id": f"agentic/{name}",
+        "adapter": "agentic",
+        "adapter_model_name": name,
+        "capability_score": 70,
+        "tags": ["agentic", "openrouter", "discord-os"],
+        "notes": "Written by Discord OS for its pinned worker model.",
+        "enabled": True,
+        "payload_defaults": {"provider": "openrouter"},
+        "billing": "api",
+    }
+    body = json.dumps({"schema_version": 1, "models": [entry]}, indent=2) + "\n"
+    try:
+        if path.read_text(encoding="utf-8") == body:
+            return str(path)
+    except OSError:
+        pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(body, encoding="utf-8")
+    os.replace(tmp, path)
+    return str(path)
+
+
 # Puppetmaster reads this allowlist ahead of the shared ~/.puppetmaster
 # platform.json (platform_lock.enabled_adapters, 1.27.39).
 PM_ONLY_ADAPTERS_ENV = "PUPPETMASTER_ONLY_ADAPTERS"

@@ -12,25 +12,23 @@ over new planes.
 | Recipe | Where | Cadence note |
 |---|---|---|
 | Parameterized recipe inputs (Goose-shaped) | [parameterized.md](parameterized.md) | Docs only — no YAML runtime |
-| Wave 7 TTFP / cold-start | [wave7-ttfp-demo.md](../co-work/wave7-ttfp-demo.md) | Stopwatch to first Done; Discord phone |
-| Wave 6 board + brain demo | [wave6-board-brain-demo.md](../co-work/wave6-board-brain-demo.md) | Discord phone; spend meter glance |
-| Wave 5 board + brain demo | [co-work/wave5-board-brain-demo](../co-work/wave5-board-brain-demo.md) | desk-pack → brain → handoff envelope → board catch-up |
-| Shared-desk demo (&lt;15 min) | [co-work/shared-desk-demo](../co-work/shared-desk-demo.md) | Pair×2, desk-pack, dual ask, handoff, overnight brief, gate park |
-| Board catch-up (ADR/PR) | [co-work/board-catchup](../co-work/board-catchup.md) | Catch-up + digest schedules |
-| Brain lake / meat-proxy cut | [co-work/brain-lake](../co-work/brain-lake.md) | `add brain` + handoff lake context |
-| Overnight brief | [co-work/overnight-brief](../co-work/overnight-brief.md) | `schedule` + Catch-up `skipped_while_disarmed` |
-| Desk-pack inject | [co-work/desk-pack](../co-work/desk-pack.md) | realm+memory(+wiki/github) |
-| Handoff / peer-task | [co-work/handoff](../co-work/handoff.md) | JobPool-only |
-| Schedule deepen | [co-work/schedule](../co-work/schedule.md) | `--list` / `--every` |
-| Forum lane | [co-work/forum-lane](../co-work/forum-lane.md) | Existing tags only; never auto-create `available_tags` |
-| Cross-host RO | [co-work/cross-host-ro](../co-work/cross-host-ro.md) | `discord-os host hosts`; fail-closed allowlist |
-| Mailbox | [co-work/mailbox-park](../co-work/mailbox-park.md) | **PARKED** |
+| Wave 7 TTFP / cold-start | [ttfp-demo.md](ttfp-demo.md) | Stopwatch to first Done; Discord phone |
+| Wave 6 board + brain demo | [board-brain-demo.md](board-brain-demo.md) | Discord phone; spend meter glance |
+| Shared-desk demo (&lt;15 min) | [shared-desk-demo](shared-desk-demo.md) | Pair×2, desk-pack, dual ask, handoff, overnight brief, gate park |
+| Board catch-up (ADR/PR) | [board-catchup](board-catchup.md) | Catch-up + digest schedules |
+| Brain lake / meat-proxy cut | [brain-lake](../memory/brain-lake.md) | `add brain` + handoff lake context |
+| Overnight brief | [overnight-brief](overnight-brief.md) | `schedule` + Catch-up `skipped_while_disarmed` |
+| Desk-pack inject | [desk-pack](../realms/desk-pack.md) | realm+memory(+wiki/github) |
+| Handoff / peer-task | [handoff](../jobs/handoff.md) | JobPool-only |
+| Schedule deepen | [schedule](../jobs/schedule.md) | `--list` / `--every` |
+| Forum lane | [forum-lane](../realms/forum-lane.md) | Existing tags only; never auto-create `available_tags` |
+| Cross-host RO | [cross-host-status](../host/cross-host-status.md) | `discord-os host hosts`; fail-closed allowlist |
+| Mailbox | Not shipped. Use job threads and handoff. | **PARKED** |
 
 ## Policy / positioning
 
 - HARD locks: [host/policy](../host/policy.md)
 - Vs nearby products: [COMPARISON](../COMPARISON.md)
-- Lift notes (no CRHQ clone): [co-work/crhq-audit](../co-work/crhq-audit.md)
 
 ## What is not a recipe
 

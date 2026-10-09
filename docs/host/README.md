@@ -1,6 +1,5 @@
 # Host
 
-
 **HARD locks:** [policy.md](policy.md) — SSH bridge OPT-IN, no forum auto-tags, Path A never silent local, single gateway, Update=PyPI, voice local TTS/memo, spend honesty, desk single-user OK, slash self-heal, CU/docker PARKED.
 The host is the long-running process on this Mac: listen loop, JobPool, SQLite, Puppetmaster workers. Discord is only the remote.
 
@@ -30,7 +29,6 @@ DISCORD_OS_HOSTS=lab:ssh:cary@lab.local,nas:path:/Volumes/work
 Bind a channel: `bind host lab` (or `/bind host lab`). Doctor reports allowlist status, **OK**s cook-capable ssh hosts (`cook via ssh BatchMode` plus remote `cli=` / `openrouter=env|vault` — never secrets), **WARN**s unreachable ssh, missing remote `puppetmaster`/`agentic`, or missing remote OpenRouter (env/vault) so phone sees Need before a blind cook Deny, and **FAIL**s unsafe entries (duplicate ids, empty target, ssh targets that look like flag/password soup).
 
 **Path A (remote cook).** Oversized prompts use SSH **stdin** handoff (not argv) so OS ``ARG_MAX`` does not abort the cook — see [compute README](../compute/README.md).  Allowlisted `kind=ssh` hosts cook off this Mac: control plane builds `host_runner_argv` (`ssh -o BatchMode=yes user@host …`) and runs remote `puppetmaster agentic` (OpenRouter). Doctor/preflight probe checks SSH **and** remote CLI + OpenRouter presence (no key tunnel). Probe fails or `DISCORD_OS_SSH_COOK=0` → spoken Deny — never a silent local cook. Remote must already have OpenRouter configured (key never on argv). Live progress pipe: remote agentic stdout/stderr → Discord `PROGRESS` cards while SSH runs (same parsers as local). Phone **Cancel** kills the local ssh process group and best-effort remote pid / ControlMaster; failure speaks **Cancel unconfirmed** (no false Cancelled paint).
-
 
 `discord-os setup` / `host start` detaches it and posts the HOST card: On, Off, Ask, a More menu (Pair / Halt or Resume / Clear failed Needs / Gate / Roles / GitHub / Files here or on host / Terminal on host / Browser here or on host), and Jobs. Dest is a noun: **here** stays in Discord (the tapping client — phone or desktop — opens the link or reads the listing). **host** opens a GUI on the listen machine. Discord does not send which client tapped; presence `client_status` is not a dest. The job line and select are a deterministic briefing over SQLite: parked / failed first, then waiting-on-CI, then live, then last Done. Not a second board. Selecting a job answers **ephemerally** — status line, job code, a link to that job's thread card, and the same buttons (**Dismiss** on a failed Need, Continue / Retry on a done one). It never posts a second copy of the job card into the HOST channel: one live card per job, in its thread. Dismiss / ack / cancel settle immediately refresh the HOST Jobs select (and Need line); if the panel message id is missing the host recovers or repaints it, else speaks Need once. Message intake is REST. A Gateway is open **only** so those controls work. Do not run a second bot process on the same token. Discord has no tabs — the More select is the grouping. Pair / Gate open ephemeral Confirm menus; Roles opens the role-id **modal** (not an ephemeral Roles fantasy). More → Post preference poll is a non-blocking survey only — never a live gate replace. HOST Jobs select labels prefix Need / Live / Done; panel accent follows the top job.
 
@@ -148,6 +146,12 @@ the host channel (or `DISCORD_OS_STATUS_THREAD_ID`) on **On**, `/status`, and
 listen on-change. Debounced. Never mutates power. See
 [status.md](status.md).
 
+## Worker sandbox
+
+On macOS each local worker runs under `sandbox-exec`: host secrets and the
+Discord OS workspace are hidden, and writes stay in the job's checkout, temp,
+and caches. `DISCORD_OS_SANDBOX=0` turns it off. See [sandbox.md](sandbox.md).
+
 ## Features (opt-ins)
 
 Every opt-in is off by default. Turn one on with `/features`, HOST
@@ -169,7 +173,6 @@ overnight settles, open Needs, and bound-repo PR/CI state. Silent when there
 is nothing to report. Off by default. Turn it on with `/features` or
 `DISCORD_OS_MORNING=1`. See
 [morning.md](morning.md).
-
 
 ## Other host verbs
 
@@ -196,15 +199,15 @@ Opt-in local spoken Done on this Mac. Discord guild voice join re-checked:
 
 ## Mac Rich Presence (optional)
 
-Desktop Discord on this Mac can show HOST as an activity. Independent of bot gateway presence. Install `discord-os[presence]`. Default ON when `pypresence` and `DISCORD_APPLICATION_ID` are present. Set `DISCORD_OS_PRESENCE=0` to disable. Fail soft if Discord desktop is not running. See [band-b-pypresence](../co-work/band-b-pypresence.md).
+Desktop Discord on this Mac can show HOST as an activity. Independent of bot gateway presence. Install `discord-os[presence]`. Default ON when `pypresence` and `DISCORD_APPLICATION_ID` are present. Set `DISCORD_OS_PRESENCE=0` to disable. Fail soft if Discord desktop is not running. See [band-b-pypresence](presence.md).
 
 ## Ops webhook (optional side-channel)
 
-HTTP-only alerts to a Discord webhook. **Not** JobPool / HOST cards. Install `discord-os[webhook]`. Set `DISCORD_OS_WEBHOOK_URL` (comma-separated URLs ok). `DISCORD_OS_WEBHOOK=0` **or** empty URL = off. Fires host start / version kick (once), Job fail, Halt, and a debounced rate-limit storm hook. Fail soft — never blocks gateway, cards, or JobPool. See [band-c-webhook](../co-work/band-c-webhook.md).
+HTTP-only alerts to a Discord webhook. **Not** JobPool / HOST cards. Install `discord-os[webhook]`. Set `DISCORD_OS_WEBHOOK_URL` (comma-separated URLs ok). `DISCORD_OS_WEBHOOK=0` **or** empty URL = off. Fires host start / version kick (once), Job fail, Halt, and a debounced rate-limit storm hook. Fail soft — never blocks gateway, cards, or JobPool. See [band-c-webhook](webhook.md).
 
-## jishaku (Cary tip debugging only)
+## jishaku (maintainer debugging only)
 
-Not a product feature. Optional extra `discord-os[debug]`. Default **off.** `DISCORD_OS_JISHAKU=1` **and** owner / allowlisted operator. Flag alone does not enable. Cog attach parked (REST host; no second gateway). See [band-d-jishaku](../co-work/band-d-jishaku.md).
+Not a product feature. Optional extra `discord-os[debug]`. Default **off.** `DISCORD_OS_JISHAKU=1` **and** owner / allowlisted operator. Flag alone does not enable. Cog attach parked (REST host; no second gateway). See [band-d-jishaku](jishaku.md).
 
 ## Code
 

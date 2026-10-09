@@ -39,7 +39,9 @@ from agent_discord.puppetmaster.backend import (
     usage_from_cli_meta,
     _parse_safe_cli_completion,
     _safe_dispatch_prompt,
+    PM_MODELS_PATH_ENV,
     confine_worker_cwd,
+    ensure_worker_registry,
     iter_cli_process_events,
     measured_job_usage,
     prepend_early_job_id,
@@ -131,11 +133,7 @@ class AgenticPuppetmasterBackend:
 
         handoff, workdir = self._plan_agentic_spawn(request, stream=False)
 
-        child_env = worker_env(self.env)
-        secret = self._resolve_secret()
-        if secret:
-            child_env["OPENROUTER_API_KEY"] = secret
-        self._attach_gate_env(child_env, request)
+        child_env = self._worker_child_env(request)
 
         try:
             proc = self._spawn_agentic_popen(
@@ -313,11 +311,7 @@ class AgenticPuppetmasterBackend:
 
         handoff, workdir = self._plan_agentic_spawn(request, stream=True)
 
-        child_env = worker_env(self.env)
-        secret = self._resolve_secret()
-        if secret:
-            child_env["OPENROUTER_API_KEY"] = secret
-        self._attach_gate_env(child_env, request)
+        child_env = self._worker_child_env(request)
 
         try:
             proc = self._spawn_agentic_popen(
@@ -491,9 +485,10 @@ class AgenticPuppetmasterBackend:
 
         if not handoff.argv:
             raise OSError(spoken_arg_max_denied(detail="no puppetmaster interpreter"))
+        argv = self._sandboxed_argv(list(handoff.argv), workdir=workdir, child_env=child_env)
         try:
             return subprocess.Popen(
-                handoff.argv,
+                argv,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -507,6 +502,48 @@ class AgenticPuppetmasterBackend:
                 raise OSError(spoken_arg_max_denied(detail=str(exc)[:120])) from exc
             raise
 
+
+    def _worker_child_env(self, request: DispatchRequest) -> dict[str, str]:
+        """Allowlisted env, the provider key, gate stamps, and the model registry."""
+
+        child_env = worker_env(self.env)
+        secret = self._resolve_secret()
+        if secret:
+            child_env["OPENROUTER_API_KEY"] = secret
+        self._attach_gate_env(child_env, request)
+        if not str(child_env.get(PM_MODELS_PATH_ENV) or "").strip():
+            child_env[PM_MODELS_PATH_ENV] = ensure_worker_registry(
+                child_env["PUPPETMASTER_STATE_DIR"],
+                self.pin.adapter_name or self.pin.canonical,
+            )
+        return child_env
+
+    def _sandboxed_argv(
+        self, argv: list[str], *, workdir: Any, child_env: Mapping[str, str]
+    ) -> list[str]:
+        """Wrap the worker in the OS sandbox unless it is off or unavailable."""
+
+        from agent_discord.puppetmaster.sandbox import (
+            sandbox_enabled,
+            worker_profile,
+            wrap_argv,
+        )
+
+        # The host env decides: worker_env does not carry DISCORD_OS_SANDBOX.
+        host_env = dict(os.environ)
+        host_env.update(self.env or {})
+        if not workdir or not sandbox_enabled(host_env):
+            return argv
+        state = str(child_env.get("PUPPETMASTER_STATE_DIR") or "").strip()
+        if state:
+            # The worker cannot create it: its parent is the hidden workspace.
+            Path(state).mkdir(parents=True, exist_ok=True)
+        runtime: list[Path] = [Path.cwd() / ".env"]
+        workspace = self._host_workspace()
+        if workspace is not None:
+            runtime.extend([workspace, workspace.parent / ".env"])
+        profile = worker_profile(workdir=workdir, child_env=child_env, runtime_dirs=runtime)
+        return wrap_argv(argv, profile)
 
     def _register_child(self, run_id: str, proc: Any) -> None:
         rid = (run_id or "").strip()

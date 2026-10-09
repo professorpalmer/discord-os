@@ -1,4 +1,4 @@
-# Wave 5 — Handoff compensation NOTE (SagaLLM-lite)
+# Handoff compensation note
 
 When a **peer/handoff** JobPool cook settles **failed** or **cancelled**, Discord OS posts a parent-thread **NOTE** and records a lineage edge. This is **not** a distributed saga.
 
@@ -17,4 +17,4 @@ When a **peer/handoff** JobPool cook settles **failed** or **cancelled**, Discor
 
 ## Wave 6 extension
 
-Failed Live (not only handoff peers) also get a human **recovery beat** — see [wave6-recovery-beat](wave6-recovery-beat.md).
+Failed Live (not only handoff peers) also get a human **recovery beat** — see [wave6-recovery-beat](recovery-beat.md).
