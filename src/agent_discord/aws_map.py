@@ -106,17 +106,6 @@ def lookup_lifts(query: str, *, catalog: Optional[Mapping[str, Any]] = None) -> 
     return tuple(hits)
 
 
-def filter_rank(
-    rank: str,
-    *,
-    catalog: Optional[Mapping[str, Any]] = None,
-) -> tuple[Analog, ...]:
-    wanted = rank.strip().lower()
-    if wanted not in RANKS:
-        raise ValueError(f"rank {rank!r} is not in {sorted(RANKS)}")
-    return tuple(row for row in analogs(catalog) if row.rank == wanted)
-
-
 def analog_payload(row: Analog) -> dict[str, str]:
     return {
         "aws": row.aws,

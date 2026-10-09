@@ -10,7 +10,7 @@ from agent_discord.discord.providers.fake import FakeDiscordMCPProvider
 from agent_discord.host.actions import job_action_from_custom_id, job_custom_id
 from agent_discord.host.panel import (
     JOBS_ID,
-    _publish_job_card,
+    _answer_job_pick,
     handle_gateway_interaction,
 )
 from agent_discord.orchestration.cards import job_action_row, receipt_card, working_card
@@ -198,7 +198,7 @@ def test_continue_uses_ask_prompt_when_provided(tmp_path: Path):
     store.close()
 
 
-def test_publish_job_card_idle_includes_continue(tmp_path: Path):
+def test_job_pick_answers_ephemerally_with_continue(tmp_path: Path):
     store = SQLiteStore(tmp_path / "panel.sqlite3")
     store.initialize()
     store.create_task(
@@ -241,24 +241,24 @@ def test_publish_job_card_idle_includes_continue(tmp_path: Path):
         return _Resp()
 
     payload = {
+        "id": "ix-1",
         "application_id": "app",
         "token": "ix",
+        "guild_id": "999",
         "data": {"custom_id": JOBS_ID, "values": ["run-idle"]},
     }
-    _publish_job_card(
-        store,
-        "ch",
-        payload,
-        token="bot-token",
-        opener=opener,
-    )
-    assert sent
+    _answer_job_pick(store, payload, opener=opener)
+    assert len(sent) == 1
+    # Audit 2026-10-02 G1-10: the pick is an ephemeral answer, not a channel post.
+    assert "/interactions/ix-1/ix/callback" in str(sent[-1].get("url") or "")
     blob = str(sent[-1].get("body") or "")
     assert ("discord-os:job:continue:run-idle" in blob) or (
         "dos:continue:" in blob and "run-idle" in blob
     )
-    pending = store.get_preference("_host", "pending_continue:ch")
-    assert pending == "run-idle"
+    assert '"flags": 64' in blob or '"flags":64' in blob
+    assert "thread-idle" in blob
+    # Audit 2026-10-02 G1-15: viewing a job must not arm the next HOST Ask.
+    assert not store.get_preference("_host", "pending_continue:ch")
     store.close()
 
 
@@ -314,4 +314,92 @@ def test_session_allow_helper_round_trip(tmp_path: Path):
     set_write_session_allow(store, "th", ttl_seconds=120)
     assert write_session_allows_writes(store, "th")
     assert not writes_need_approval_for(store, channel_id="ch", thread_id="th")
+    store.close()
+
+
+def test_approve_cooks_in_jobpool_not_on_caller_thread(tmp_path: Path):
+    """Audit A3: a button click must not run the write on the Gateway thread."""
+
+    import threading
+
+    from agent_discord.orchestration.jobs import JobPool
+
+    orch, store, fake, backend = _orch(tmp_path)
+    pool = JobPool(max_live=2)
+    orch.job_pool = pool
+    set_write_gate(store, True)
+    parked = orch.run_task(
+        TaskIntake(
+            text="implement the pool path",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="ask-pool",
+        )
+    )
+    assert parked.status == TaskStatus.PENDING
+    cook_threads: list[int] = []
+    original = backend.dispatch
+
+    def dispatch(request):
+        cook_threads.append(threading.get_ident())
+        return original(request)
+
+    backend.dispatch = dispatch
+    if hasattr(backend, "stream"):
+        backend.stream = None
+    result = orch.apply_job_action("approve", parked.run_id)
+    assert result["status"] == "queued"
+    receipts = pool.wait()
+    assert len(receipts) == 1
+    assert receipts[0].status == TaskStatus.COMPLETED
+    assert cook_threads and cook_threads[0] != threading.get_ident()
+    store.close()
+
+
+def test_restart_sweep_keeps_parked_approval_and_approve_still_works(tmp_path: Path):
+    """Audit C4/A5: a host restart used to fail every parked Need."""
+
+    orch, store, fake, backend = _orch(tmp_path)
+    set_write_gate(store, True)
+    parked = orch.run_task(
+        TaskIntake(
+            text="implement the restart path",
+            channel_id="ch",
+            workspace_id="ws",
+            message_id="ask-restart",
+        )
+    )
+    assert parked.status == TaskStatus.PENDING
+    stale = store.fail_stale_runs()
+    assert parked.run_id not in [row["run_id"] for row in stale]
+    assert store.get_run(parked.run_id)["status"] == TaskStatus.PENDING.value
+    result = orch.apply_job_action("approve", parked.run_id)
+    assert result["status"] == TaskStatus.COMPLETED.value
+    assert backend.dispatch_count == 1
+    store.close()
+
+
+def test_restart_sweep_fails_running_run_and_repaints_its_card(tmp_path: Path):
+    from agent_discord.discord.layout import iter_component_text
+    from agent_discord.orchestration.orchestrator import (
+        STOPPED_BY_RESTART_SPOKEN,
+        repaint_stopped_cards,
+    )
+
+    orch, store, fake, backend = _orch(tmp_path)
+    set_write_gate(store, False)
+    done = orch.run_task(
+        TaskIntake(text="review the billing module", channel_id="ch", workspace_id="ws")
+    )
+    meta = store.task_metadata(done.task_id)
+    assert meta.get("card_message_id"), "live card id is persisted on first paint"
+    # Simulate the host dying mid-run.
+    store.update_run(done.run_id, status=TaskStatus.RUNNING)
+    stale = store.fail_stale_runs()
+    assert [row["run_id"] for row in stale] == [done.run_id]
+    assert store.get_run(done.run_id)["status"] == TaskStatus.FAILED.value
+    assert repaint_stopped_cards(orch.discord, stale) == 1
+    card = next(m for m in fake.sent if m.message_id == meta["card_message_id"])
+    text = "\n".join(iter_component_text((card.metadata or {}).get("components")))
+    assert STOPPED_BY_RESTART_SPOKEN in text
     store.close()

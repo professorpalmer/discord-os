@@ -5,13 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from agent_discord.contracts import RunReceipt, TaskStatus
-from agent_discord.host.brain import build_compact_recall_pack, list_brain_cites
+from agent_discord.host.memory import build_compact_recall_pack, list_brain_cites
 from agent_discord.host.doctor import (
     doctor_notify_should_post,
     filter_doctor_notify_lines,
 )
-from agent_discord.host.status_digest import (
-    MIN_CHECK_INTERVAL_S,
+from agent_discord.host.status import (
+    DIGEST_MIN_CHECK_INTERVAL_S,
     TERMINAL_JOB_STATUSES,
     digest_signature,
 )
@@ -69,7 +69,7 @@ def test_progress_card_includes_steer_footer():
 
 
 def test_digest_ignores_failed_and_interval_raised():
-    assert MIN_CHECK_INTERVAL_S >= 120.0
+    assert DIGEST_MIN_CHECK_INTERVAL_S >= 120.0
     assert "failed" in TERMINAL_JOB_STATUSES
     assert "error" in TERMINAL_JOB_STATUSES
     base = {
@@ -192,7 +192,6 @@ def test_brain_cites_in_recall_pack(tmp_path: Path):
         channel_id="ch",
         metadata={
             "brain": True,
-            "dri": "alex",
             "strategy_docs": str(tmp_path),
             "journal": True,
         },
@@ -224,11 +223,9 @@ def test_brain_cites_in_recall_pack(tmp_path: Path):
     )
     assert "[brain-lake]" in pack
     cites = list_brain_cites(
-        store.get_binding("default", "ch"),
-        store=store,
+        store,
         workspace_id="default",
         channel_id="ch",
-        dri="alex",
     )
     # Journal cite and/or DOS code when present
     assert isinstance(cites, list)

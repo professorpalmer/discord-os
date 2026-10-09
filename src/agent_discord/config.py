@@ -11,24 +11,46 @@ from typing import Mapping, Optional
 
 DEFAULT_HOST_BOT_TOKEN_PATH = Path.home() / ".pmharness" / ".discord_token"
 
+# Workspace resolution is deliberately CWD-independent: `discord-os ...` run from
+# a git checkout used to create or open a second SQLite database next to the
+# source. Documented in docs/host/README.md.
+LIVE_WORKSPACE_RELPATH = ("discord-os", ".agent-discord")
+FALLBACK_WORKSPACE_RELPATH = (".discord-os", "workspace")
+
+
+def default_workspace(*, home: Optional[Path] = None) -> Path:
+    """The workspace used when AGENT_DISCORD_WORKSPACE is unset.
+
+    Prefer the documented live layout ``~/discord-os/.agent-discord`` when it
+    already exists, else ``~/.discord-os/workspace``. Never the current
+    directory.
+    """
+
+    root = Path(home) if home is not None else Path.home()
+    live = root.joinpath(*LIVE_WORKSPACE_RELPATH)
+    if live.is_dir():
+        return live
+    return root.joinpath(*FALLBACK_WORKSPACE_RELPATH)
+
+
+def default_dotenv_path(workspace: Path) -> Path:
+    """``.env`` sits beside the workspace, not in the current directory.
+
+    The live layout is ``~/discord-os/.env`` next to ``~/discord-os/.agent-discord``.
+    """
+
+    return Path(workspace).expanduser().parent / ".env"
+
 
 class ConfigError(ValueError):
     """Invalid or incomplete local configuration."""
-
-
-DEFAULT_SASEQ_MCP_HTTP_URL = "http://127.0.0.1:8085/mcp"
-DEFAULT_BRAINDAO_MCP_HTTP_URL = "http://127.0.0.1:3000/mcp"
 
 
 @dataclass(frozen=True)
 class AppConfig:
     workspace: Path
     discord_bot_token: str
-    discord_mcp_provider: str  # rest | saseq | braindao
-    discord_mcp_transport: str  # http | stdio
-    saseq_mcp_http_url: str
-    braindao_mcp_http_url: str
-    discord_mcp_stdio_command: str
+    discord_mcp_provider: str  # rest
     puppetmaster_model: str
     puppetmaster_cli: str
     puppetmaster_cwd: Path
@@ -75,6 +97,17 @@ def _parse_dotenv(path: Path) -> dict[str, str]:
     return values
 
 
+def _resolve_workspace(
+    explicit: Optional[Path],
+    from_env: Optional[str],
+) -> Path:
+    if explicit is not None:
+        return Path(explicit).expanduser().resolve()
+    if (from_env or "").strip():
+        return Path(str(from_env).strip()).expanduser().resolve()
+    return default_workspace().resolve()
+
+
 def load_config(
     *,
     env: Optional[Mapping[str, str]] = None,
@@ -82,29 +115,24 @@ def load_config(
     workspace: Optional[Path] = None,
 ) -> AppConfig:
     """Load config from process env, optionally overlaying a .env file first."""
-    merged: dict[str, str] = {}
-    if dotenv_path is None:
-        dotenv_path = Path.cwd() / ".env"
-    merged.update(_parse_dotenv(dotenv_path))
     source = dict(os.environ if env is None else env)
+    if dotenv_path is None:
+        # Locate .env from the workspace we can already name, so the file read
+        # does not depend on where the command was run.
+        dotenv_path = default_dotenv_path(
+            _resolve_workspace(workspace, source.get("AGENT_DISCORD_WORKSPACE"))
+        )
+    merged: dict[str, str] = {}
+    merged.update(_parse_dotenv(dotenv_path))
     merged.update({k: v for k, v in source.items() if v is not None})
 
-    ws = Path(
-        workspace
-        or merged.get("AGENT_DISCORD_WORKSPACE")
-        or ".agent-discord"
-    ).expanduser().resolve()
+    ws = _resolve_workspace(workspace, merged.get("AGENT_DISCORD_WORKSPACE"))
 
     provider = (merged.get("DISCORD_MCP_PROVIDER") or "rest").strip().lower()
-    if provider not in {"rest", "saseq", "braindao"}:
+    if provider != "rest":
         raise ConfigError(
-            f"DISCORD_MCP_PROVIDER must be 'rest', 'saseq', or 'braindao', got {provider!r}"
-        )
-
-    transport = (merged.get("DISCORD_MCP_TRANSPORT") or "http").strip().lower()
-    if transport not in {"http", "stdio"}:
-        raise ConfigError(
-            f"DISCORD_MCP_TRANSPORT must be 'http' or 'stdio', got {transport!r}"
+            f"DISCORD_MCP_PROVIDER must be 'rest', got {provider!r} "
+            "(the saseq and braindao MCP adapters were removed)"
         )
 
     model = (merged.get("PUPPETMASTER_MODEL") or "openrouter/auto").strip()
@@ -142,9 +170,10 @@ def load_config(
         max_object_bytes = 10_485_760
 
     interactions = (merged.get("AGENT_DISCORD_INTERACTIONS") or "off").strip().lower()
-    if interactions not in {"off", "http"}:
+    if interactions not in {"off", "http", "gateway"}:
         raise ConfigError(
-            f"AGENT_DISCORD_INTERACTIONS must be 'off' or 'http', got {interactions!r}"
+            "AGENT_DISCORD_INTERACTIONS must be 'off', 'http', or 'gateway', "
+            f"got {interactions!r}"
         )
     host_actions_raw = (merged.get("AGENT_DISCORD_HOST_ACTIONS") or "on").strip().lower()
     if host_actions_raw not in {"on", "off", "1", "0", "true", "false"}:
@@ -169,14 +198,6 @@ def load_config(
         workspace=ws,
         discord_bot_token=(merged.get("DISCORD_BOT_TOKEN") or "").strip(),
         discord_mcp_provider=provider,
-        discord_mcp_transport=transport,
-        saseq_mcp_http_url=(
-            merged.get("SASEQ_MCP_HTTP_URL") or DEFAULT_SASEQ_MCP_HTTP_URL
-        ).strip(),
-        braindao_mcp_http_url=(
-            merged.get("BRAINDAO_MCP_HTTP_URL") or DEFAULT_BRAINDAO_MCP_HTTP_URL
-        ).strip(),
-        discord_mcp_stdio_command=(merged.get("DISCORD_MCP_STDIO_COMMAND") or "").strip(),
         puppetmaster_model=model,
         puppetmaster_cli=(merged.get("PUPPETMASTER_CLI") or "puppetmaster").strip(),
         puppetmaster_cwd=puppetmaster_cwd,
@@ -201,8 +222,25 @@ def load_config(
     )
 
 
+# Declared Puppetmaster range. Mirrors `dependencies` in pyproject.toml. The
+# floor is the oldest release with everything the agentic backend calls:
+# `steer` landed in v1.27.24; `cost --json` with token_usage / actual_cost and
+# `--emit-job-id-early` are older (checked in the Puppetmaster repo history).
+PUPPETMASTER_VERSION_FLOOR = (1, 27, 24)
+PUPPETMASTER_VERSION_CEILING = (2,)
+PUPPETMASTER_REQUIREMENT = "puppetmaster-ai>=1.27.24,<2"
+
+_PM_VERSION_CACHE: dict[str, str] = {}
+
+
 def resolve_puppetmaster_cli(configured: str = "puppetmaster") -> str:
-    """Prefer the CLI next to this Python. LaunchAgents often have a tiny PATH."""
+    """The one resolver for the PM executable. Every call site routes here.
+
+    Prefers the CLI next to this Python, because LaunchAgents often have a tiny
+    PATH. That preference is why production once ran a stale 1.22.15, so the
+    version is now reported (see :func:`puppetmaster_cli_version`) rather than
+    the order being guessed at.
+    """
 
     name = (configured or "puppetmaster").strip() or "puppetmaster"
     sibling = Path(sys.executable).resolve().parent / Path(name).name
@@ -212,6 +250,67 @@ def resolve_puppetmaster_cli(configured: str = "puppetmaster") -> str:
     if found:
         return found
     return name
+
+
+def puppetmaster_cli_found(configured: str = "puppetmaster") -> bool:
+    """True when the resolved PM executable actually exists on this host."""
+
+    resolved = resolve_puppetmaster_cli(configured)
+    if os.sep in resolved:
+        return Path(resolved).is_file()
+    return shutil.which(resolved) is not None
+
+
+def parse_puppetmaster_version(text: str) -> tuple[int, ...]:
+    """First dotted numeric run in ``puppetmaster --version`` output."""
+
+    import re
+
+    match = re.search(r"(\d+(?:\.\d+)+)", text or "")
+    if not match:
+        return ()
+    return tuple(int(part) for part in match.group(1).split("."))
+
+
+def puppetmaster_cli_version(cli: str = "", *, refresh: bool = False) -> str:
+    """Resolved PM version string, or "" when it cannot be read. Never raises."""
+
+    import subprocess
+
+    target = (cli or "").strip() or resolve_puppetmaster_cli()
+    if not refresh and target in _PM_VERSION_CACHE:
+        return _PM_VERSION_CACHE[target]
+    version = ""
+    try:
+        proc = subprocess.run(
+            [target, "--version"], capture_output=True, text=True, timeout=15
+        )
+        parts = parse_puppetmaster_version(f"{proc.stdout}\n{proc.stderr}")
+        if parts:
+            version = ".".join(str(part) for part in parts)
+    except Exception:
+        version = ""
+    if not version:
+        try:
+            from importlib.metadata import version as dist_version
+
+            version = dist_version("puppetmaster-ai")
+        except Exception:
+            version = ""
+    _PM_VERSION_CACHE[target] = version
+    return version
+
+
+def puppetmaster_version_in_range(version: str) -> bool:
+    """True when ``version`` satisfies PUPPETMASTER_REQUIREMENT.
+
+    An unreadable version is not a violation — callers report it separately.
+    """
+
+    parts = parse_puppetmaster_version(version)
+    if not parts:
+        return True
+    return PUPPETMASTER_VERSION_FLOOR <= parts < PUPPETMASTER_VERSION_CEILING
 
 
 def read_host_bot_token(*, path: Optional[Path] = None) -> str:
@@ -257,26 +356,21 @@ def check_config(config: AppConfig, *, require_token: bool = True) -> list[str]:
     problems: list[str] = []
     if require_token and not config.discord_bot_token:
         problems.append("DISCORD_BOT_TOKEN is empty")
-    if config.discord_mcp_provider not in {"rest", "saseq", "braindao"}:
-        problems.append("invalid DISCORD_MCP_PROVIDER")
     if config.discord_mcp_provider != "rest":
-        if config.discord_mcp_transport not in {"http", "stdio"}:
-            problems.append("invalid DISCORD_MCP_TRANSPORT")
-        if config.discord_mcp_transport == "stdio" and not config.discord_mcp_stdio_command:
-            problems.append(
-                "DISCORD_MCP_STDIO_COMMAND is required when DISCORD_MCP_TRANSPORT=stdio "
-                "(no fabricated default npm package; set an explicit command, e.g. "
-                "'npx -y @iqai/mcp-discord' for BrainDAO)"
-            )
+        problems.append("invalid DISCORD_MCP_PROVIDER")
     if config.compute not in {"auto", "agentic"}:
         problems.append("invalid AGENT_DISCORD_COMPUTE")
-    if config.interactions not in {"off", "http"}:
+    if config.interactions not in {"off", "http", "gateway"}:
         problems.append("invalid AGENT_DISCORD_INTERACTIONS")
     if config.interactions == "http":
         if not config.discord_application_id:
             problems.append("DISCORD_APPLICATION_ID is required when interactions=http")
         if not config.discord_public_key:
             problems.append("DISCORD_PUBLIC_KEY is required when interactions=http")
+    if config.interactions == "gateway" and not config.discord_application_id:
+        # Gateway mode needs no public key and no HTTPS URL — only the id that
+        # slash registration POSTs against.
+        problems.append("DISCORD_APPLICATION_ID is required when interactions=gateway")
     resolution = resolve_compute(config)
     if resolution.mode == "agentic" and not has_openrouter_key(config):
         problems.append(

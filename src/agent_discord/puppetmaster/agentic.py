@@ -6,12 +6,14 @@ import os
 import shutil
 import subprocess
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Optional
 
 from agent_discord.puppetmaster.cancel_honesty import (
     cancel_receipt,
+    clear_local_pid_sidecar,
+    persist_local_pid_sidecar,
     popen_kwargs_for_killable_child,
     terminate_process_group,
 )
@@ -37,10 +39,12 @@ from agent_discord.puppetmaster.backend import (
     usage_from_cli_meta,
     _parse_safe_cli_completion,
     _safe_dispatch_prompt,
-    cli_supports_flag,
+    confine_worker_cwd,
     iter_cli_process_events,
+    measured_job_usage,
     prepend_early_job_id,
     request_workdir,
+    with_state_dir,
     worker_env,
     salvage_swarm_incomplete_answer,
 )
@@ -58,12 +62,16 @@ class AgenticPuppetmasterBackend:
     cli: str = "puppetmaster"
     pin: ModelPin = field(default_factory=lambda: AGENTIC_MODEL_PIN)
     cwd: Optional[str | Path] = None
+    # Host state dir (.agent-discord): never a worker cwd; owns gates/.
+    workspace: Optional[str | Path] = None
     timeout_seconds: float = 3600.0
     vault: Optional[KeyVault] = None
     env: Optional[Mapping[str, str]] = None
     _statuses: dict[str, TaskStatus] = field(default_factory=dict)
     _children: dict[str, Any] = field(default_factory=dict, repr=False)
     _cancel_requested: set[str] = field(default_factory=set, repr=False)
+    # run_id -> Puppetmaster job id, known once the worker prints job_id:.
+    _job_ids: dict[str, str] = field(default_factory=dict, repr=False)
     _child_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def resolve_model(self, requested: str) -> ModelPin:
@@ -76,6 +84,9 @@ class AgenticPuppetmasterBackend:
         return self.pin
 
     def available(self) -> bool:
+        # Presence check on an already-picked executable: `self.cli` comes from
+        # config.resolve_puppetmaster_cli, the one resolver. Do not re-resolve
+        # here, or the backend could run a different CLI than it reports.
         return shutil.which(self.cli) is not None
 
     def dispatch(self, request: DispatchRequest) -> DispatchResult:
@@ -124,7 +135,7 @@ class AgenticPuppetmasterBackend:
         secret = self._resolve_secret()
         if secret:
             child_env["OPENROUTER_API_KEY"] = secret
-        self._attach_gate_env(child_env, request, workdir)
+        self._attach_gate_env(child_env, request)
 
         try:
             proc = self._spawn_agentic_popen(
@@ -306,7 +317,7 @@ class AgenticPuppetmasterBackend:
         secret = self._resolve_secret()
         if secret:
             child_env["OPENROUTER_API_KEY"] = secret
-        self._attach_gate_env(child_env, request, workdir)
+        self._attach_gate_env(child_env, request)
 
         try:
             proc = self._spawn_agentic_popen(
@@ -336,7 +347,12 @@ class AgenticPuppetmasterBackend:
                 model=pin.canonical,
                 cli=self.cli,
                 timeout_seconds=self.timeout_seconds,
+                on_job_id=lambda job_id: self._note_job_id(request.run_id, job_id),
             ):
+                if event.kind == EventKind.RECEIPT:
+                    event = self._with_measured_usage(
+                        event, self._job_ids.get(request.run_id, "")
+                    )
                 if request.run_id in self._cancel_requested:
                     self._statuses[request.run_id] = TaskStatus.CANCELLED
                     yield DispatchEvent(
@@ -361,7 +377,42 @@ class AgenticPuppetmasterBackend:
         finally:
             self._unregister_child(request.run_id, proc)
             self._cancel_requested.discard(request.run_id)
+            self._job_ids.pop(request.run_id, None)
             handoff.cleanup()
+
+    def _with_measured_usage(self, event: DispatchEvent, job_id: str) -> DispatchEvent:
+        """Attach Puppetmaster's measured tokens and cost to the final receipt."""
+
+        measured = measured_job_usage(self.cli, job_id, env=self.env)
+        if not measured:
+            return event
+        payload = dict(event.payload or {})
+        nested = payload.get("usage")
+        payload["usage"] = {**(dict(nested) if isinstance(nested, Mapping) else {}), **measured}
+        payload.setdefault("job_id", job_id)
+        return replace(event, payload=payload)
+
+    def steer(self, run_id: str, text: str) -> bool:
+        """Deliver a follow-up to the live worker via ``puppetmaster steer``.
+
+        False until the worker's job id is known, or when the CLI refuses.
+        """
+
+        job_id = self._job_ids.get((run_id or "").strip(), "")
+        body = (text or "").strip()
+        if not job_id or not body:
+            return False
+        try:
+            proc = subprocess.run(
+                with_state_dir([self.cli, "steer", job_id, body]),
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env=worker_env(self.env),
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return proc.returncode == 0
 
     def _agentic_flags(
         self,
@@ -395,8 +446,8 @@ class AgenticPuppetmasterBackend:
             flags.extend(["--allow-non-worktree", "--disable-codegraph"])
         if workdir:
             flags.extend(["--cwd", workdir])
-        if stream and cli_supports_flag(self.cli, "agentic", "--json-lines"):
-            flags.append("--json-lines")
+        # No --json-lines: no Puppetmaster release has that flag. Token events
+        # come from `deltas --follow --json` (see backend.iter_cli_process_events).
         return flags
 
     def _plan_agentic_spawn(
@@ -408,7 +459,11 @@ class AgenticPuppetmasterBackend:
         """Build ARG_MAX-safe local agentic argv (file handoff when oversized)."""
 
         prompt = _safe_dispatch_prompt(request)
-        workdir = request_workdir(request, self.cwd)
+        workdir = confine_worker_cwd(
+            request_workdir(request, self.cwd),
+            workspace=self._host_workspace(),
+            env=self.env,
+        )
         mode = str((request.metadata or {}).get("compute_mode") or "implement")
         if mode not in {"implement", "analyze"}:
             mode = "implement"
@@ -417,11 +472,11 @@ class AgenticPuppetmasterBackend:
             request, workdir=workdir, mode=mode, is_git=is_git, stream=stream
         )
         if stream:
-            # prepend_early_job_id wraps the full command; apply after handoff plan
-            # only for argv mode. File handoff uses PM python -c (no early job id
-            # prefix — job id still arrives on stdout from the worker).
+            # Both shapes ask for the job id up front, or live steer and deltas
+            # never start: argv mode via prepend_early_job_id, file mode baked
+            # into the bridge before the subcommand.
             handoff = plan_local_agentic_handoff(
-                cli=self.cli, prompt=prompt, flags=flags
+                cli=self.cli, prompt=prompt, flags=flags, early_job_id=True
             )
             if handoff.mode == "argv":
                 handoff.argv = prepend_early_job_id(list(handoff.argv))
@@ -459,6 +514,7 @@ class AgenticPuppetmasterBackend:
             return
         with self._child_lock:
             self._children[rid] = proc
+        self._write_pid_sidecar(rid, proc)
 
     def _unregister_child(self, run_id: str, proc: Any) -> None:
         rid = (run_id or "").strip()
@@ -468,6 +524,48 @@ class AgenticPuppetmasterBackend:
             current = self._children.get(rid)
             if current is proc or current is None:
                 self._children.pop(rid, None)
+        clear_local_pid_sidecar(rid, workspace=self._host_workspace(), env=self.env)
+
+    def _write_pid_sidecar(self, run_id: str, proc: Any = None) -> None:
+        """Durable record of the live worker group, for reap after a host restart."""
+
+        rid = (run_id or "").strip()
+        if not rid:
+            return
+        with self._child_lock:
+            child = proc if proc is not None else self._children.get(rid)
+        pid = int(getattr(child, "pid", 0) or 0)
+        if pid <= 0:
+            return
+        # Spawned with start_new_session, so the group leader is the child.
+        pgid = pid
+        if os.name == "posix":
+            try:
+                pgid = os.getpgid(pid)
+            except OSError:
+                pgid = pid
+        try:
+            persist_local_pid_sidecar(
+                run_id=rid,
+                pid=pid,
+                pgid=pgid,
+                job_id=self._job_ids.get(rid, ""),
+                workspace=self._host_workspace(),
+                env=self.env,
+                command=f"puppetmaster agentic ({self.cli})",
+            )
+        except Exception:
+            pass
+
+    def _note_job_id(self, run_id: str, job_id: str) -> None:
+        """Remember the PM job id and fold it into the pid sidecar."""
+
+        rid = (run_id or "").strip()
+        ident = (job_id or "").strip()
+        if not rid or not ident:
+            return
+        self._job_ids[rid] = ident
+        self._write_pid_sidecar(rid)
 
     def cancel_receipt_for(self, run_id: str):
         """gjc-remote-shaped receipt after ``cancel`` (inspect only)."""
@@ -476,18 +574,29 @@ class AgenticPuppetmasterBackend:
         confirmed = self._statuses.get(rid) == TaskStatus.CANCELLED
         return cancel_receipt(confirmed=confirmed, run_id=rid)
 
-    def _attach_gate_env(
-        self, child_env: dict[str, str], request: DispatchRequest, workdir: Optional[str]
-    ) -> None:
-        """Stamp the live ask-gate file-queue so a PreToolUse hook can hold."""
+    def _attach_gate_env(self, child_env: dict[str, str], request: DispatchRequest) -> None:
+        """Stamp the live ask-gate file-queue so a PreToolUse hook can hold.
+
+        The queue lives under the host workspace, where listen drains it. Never
+        under the worker's checkout: listen would not see it, and the worker
+        could write its own results there.
+        """
 
         try:
             from agent_discord.orchestration.gate_hook import attach_gate_env
 
-            ws = workdir or (str(self.cwd) if self.cwd else None)
-            attach_gate_env(child_env, run_id=request.run_id, workspace=ws)
+            attach_gate_env(
+                child_env, run_id=request.run_id, workspace=self._host_workspace()
+            )
         except Exception:
             pass
+
+    def _host_workspace(self) -> Optional[Path]:
+        if self.workspace:
+            return Path(self.workspace)
+        source = self.env if self.env is not None else os.environ
+        raw = str(source.get("AGENT_DISCORD_WORKSPACE") or "").strip()
+        return Path(raw) if raw else None
 
     def _resolve_secret(self) -> str:
         if self.vault is not None:

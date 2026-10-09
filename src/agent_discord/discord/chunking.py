@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Sequence
-
 # Discord message content limit
 DEFAULT_LIMIT = 2000
 
@@ -51,7 +49,3 @@ def _best_break(window: str) -> int:
     if space > 0:
         return space + 1
     return 0
-
-
-def join_chunks(chunks: Sequence[str]) -> str:
-    return "\n".join(chunks)

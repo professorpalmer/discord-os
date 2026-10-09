@@ -27,8 +27,14 @@ Recall skips harness `**Card**` / `**Receipt**` lines. It also reads SQLite `sou
 
 Injected into the next worker as memories with `source=think-tank`.
 
+## Brain lake
+
+The same module formats the `[brain-lake]` recall pack injected into worker
+prompts and printed by `discord-os brain show`. See
+[co-work/brain-lake](../co-work/brain-lake.md).
+
 ## Code
 
-- `src/agent_discord/host/memory.py` — bind, recall, settle
+- `src/agent_discord/host/memory.py` — bind, recall, settle, brain-lake pack
 - `src/agent_discord/orchestration/cards.py` — `note_card`
 - `src/agent_discord/orchestration/listen.py` — bind memory intercept

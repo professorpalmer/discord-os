@@ -13,6 +13,7 @@ from agent_discord.discord.rest import (
     edit_channel_message,
     fetch_channel_message,
     list_channel_messages,
+    list_message_reactions,
     send_channel_attachment,
     send_channel_message,
 )
@@ -72,12 +73,14 @@ class RestDiscordProvider:
         *,
         limit: int = 20,
         thread_id: Optional[str] = None,
+        after: Optional[str] = None,
     ) -> Sequence[DiscordMessage]:
         return list_channel_messages(
             token=self._bot_token,
             channel_id=channel_id,
             limit=limit,
             thread_id=thread_id,
+            after=after,
             opener=self._opener,
         )
 
@@ -100,6 +103,8 @@ class RestDiscordProvider:
         embeds: Optional[list] = None,
         components: Optional[list] = None,
         flags: int = 0,
+        attachment_extra: Optional[Mapping[str, Any]] = None,
+        attachment_content_type: str = "",
     ) -> DiscordMessage:
         return send_channel_attachment(
             token=self._bot_token,
@@ -111,6 +116,8 @@ class RestDiscordProvider:
             embeds=embeds,
             components=components,
             flags=flags,
+            attachment_extra=attachment_extra,
+            attachment_content_type=attachment_content_type,
             opener=self._opener,
         )
 
@@ -176,6 +183,20 @@ class RestDiscordProvider:
 
     def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> None:
         add_message_reaction(
+            token=self._bot_token,
+            channel_id=channel_id,
+            message_id=message_id,
+            emoji=emoji,
+            opener=self._opener,
+        )
+
+    def list_reactions(
+        self,
+        channel_id: str,
+        message_id: str,
+        emoji: str,
+    ) -> tuple[dict[str, Any], ...]:
+        return list_message_reactions(
             token=self._bot_token,
             channel_id=channel_id,
             message_id=message_id,

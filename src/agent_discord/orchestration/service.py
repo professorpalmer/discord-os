@@ -225,12 +225,6 @@ def set_spend_halted(store: Any, halted: bool) -> None:
             pass
 
 
-def toggle_spend_halted(store: Any) -> bool:
-    next_halted = not _truthy(_host_pref(store, SPEND_HALT_KEY))
-    set_spend_halted(store, next_halted)
-    return next_halted
-
-
 def writes_need_approval(store: Any) -> bool:
     return _truthy(_host_pref(store, WRITE_GATE_KEY))
 
@@ -305,6 +299,16 @@ def clear_write_session_allow(store: Any, scope_id: str) -> None:
     if not scope:
         return
     writer(HOST_PREFS_WORKSPACE, write_session_allow_key(scope), "0")
+
+
+def set_host_armed(store: Any, channel_id: str, armed: bool) -> dict[str, Any]:
+    """Arm or disarm a channel. Every Off path revokes all Always grants."""
+
+    writer = getattr(store, "set_host_control", None)
+    result = dict(writer(channel_id, armed=armed) or {}) if callable(writer) else {}
+    if not armed:
+        clear_write_session_allows(store)
+    return result
 
 
 def clear_write_session_allows(store: Any) -> None:
@@ -623,11 +627,16 @@ REQUIRE_ALLOWLIST_ENV = "DISCORD_OS_REQUIRE_ALLOWLIST"
 
 
 def interactions_public(env: Optional[Mapping[str, str]] = None) -> bool:
-    """True when slash Interactions endpoint is opted in (public HTTPS path)."""
+    """True when slash Interactions are opted in.
+
+    ``gateway`` counts: slash over the existing Gateway is just as
+    phone/guild-visible as the HTTPS endpoint, so it hardens the operator
+    allowlist the same way.
+    """
 
     source = env if env is not None else os.environ
     raw = str(source.get("AGENT_DISCORD_INTERACTIONS") or "").strip().lower()
-    return raw in {"http", "https", "public", "on", "1", "true", "yes"}
+    return raw in {"http", "https", "public", "on", "1", "true", "yes", "gateway", "gw"}
 
 
 def require_operators(env: Optional[Mapping[str, str]] = None) -> bool:

@@ -15,24 +15,47 @@ closed** with spoken Deny. ``leave_voice_channel`` is an idle no-op (we never
 hold a live voice session). Local Mac TTS and inbound voice-memo whisper
 remain separate and unchanged.
 
-Env: ``DISCORD_OS_TTS=1`` (default off). ``DISCORD_OS_VOICE_JOIN=1`` is an
-explicit opt-in **intent** knob — still Deny until DAVE ships (not an unlock).
-Argv lists only. Keys never in argv.
+A **voice message attachment** rendered by that same local TTS is allowed by
+lock 6 — it is a file Discord plays back, not a guild voice session. See
+``render_voice_done`` / ``maybe_post_voice_done``.
+
+Env: ``DISCORD_OS_TTS=1`` (default off). ``DISCORD_OS_VOICE_DONE=1`` (default
+off) additionally posts the Done summary as a voice message in the job thread.
+``DISCORD_OS_VOICE_JOIN=1`` is an explicit opt-in **intent** knob — still Deny
+until DAVE ships (not an unlock). Argv lists only. Keys never in argv.
 """
 
 from __future__ import annotations
 
+import base64
 import os
 import shutil
 import subprocess
+import sys
+import tempfile
+import threading
+from array import array
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Optional, Sequence
+from typing import Any, Callable, Mapping, Optional, Sequence
+
+from agent_discord.discord.layout import FLAG_IS_VOICE_MESSAGE
+from agent_discord.redaction import redact_text_markers
 
 ENV_TTS = "DISCORD_OS_TTS"
 ENV_VOICE_JOIN = "DISCORD_OS_VOICE_JOIN"
+ENV_VOICE_DONE = "DISCORD_OS_VOICE_DONE"
 SPEAK_TIMEOUT_S = 45
 MAX_SPEAK_CHARS = 800
+
+# Voice message (attachment) rendering.
+VOICE_MESSAGE_FILENAME = "voice-message.ogg"
+VOICE_MESSAGE_MIMETYPE = "audio/ogg"
+VOICE_RENDER_TIMEOUT_S = 60
+MAX_VOICE_CHARS = 420
+WAVEFORM_BYTES = 256
+# Mono s16le probe stream — waveform amplitudes and duration come from it.
+WAVEFORM_PCM_RATE = 8000
 
 # Discord voice E2EE mandate (public docs / close code 4017).
 DAVE_REQUIRED_SINCE = "2026-03-01"
@@ -56,15 +79,24 @@ _SECRET_ARGV_MARKERS = (
 __all__ = [
     "DAVE_REQUIRED_SINCE",
     "ENV_TTS",
+    "ENV_VOICE_DONE",
     "ENV_VOICE_JOIN",
+    "MAX_VOICE_CHARS",
     "SpeakResult",
     "VOICE_CLOSE_DAVE_REQUIRED",
+    "VOICE_MESSAGE_FILENAME",
+    "VOICE_MESSAGE_MIMETYPE",
+    "VoiceDoneMessage",
     "VoiceJoinError",
+    "WAVEFORM_BYTES",
     "available",
     "join_voice_channel",
     "leave_voice_channel",
     "listen_in_voice_channel",
+    "maybe_post_voice_done",
     "maybe_speak_done",
+    "post_voice_done_async",
+    "render_voice_done",
     "speak_done",
     "speak_in_voice_channel",
     "spoken_tts_deny",
@@ -73,6 +105,8 @@ __all__ = [
     "spoken_voice_speak_deny",
     "tts_enabled",
     "voice_capabilities",
+    "voice_done_enabled",
+    "voice_done_tools",
     "voice_join_enabled",
 ]
 
@@ -85,6 +119,17 @@ class SpeakResult:
     spoken: str = ""
     attempted: bool = False
     cli: str = ""
+
+
+@dataclass(frozen=True)
+class VoiceDoneMessage:
+    """A rendered Discord voice message: OGG/Opus bytes plus its metadata."""
+
+    data: bytes
+    duration_secs: float
+    waveform: str
+    filename: str = VOICE_MESSAGE_FILENAME
+    mimetype: str = VOICE_MESSAGE_MIMETYPE
 
 
 class VoiceJoinError(RuntimeError):
@@ -111,6 +156,46 @@ def voice_join_enabled(*, env: Optional[Mapping[str, str]] = None) -> bool:
     return raw in _TRUTHY
 
 
+def voice_done_enabled(*, env: Optional[Mapping[str, str]] = None) -> bool:
+    """True only when ``DISCORD_OS_VOICE_DONE`` is an explicit truthy opt-in."""
+
+    source = dict(os.environ if env is None else env)
+    raw = str(source.get(ENV_VOICE_DONE) or "").strip().lower()
+    return raw in _TRUTHY
+
+
+def voice_done_tools(
+    *,
+    say_cmd: Optional[str] = None,
+    ffmpeg_cmd: Optional[str] = None,
+    env: Optional[Mapping[str, str]] = None,
+    runner: Optional[Callable[[Sequence[str]], int]] = None,
+) -> dict[str, Any]:
+    """Doctor view: is voice-Done opted in, do both tools resolve, does ffmpeg start?
+
+    A Homebrew ffmpeg with a missing dylib resolves on PATH but aborts on
+    launch, so when voice-Done is on, ffmpeg is actually run once.
+    """
+
+    tts = _resolve_tts_cmd(say_cmd)
+    ffmpeg = _resolve_ffmpeg_cmd(ffmpeg_cmd)
+    enabled = voice_done_enabled(env=env)
+    ffmpeg_exit: Optional[int] = None
+    if enabled and ffmpeg:
+        run = runner or _run_voice_tool
+        try:
+            ffmpeg_exit = int(run([ffmpeg, "-hide_banner", "-version"]))
+        except Exception:
+            ffmpeg_exit = -1
+    return {
+        "enabled": enabled,
+        "tts_cli": tts or "",
+        "ffmpeg_cli": ffmpeg or "",
+        "ffmpeg_exit": ffmpeg_exit,
+        "ready": bool(tts and ffmpeg) and ffmpeg_exit in (None, 0),
+    }
+
+
 def voice_capabilities(*, env: Optional[Mapping[str, str]] = None) -> dict[str, Any]:
     """Honest matrix for doctor / docs. No network."""
 
@@ -129,6 +214,7 @@ def voice_capabilities(*, env: Optional[Mapping[str, str]] = None) -> dict[str, 
             "ship libdave / voice UDP / Opus duplex"
         ),
         "local_voice_memos": True,
+        "voice_message_done": voice_done_enabled(env=env),
         "computer_use": False,
     }
 
@@ -248,6 +334,162 @@ def maybe_speak_done(
         )
 
 
+def render_voice_done(
+    text: str,
+    *,
+    say_cmd: Optional[str] = None,
+    ffmpeg_cmd: Optional[str] = None,
+    env: Optional[Mapping[str, str]] = None,
+    runner: Optional[Callable[[Sequence[str]], int]] = None,
+    log: Optional[Callable[[str], None]] = None,
+) -> Optional[VoiceDoneMessage]:
+    """Render a Done summary to OGG/Opus + voice-message metadata, or ``None``.
+
+    Local TTS (``say -o file.aiff`` / ``espeak -w file.wav``) then ``ffmpeg``
+    twice: once to mono 48k Opus for Discord, once to mono 8k s16le so the
+    waveform amplitudes and the duration come from the decoded audio with no
+    third-party library. Opt-in only; any missing or failing tool fails soft
+    with one log line and ``None`` — the normal card is untouched.
+    """
+
+    note = log or _log_voice_done
+    if not voice_done_enabled(env=env):
+        return None
+    body = _voice_done_text(text)
+    if not body:
+        return None
+
+    tts_cli = _resolve_tts_cmd(say_cmd)
+    ffmpeg = _resolve_ffmpeg_cmd(ffmpeg_cmd)
+    if tts_cli is None or ffmpeg is None:
+        missing = "say/espeak" if tts_cli is None else "ffmpeg"
+        note(f"voice Done skipped: {missing} not on PATH")
+        return None
+
+    if _argv_looks_like_secrets([tts_cli, body]):
+        note("voice Done skipped: refusing to place secrets in argv")
+        return None
+
+    run = runner or _run_voice_tool
+    with tempfile.TemporaryDirectory(prefix="discord-os-voice-") as tmp:
+        root = Path(tmp)
+        speech = root / _speech_filename(tts_cli)
+        ogg = root / VOICE_MESSAGE_FILENAME
+        pcm = root / "probe.s16le"
+        steps = (
+            ("tts", _speak_to_file_argv(tts_cli, body, speech)),
+            ("ffmpeg opus", _ffmpeg_opus_argv(ffmpeg, speech, ogg)),
+            ("ffmpeg pcm", _ffmpeg_pcm_argv(ffmpeg, speech, pcm)),
+        )
+        for label, argv in steps:
+            try:
+                code = int(run(argv))
+            except Exception:
+                note(f"voice Done skipped: {label} failed to run")
+                return None
+            if code != 0:
+                note(f"voice Done skipped: {label} exited {code}")
+                return None
+
+        data = _read_bytes(ogg)
+        raw_pcm = _read_bytes(pcm)
+        if not data or not raw_pcm:
+            note("voice Done skipped: TTS or ffmpeg produced no audio")
+            return None
+
+    waveform, duration = _waveform_from_pcm(raw_pcm)
+    if not waveform or duration <= 0:
+        note("voice Done skipped: decoded audio was silent or empty")
+        return None
+    return VoiceDoneMessage(data=data, duration_secs=duration, waveform=waveform)
+
+
+def maybe_post_voice_done(
+    discord: Any,
+    *,
+    channel_id: str,
+    thread_id: str,
+    text: str,
+    say_cmd: Optional[str] = None,
+    ffmpeg_cmd: Optional[str] = None,
+    env: Optional[Mapping[str, str]] = None,
+    runner: Optional[Callable[[Sequence[str]], int]] = None,
+    log: Optional[Callable[[str], None]] = None,
+) -> bool:
+    """Post the Done summary as a voice message in the job thread. Never raises.
+
+    Thread only — a voice message in the channel would bury the card. Returns
+    True only when Discord accepted the attachment.
+    """
+
+    note = log or _log_voice_done
+    if discord is None or not str(thread_id or "").strip():
+        return False
+    try:
+        rendered = render_voice_done(
+            text,
+            say_cmd=say_cmd,
+            ffmpeg_cmd=ffmpeg_cmd,
+            env=env,
+            runner=runner,
+            log=note,
+        )
+    except Exception:
+        note("voice Done skipped: render raised")
+        return False
+    if rendered is None:
+        return False
+    try:
+        discord.send_attachment(
+            str(channel_id),
+            rendered.filename,
+            rendered.data,
+            content="",
+            thread_id=str(thread_id),
+            flags=FLAG_IS_VOICE_MESSAGE,
+            attachment_extra={
+                "duration_secs": rendered.duration_secs,
+                "waveform": rendered.waveform,
+            },
+            attachment_content_type=rendered.mimetype,
+        )
+    except Exception:
+        note("voice Done skipped: Discord rejected the voice attachment")
+        return False
+    return True
+
+
+def post_voice_done_async(
+    discord: Any,
+    *,
+    channel_id: str,
+    thread_id: str,
+    text: str,
+    env: Optional[Mapping[str, str]] = None,
+) -> Optional[threading.Thread]:
+    """Run ``maybe_post_voice_done`` off the settle hot path. Never raises."""
+
+    if discord is None or not voice_done_enabled(env=env):
+        return None
+    worker = threading.Thread(
+        target=maybe_post_voice_done,
+        kwargs={
+            "discord": discord,
+            "channel_id": channel_id,
+            "thread_id": thread_id,
+            "text": text,
+            "env": env,
+        },
+        name="discord-os-voice-done",
+        daemon=True,
+    )
+    try:
+        worker.start()
+    except Exception:
+        return None
+    return worker
+
+
 def join_voice_channel(
     guild_id: Any = "",
     channel_id: Any = "",
@@ -357,6 +599,118 @@ def _sanitize_speak_text(text: str) -> str:
     if len(collapsed) > MAX_SPEAK_CHARS:
         collapsed = collapsed[: MAX_SPEAK_CHARS - 1].rstrip() + "…"
     return collapsed
+
+
+def _voice_done_text(text: str) -> str:
+    """Redact, collapse, and clip the spoken Done body. Secrets never ship."""
+
+    return _sanitize_speak_text(redact_text_markers(text or ""))[:MAX_VOICE_CHARS]
+
+
+def _log_voice_done(message: str) -> None:
+    print(str(message), file=sys.stderr)
+
+
+def _run_voice_tool(argv: Sequence[str]) -> int:
+    """Default runner. Argv list, no shell, bounded. Tests inject a fake."""
+
+    try:
+        proc = subprocess.run(
+            list(argv),
+            capture_output=True,
+            timeout=VOICE_RENDER_TIMEOUT_S,
+            check=False,
+            shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return 1
+    return int(proc.returncode)
+
+
+def _resolve_ffmpeg_cmd(ffmpeg_cmd: Optional[str]) -> Optional[str]:
+    return _executable_path(ffmpeg_cmd or "ffmpeg")
+
+
+def _speech_filename(cli: str) -> str:
+    """``say`` writes AIFF; espeak writes WAV."""
+
+    name = Path(cli).name.lower()
+    return "speech.wav" if name in {"espeak", "espeak-ng"} else "speech.aiff"
+
+
+def _speak_to_file_argv(cli: str, text: str, out: Path) -> list[str]:
+    name = Path(cli).name.lower()
+    if name in {"espeak", "espeak-ng"}:
+        return [cli, "-w", str(out), text]
+    return [cli, "-o", str(out), text]
+
+
+def _ffmpeg_opus_argv(ffmpeg: str, src: Path, out: Path) -> list[str]:
+    return [
+        ffmpeg,
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(src),
+        "-ac",
+        "1",
+        "-ar",
+        "48000",
+        "-c:a",
+        "libopus",
+        str(out),
+    ]
+
+
+def _ffmpeg_pcm_argv(ffmpeg: str, src: Path, out: Path) -> list[str]:
+    return [
+        ffmpeg,
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(src),
+        "-ac",
+        "1",
+        "-ar",
+        str(WAVEFORM_PCM_RATE),
+        "-f",
+        "s16le",
+        "-acodec",
+        "pcm_s16le",
+        str(out),
+    ]
+
+
+def _read_bytes(path: Path) -> bytes:
+    try:
+        return path.read_bytes()
+    except OSError:
+        return b""
+
+
+def _waveform_from_pcm(pcm: bytes) -> tuple[str, float]:
+    """Base64 waveform (<=256 bytes, 0-255 peaks) + duration from mono s16le."""
+
+    frames = len(pcm) // 2
+    if frames <= 0:
+        return "", 0.0
+    samples = array("h")
+    samples.frombytes(pcm[: frames * 2])
+    if sys.byteorder == "big":
+        samples.byteswap()
+    buckets = min(WAVEFORM_BYTES, frames)
+    out = bytearray()
+    for index in range(buckets):
+        low = (index * frames) // buckets
+        high = max(low + 1, ((index + 1) * frames) // buckets)
+        peak = max(abs(int(value)) for value in samples[low:high])
+        out.append(min(255, (peak * 255) // 32767))
+    duration = round(frames / float(WAVEFORM_PCM_RATE), 3)
+    return base64.b64encode(bytes(out)).decode("ascii"), duration
 
 
 def _resolve_tts_cmd(say_cmd: Optional[str]) -> Optional[str]:

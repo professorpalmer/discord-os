@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
 from agent_discord.discord.layout import progress_bar
-from agent_discord.host.status_digest import format_status_digest
+from agent_discord.host.status import format_status_digest
 from agent_discord.orchestration.cards import _host_status_fields
 from agent_discord.orchestration.service import format_spend_meter
 
@@ -80,12 +79,3 @@ def test_status_digest_uses_meter():
     assert "spend" in body
     assert "halted" in body
     assert "[" in body  # meter
-
-
-def test_wave6_spend_docs():
-    root = Path(__file__).resolve().parents[1]
-    text = (root / "docs/co-work/wave6-spend-meter.md").read_text().lower()
-    assert "unknown" in text
-    assert "$0" in text or "≠" in text or "!=" in text
-    assert "halt" in text
-    assert "graham" not in text

@@ -36,6 +36,10 @@ The host scans GitHub on that checkout before dispatch. The worker prompt starts
 
 `.agent-discord` is never the subject repository.
 
+"Any open PRs on X?" does not cook at all — see
+[repo-status](repo-status.md). Red CI on a bound repo wakes the channel once
+with a Fix CI button — see [ci-watch](ci-watch.md).
+
 ## Forum-as-realm (Discord-half EXTRAS — scoped experiment)
 
 **Experiment, not a second job system.** Bind a Discord **forum** channel

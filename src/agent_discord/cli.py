@@ -20,12 +20,14 @@ from uuid import uuid4
 from agent_discord import CLI_NAME, CLI_OWNER_PREFIX, PRODUCT_NAME, __version__
 from agent_discord.bootstrap import bootstrap_workspace, describe_bootstrap
 from agent_discord.config import (
+    PUPPETMASTER_REQUIREMENT,
     AppConfig,
     apply_runtime_secrets,
     check_config,
     discord_token_source,
     keys_dir,
     load_config,
+    puppetmaster_cli_found,
     resolve_compute,
     resolve_puppetmaster_cli,
 )
@@ -33,6 +35,7 @@ from agent_discord.contracts import (
     DiscordObjectRef,
     ObjectNotFoundError,
     PuppetmasterBackend,
+    RunReceipt,
     TaskIntake,
     discord_jump_url,
 )
@@ -60,7 +63,6 @@ from agent_discord.host.service import (
     write_host_meta,
 )
 from agent_discord.orchestration.listen import (
-    LISTEN_HISTORY_SLACK_MS,
     drain_inbound,
     listen_destinations,
     publish_host_card,
@@ -284,32 +286,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Install listen-dead doctor --notify LaunchAgent for real (not example-only)",
     )
     p_host_doctor.add_argument("--json", action="store_true")
-    p_host_dash = host_sub.add_parser(
-        "dashboard",
-        help="Read-only companion web dashboard (loopback by default)",
-    )
-    p_host_dash.add_argument(
-        "--host",
-        default=None,
-        help="Bind host (default: 127.0.0.1 / DISCORD_OS_DASHBOARD_HOST)",
-    )
-    p_host_dash.add_argument(
-        "--port",
-        type=int,
-        default=None,
-        help="Bind port (default: 8765 / DISCORD_OS_DASHBOARD_PORT)",
-    )
-    p_host_dash.add_argument(
-        "--allow-non-loopback",
-        action="store_true",
-        help="Permit non-loopback bind (fail-closed unless set)",
-    )
-    p_host_dash.add_argument(
-        "--once",
-        action="store_true",
-        help="Print JSON snapshot to stdout and exit (no HTTP server)",
-    )
-    p_host_dash.add_argument("--json", action="store_true", help="With --once, force JSON")
     p_host_run = host_sub.add_parser(
         "run",
         help="Foreground host loop (used by host start; prefer host start)",
@@ -462,15 +438,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_brain_show.add_argument("--workspace-id", default="default")
     p_brain_show.add_argument("--max-bytes", type=int, default=1800)
 
-    p_dashboard = sub.add_parser(
-        "dashboard",
-        help="Alias for host dashboard (read-only companion web UI)",
+    p_db = sub.add_parser("db", help="SQLite maintenance")
+    db_sub = p_db.add_subparsers(dest="db_command", required=True)
+    p_compact = db_sub.add_parser(
+        "compact", help="Drop old progress events of finished runs, then VACUUM"
     )
-    p_dashboard.add_argument("--host", default=None)
-    p_dashboard.add_argument("--port", type=int, default=None)
-    p_dashboard.add_argument("--allow-non-loopback", action="store_true")
-    p_dashboard.add_argument("--once", action="store_true")
-    p_dashboard.add_argument("--json", action="store_true")
+    p_compact.add_argument("--days", type=float, default=14.0, help="Keep this many days")
+    p_compact.add_argument("--json", action="store_true")
+
+    p_features = sub.add_parser(
+        "features", help="List opt-in features, or turn one on or off"
+    )
+    p_features.add_argument("action", nargs="?", choices=("list", "on", "off"), default="list")
+    p_features.add_argument("name", nargs="?", default="", help="Feature name")
+    p_features.add_argument("--channel-id", default="", help="Channel for per-channel features")
+    p_features.add_argument("--workspace-id", default="default")
+    p_features.add_argument("--json", action="store_true")
 
     p_spend = sub.add_parser("spend", help="Show session spend, set a cap, or halt new jobs")
     p_spend.add_argument("--cap", type=float, default=None, help="USD halt threshold")
@@ -529,15 +512,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_add_desk.add_argument("--github-token", default="")
     p_add_brain = add_sub.add_parser(
         "brain",
-        help="Per-DRI brain lake bind (strategy docs + transcripts + journal; single-host)",
+        help="Brain lake bind (strategy docs + transcripts + journal; single-host)",
     )
     p_add_brain.add_argument("--channel-id", required=True)
-    p_add_brain.add_argument("--dri", required=True, help="DRI / operator label for this brain")
-    p_add_brain.add_argument(
-        "--role",
-        default="",
-        help="Optional SOP role: implementer | reviewer | planner",
-    )
     p_add_brain.add_argument("--strategy-docs", default="", help="Path to strategy docs dir/file")
     p_add_brain.add_argument("--transcripts-channel", default="", help="Discord channel id for meeting transcripts")
     p_add_brain.add_argument("--no-journal", action="store_true", help="Skip journal inject")
@@ -550,6 +527,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_add_forum_tags.add_argument("--channel-id", required=True)
     p_add_forum_tags.add_argument("--workspace-id", default="default")
+    p_add_pm_inbox = add_sub.add_parser(
+        "pm-inbox",
+        help="Card Puppetmaster jobs started elsewhere on this Mac into one channel",
+    )
+    p_add_pm_inbox.add_argument("--channel-id", required=True)
+    p_add_pm_inbox.add_argument("--json", action="store_true")
+    p_add_capture = add_sub.add_parser(
+        "capture",
+        help="Capture short thoughts to memory instead of cooking them (opt-in)",
+    )
+    p_add_capture.add_argument("--channel-id", required=True)
+    p_add_capture.add_argument("--workspace-id", default="default")
+    p_add_capture.add_argument("--json", action="store_true")
     p_add_list = add_sub.add_parser("list", help="Show wired realms, memory, wiki, and tools")
     p_add_list.add_argument("--workspace-id", default="default")
     p_add_list.add_argument("--json", action="store_true")
@@ -582,6 +572,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run id or job code (DOS-10001). Default: latest lineage run",
     )
     p_lineage.add_argument("--json", action="store_true")
+
+    p_eval = sub.add_parser(
+        "eval",
+        help="Replay labeled runs read-only and score win/loss/same (spends OpenRouter)",
+    )
+    p_eval.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="How many labeled runs to replay. Required to actually run",
+    )
+    p_eval.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm the spend. Without it, print the plan and exit",
+    )
+    p_eval.add_argument(
+        "--pin",
+        default="",
+        help="Candidate model pin. Must be in the allowlist; default is the current pin",
+    )
+    p_eval.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Write the JSON report to this path",
+    )
+    p_eval.add_argument("--json", action="store_true", help="Print the JSON report")
+    p_eval.add_argument(
+        "--fake",
+        action="store_true",
+        help="Use the fake Puppetmaster backend (no network / no spend)",
+    )
 
     p_hook = sub.add_parser(
         "gate-hook",
@@ -650,6 +673,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_clear.add_argument("--fake", action="store_true", help="Fake Discord/Puppetmaster")
     p_clear.add_argument("--json", action="store_true")
 
+    p_repo = sub.add_parser("repo", help="Read a named host checkout")
+    repo_sub = p_repo.add_subparsers(dest="repo_command", required=True)
+    p_repo_status = repo_sub.add_parser(
+        "status",
+        help="Open PRs, open issues, branch drift, and default-branch CI (no cook)",
+    )
+    p_repo_status.add_argument(
+        "name",
+        nargs="?",
+        default="",
+        help="Named checkout (default: every host checkout)",
+    )
+    p_repo_status.add_argument("--json", action="store_true")
+
     return parser
 
 
@@ -698,6 +735,40 @@ def cmd_map(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     return 0
 
 
+def cmd_repo(
+    args: argparse.Namespace,
+    *,
+    out: TextIO | None = None,
+    repos: Any = None,
+    collector: Any = None,
+) -> int:
+    out = out or sys.stdout
+    if str(getattr(args, "repo_command", "") or "") != "status":
+        print("unknown repo subcommand", file=sys.stderr)
+        return 2
+    from agent_discord.host.repo_status import (
+        collect_repo_status,
+        format_repo_status,
+        repo_status_payload,
+    )
+    from agent_discord.host.repos import load_host_repos
+
+    catalog = tuple(repos) if repos is not None else load_host_repos()
+    wanted = str(getattr(args, "name", "") or "").strip().lower()
+    if wanted:
+        catalog = tuple(item for item in catalog if item.matches(wanted))
+    if not catalog:
+        print("no host checkout matched", file=sys.stderr)
+        return 1
+    collect = collector or collect_repo_status
+    rows = [collect(repo.path, name=repo.name) for repo in catalog]
+    if getattr(args, "json", False):
+        print(json.dumps([repo_status_payload(row) for row in rows], indent=2), file=out)
+        return 0
+    print("\n\n".join(format_repo_status(row) for row in rows), file=out)
+    return 0
+
+
 def cmd_gate_hook(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     """PreToolUse hold. Always exit 0 — decision is JSON on stdout."""
 
@@ -734,6 +805,7 @@ def cmd_lineage(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                 root_task = str(run.get("task_id") or "")
                 job_code = str(reader(root_task) or "")
         children = child_job_codes(store, nodes, root_task)
+        outcomes = store.list_run_outcomes(run_id) if run_id else []
         if args.json:
             print(
                 json.dumps(
@@ -741,6 +813,7 @@ def cmd_lineage(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                         "run_id": run_id,
                         "job_code": job_code,
                         "children": list(children),
+                        "outcomes": outcomes,
                         "nodes": [node_payload(node) for node in nodes],
                     },
                     indent=2,
@@ -756,10 +829,95 @@ def cmd_lineage(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
             print(f"job_code: {job_code}", file=out)
         if children:
             print("children: " + ", ".join(children), file=out)
+        if outcomes:
+            from agent_discord.orchestration.outcomes import format_run_outcomes
+
+            print("outcomes: " + format_run_outcomes(outcomes), file=out)
         print(format_nodes(nodes), file=out)
         return 0 if nodes else 1
     finally:
         store.close()
+
+
+def cmd_eval(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
+    """Replay labeled runs read-only and score them. Needs --limit and --yes."""
+
+    out = out or sys.stdout
+    from agent_discord.contracts import ModelNotAllowedError
+    from agent_discord.orchestration.evaluate import (
+        assert_pin_allowed,
+        format_plan,
+        pin_refusal,
+        plan_eval,
+        run_eval,
+    )
+    from agent_discord.orchestration.jobs import JobPool
+
+    requested_pin = str(getattr(args, "pin", "") or "")
+    try:
+        pin = assert_pin_allowed(requested_pin)
+    except ModelNotAllowedError:
+        print(pin_refusal(requested_pin), file=sys.stderr)
+        return 2
+
+    config = apply_runtime_secrets(load_config())
+    store = SQLiteStore(config.database_path)
+    store.initialize()
+    try:
+        limit = max(0, int(getattr(args, "limit", 0) or 0))
+        candidates = plan_eval(store, limit=limit)
+        if not limit or not getattr(args, "yes", False):
+            print(format_plan(candidates, pin=pin), file=out)
+            return 0
+        if not candidates:
+            print("eval: no labeled runs to replay", file=out)
+            return 0
+        if args.fake:
+            backend = FakePuppetmasterBackend()
+        else:
+            backend = _select_backend(config)
+            backend.resolve_model(pin)
+        # No Discord facade at all: an eval must not land a card in a channel.
+        orch = AgentOrchestrator(
+            store=store,
+            backend=backend,
+            discord=None,
+            model=pin,
+            post_progress_to_discord=False,
+            workspace=config.workspace,
+            compute_cwd=config.puppetmaster_cwd,
+        )
+        pool = JobPool(max_live=1)
+
+        def dispatch(intake: TaskIntake) -> RunReceipt | None:
+            pool.submit(orch.run_task, intake)
+            for receipt in pool.wait():
+                return receipt
+            return None
+
+        report = run_eval(store, dispatch=dispatch, candidates=candidates, pin=pin)
+    finally:
+        store.close()
+
+    body = json.dumps(report, indent=2)
+    if args.out is not None:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(body + "\n", encoding="utf-8")
+    if args.json:
+        print(body, file=out)
+    else:
+        totals = report["totals"]
+        print(f"eval: pin {report['pin']} · {report['replayed']} replayed", file=out)
+        print(
+            f"win {totals['win']} · loss {totals['loss']} · same {totals['same']}",
+            file=out,
+        )
+        for row in report["results"]:
+            code = row["job_code"] or row["run_id"][:12]
+            print(f"  {code}  {row['label']:7} -> {row['verdict']}", file=out)
+        if args.out is not None:
+            print(f"report: {args.out}", file=out)
+    return 0
 
 
 def cmd_bootstrap(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
@@ -772,8 +930,7 @@ def cmd_bootstrap(args: argparse.Namespace, *, out: TextIO | None = None) -> int
     if result["created_env"]:
         print("  created .env from .env.example — fill in DISCORD_BOT_TOKEN", file=out)
     print(
-        "\nDefault transport is Discord REST (no MCP, no Gateway). "
-        "Optional MCP adapters: SaseQ / BrainDAO — upstream source is not copied.",
+        "\nTransport is Discord REST (no MCP, no Gateway).",
         file=out,
     )
     return 0
@@ -786,13 +943,8 @@ def cmd_check(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     info = describe_bootstrap(config)
     print(f"workspace:  {config.workspace}", file=out)
     print(f"database:   {config.database_path}", file=out)
-    print(f"provider:   {config.discord_mcp_provider} / {config.discord_mcp_transport}", file=out)
-    if config.discord_mcp_provider == "saseq":
-        print(f"saseq url:  {config.saseq_mcp_http_url}", file=out)
-    elif config.discord_mcp_provider == "braindao":
-        print(f"braindao:   {config.braindao_mcp_http_url}", file=out)
-    else:
-        print("transport:  Discord REST (no MCP, no Gateway)", file=out)
+    print(f"provider:   {config.discord_mcp_provider}", file=out)
+    print("transport:  Discord REST (no MCP, no Gateway)", file=out)
     resolution = resolve_compute(config)
     print(f"backend:    {config.agent_backend}", file=out)
     print(f"compute:    {resolution.requested} -> {resolution.mode}", file=out)
@@ -834,10 +986,10 @@ def cmd_check(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     if config.agent_backend == "marionette":
         print(f"marionette: {config.marionette_base_url or '(unset)'}", file=out)
     print(f"bootstrapped: {info.get('bootstrapped', False)}", file=out)
-    if shutil.which(config.puppetmaster_cli) is None:
+    if not puppetmaster_cli_found(config.puppetmaster_cli):
         print(
-            f"note:       {config.puppetmaster_cli} not on PATH "
-            "(install puppetmaster-ai for live dispatch)",
+            f"note:       {config.puppetmaster_cli} not found "
+            f"(install {PUPPETMASTER_REQUIREMENT} for live dispatch)",
             file=out,
         )
     if problems:
@@ -901,7 +1053,7 @@ def cmd_pair(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
 
 def cmd_brain(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     out = out or sys.stdout
-    from agent_discord.host.brain import build_compact_recall_pack
+    from agent_discord.host.memory import build_compact_recall_pack
 
     config = apply_runtime_secrets(load_config())
     store = SQLiteStore(config.database_path)
@@ -982,9 +1134,11 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     out = out or sys.stdout
     from agent_discord.host.add import (
         add_brain,
+        add_capture,
         add_desk_pack,
         add_github,
         add_memory,
+        add_pm_inbox,
         add_realm,
         add_repo,
         add_tool,
@@ -1028,6 +1182,26 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                 )
             finally:
                 store.close()
+        elif command == "capture":
+            config = load_config()
+            store = SQLiteStore(config.database_path)
+            store.initialize()
+            try:
+                payload = add_capture(
+                    store,
+                    channel_id=args.channel_id,
+                    workspace_id=args.workspace_id,
+                )
+            finally:
+                store.close()
+        elif command == "pm-inbox":
+            config = load_config()
+            store = SQLiteStore(config.database_path)
+            store.initialize()
+            try:
+                payload = add_pm_inbox(store, channel_id=args.channel_id)
+            finally:
+                store.close()
         elif command == "repo":
             payload = add_repo(name=args.name, path=args.path)
         elif command == "wiki":
@@ -1065,8 +1239,6 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                 payload = add_brain(
                     store,
                     channel_id=args.channel_id,
-                    dri=args.dri,
-                    role=str(getattr(args, "role", "") or ""),
                     strategy_docs=getattr(args, "strategy_docs", "") or "",
                     transcripts_channel=getattr(args, "transcripts_channel", "") or "",
                     journal=not bool(getattr(args, "no_journal", False)),
@@ -1098,19 +1270,18 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                 return 2
             finally:
                 store.close()
-            life = payload.get("lifecycle_tag_ids") or {}
             print(
                 f"forum-tags {payload['channel_id']} "
                 f"tags_as_tickets={payload['tags_as_tickets']} "
                 f"map={payload['status_tag_ids']} "
-                f"lifecycle={life} "
                 f"(created_available_tags=false)",
                 file=out,
             )
             return 0
         else:
             print(
-                "add: realm, memory, repo, wiki, tool, github, desk-pack, brain, forum-tags, or list",
+                "add: realm, memory, capture, pm-inbox, repo, wiki, tool, "
+                "github, desk-pack, brain, forum-tags, or list",
                 file=sys.stderr,
             )
             return 2
@@ -1131,6 +1302,10 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
             print(f"realm:   {realm['name']} #{realm['channel_id']}", file=out)
         for channel_id in payload.get("memory") or ():
             print(f"memory:  #{channel_id}", file=out)
+        for channel_id in payload.get("capture") or ():
+            print(f"capture: #{channel_id}", file=out)
+        if payload.get("pm_inbox"):
+            print(f"pm-inbox: #{payload['pm_inbox']}", file=out)
         for tool in payload.get("tools") or ():
             print(f"tool:    {tool['name']} {tool.get('hint') or ''}", file=out)
         if payload.get("env"):
@@ -1142,6 +1317,18 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         print(f"added realm {payload['name']} #{payload['channel_id']}{cwd}{forum}", file=out)
     elif kind == "memory":
         print(f"added memory #{payload['channel_id']}", file=out)
+    elif kind == "capture":
+        print(
+            f"added capture #{payload['channel_id']} "
+            "(short thoughts become memory; do: still cooks)",
+            file=out,
+        )
+    elif kind == "pm-inbox":
+        print(
+            f"added pm-inbox #{payload['channel_id']} "
+            "(restart the host; jobs older than now are skipped)",
+            file=out,
+        )
     elif kind == "repo":
         print(f"added repo {payload['name']} {payload['path']}", file=out)
     elif kind == "wiki":
@@ -1164,8 +1351,92 @@ def cmd_add(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         )
         for step in payload.get("steps") or ():
             print(f"  - {step.get('kind')}", file=out)
+    elif kind == "brain":
+        print(
+            f"brain #{payload.get('channel_id')} "
+            f"(single-host lake; not multi-host DO)",
+            file=out,
+        )
     if payload.get("restart"):
         print("restart the host so the running process sees this", file=out)
+    return 0
+
+
+def cmd_db(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
+    out = out or sys.stdout
+    config = load_config()
+    store = SQLiteStore(config.database_path)
+    store.initialize()
+    try:
+        before = config.database_path.stat().st_size if config.database_path.exists() else 0
+        result = store.compact_events(older_than_days=args.days, vacuum_min_rows=1)
+        after = config.database_path.stat().st_size if config.database_path.exists() else 0
+    finally:
+        store.close()
+    result = {**result, "bytes_before": before, "bytes_after": after}
+    if args.json:
+        print(json.dumps(result, indent=2), file=out)
+    else:
+        print(
+            f"deleted {result['deleted']} progress event(s); "
+            f"{before / 1e6:.1f} MB -> {after / 1e6:.1f} MB",
+            file=out,
+        )
+    return 0
+
+
+def cmd_features(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
+    from agent_discord.host.features import (
+        FEATURE_NAMES,
+        feature_states,
+        format_feature_list,
+        set_feature,
+    )
+
+    out = out or sys.stdout
+    config = load_config()
+    store = SQLiteStore(config.database_path)
+    store.initialize()
+    try:
+        if args.action == "list":
+            states = feature_states(
+                store, channel_id=args.channel_id, workspace_id=args.workspace_id
+            )
+        else:
+            if not args.name:
+                print(f"features: name one of {', '.join(FEATURE_NAMES)}", file=sys.stderr)
+                return 2
+            try:
+                states = [
+                    set_feature(
+                        store,
+                        args.name,
+                        args.action == "on",
+                        channel_id=args.channel_id,
+                        workspace_id=args.workspace_id,
+                    )
+                ]
+            except ValueError as exc:
+                print(f"features: {exc}", file=sys.stderr)
+                return 2
+    finally:
+        store.close()
+    if args.json:
+        payload = [
+            {
+                "name": s.feature.name,
+                "scope": s.feature.scope,
+                "on": s.on,
+                "source": s.source,
+                "note": s.note,
+            }
+            for s in states
+        ]
+        print(json.dumps(payload, indent=2), file=out)
+    elif args.action == "list":
+        print(format_feature_list(states), file=out)
+    else:
+        print(states[0].line, file=out)
     return 0
 
 
@@ -1227,15 +1498,6 @@ def cmd_run(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
     if args.fake:
         provider = FakeDiscordMCPProvider()
         backend = FakePuppetmasterBackend()
-    elif kind == "brain":
-        print(
-            f"brain dri={payload.get('dri')}"
-            f"{(' role=' + str(payload.get('brain_role'))) if payload.get('brain_role') else ''}"
-            f" #{payload.get('channel_id')} "
-            f"(single-host lake; not multi-host DO)",
-            file=out,
-        )
-
     else:
         provider = select_provider(config)
         backend = _select_backend(config)
@@ -1334,6 +1596,7 @@ def _select_backend(config: AppConfig) -> PuppetmasterBackend:
         cli=cli,
         pin=AGENTIC_MODEL_PIN,
         cwd=config.puppetmaster_cwd,
+        workspace=config.workspace,
         vault=KeyVault(keys_dir(config)),
     )
 
@@ -1661,17 +1924,57 @@ def cmd_note(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
 
 
 def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
-    out = out or sys.stdout
+    from agent_discord.host.logstream import attach_host_log_rotation, install_host_logging
     from agent_discord.host.repos import host_path
+
+    # Stamp before anything can fail: a bad token or ConfigError has to land in
+    # host.log with a time on it, not as a bare line in a respawn loop. Only the
+    # long-running loop stamps; --once / --json are one-shot machine output.
+    long_running = not getattr(args, "once", False) and not getattr(args, "json", False)
+    if long_running:
+        install_host_logging()
+    out = out or sys.stdout
 
     os.environ["PATH"] = host_path()
     config = apply_runtime_secrets(load_config())
     config.workspace.mkdir(parents=True, exist_ok=True)
+    if long_running:
+        attach_host_log_rotation(config.workspace)
     store = SQLiteStore(config.database_path)
     store.initialize()
     stale = store.fail_stale_runs()
     if stale:
-        print(f"cleared {stale} leftover running job(s)", flush=True)
+        print(f"cleared {len(stale)} leftover running job(s)", flush=True)
+    # Local agentic children run in their own session, so an abrupt host exit
+    # leaves them cooking, spending, and writing the checkout. Path A already
+    # reaps orphaned remote pids; this is the local half.
+    try:
+        from agent_discord.puppetmaster.cancel_honesty import reap_orphaned_local_pids
+
+        for record in reap_orphaned_local_pids(workspace=config.workspace):
+            print(
+                "orphan worker {action}: run={run_id} pid={pid} pgid={pgid} "
+                "job={job_id}".format(
+                    action=record.get("action") or "?",
+                    run_id=record.get("run_id") or "?",
+                    pid=record.get("pid") or 0,
+                    pgid=record.get("pgid") or 0,
+                    job_id=record.get("job_id") or "-",
+                ),
+                flush=True,
+            )
+    except Exception as exc:  # best-effort: never block host startup
+        print(f"orphan worker reap skipped: {exc}", flush=True)
+    try:
+        compacted = store.compact_events()
+        if compacted["deleted"]:
+            print(
+                f"pruned {compacted['deleted']} old progress event(s)"
+                + (" and vacuumed" if compacted["vacuumed"] else ""),
+                flush=True,
+            )
+    except Exception as exc:
+        print(f"event compaction skipped: {exc}", flush=True)
     store.seed_owner_from_env()
     from agent_discord.orchestration.service import (
         seed_spend_cap_from_env,
@@ -1699,6 +2002,12 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         owner_id=f"{CLI_OWNER_PREFIX}{os.getpid()}-{uuid4().hex[:8]}",
         bot_token_fingerprint=config.bot_token_fingerprint or "local-dev",
     )
+    if stale:
+        from agent_discord.orchestration.orchestrator import repaint_stopped_cards
+
+        repainted = repaint_stopped_cards(discord, stale)
+        if repainted:
+            print(f"repainted {repainted} stopped job card(s)", flush=True)
     os.environ["PUPPETMASTER_STATE_DIR"] = str(config.workspace / "puppetmaster")
     orch = AgentOrchestrator(
         store=store,
@@ -1713,14 +2022,16 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         retry_backoff_s=15.0,
     )
     from agent_discord.host.github import host_github_report
+    from agent_discord.host.repo_status import collect_repo_status
 
     orch.host_github = host_github_report
+    orch.repo_status_collector = collect_repo_status
     claimed = False
     exit_code = 0
     panel_stop = threading.Event()
     discord_down = threading.Event()
-    asks: Queue[tuple[str, str, str]] = Queue()
-    ignore_history_before_ms = int(time.time() * 1000) - LISTEN_HISTORY_SLACK_MS
+    # (channel_id, prompt, replay_of, requester_id)
+    asks: Queue[tuple[str, str, str, str]] = Queue()
     from agent_discord.host.memory import seed_memory_channels
     from agent_discord.host.realms import listen_channel_ids, seed_channel_realms
     from agent_discord.host.repos import load_host_repos
@@ -1741,6 +2052,15 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         repos=host_repos,
     )
     job_pool = JobPool(max_live=resolve_max_live())
+    orch.job_pool = job_pool
+    # Asks claimed by a process that died before their task row existed. The
+    # claim already hides them from the next poll, so replay is the only way back.
+    try:
+        from agent_discord.orchestration.listen import replay_pending_intakes
+
+        replay_pending_intakes(orch, job_pool=job_pool)
+    except Exception as exc:  # noqa: BLE001 — start must not die on replay
+        print(f"pending intake replay failed: {exc}", flush=True)
     try:
         try:
             from agent_discord.host.webhook import notify_host_start
@@ -1794,6 +2114,8 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                         if config.host_actions
                         else ()
                     ),
+                    workspace=config.workspace,
+                    interactions=getattr(config, "interactions", "") or "",
                 )
         while True:
             if discord_down.is_set():
@@ -1884,7 +2206,10 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                             thread_id=drain_thread,
                             limit=args.limit,
                             workspace=config.workspace,
-                            since_ms=ignore_history_before_ms,
+                            # No since_ms: a destination is seeded when it is
+                            # first polled, not at process start, so a thread
+                            # discovered hours later does not replay the day.
+                            since_ms=None,
                             host_roots=(
                                 tuple(repo.path for repo in host_repos)
                                 + (config.puppetmaster_cwd, config.workspace)
@@ -1892,6 +2217,7 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                                 else ()
                             ),
                             job_pool=job_pool,
+                            host_channel_id=args.channel_id,
                         )
                     )
                 except Exception as exc:
@@ -1928,14 +2254,22 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                         print(f"listen drain failed: {exc}", flush=True)
             while True:
                 try:
-                    ask_channel, prompt, replay_of = asks.get_nowait()
+                    ask_channel, prompt, replay_of, requester_id = asks.get_nowait()
                 except Empty:
                     break
-                if not store.host_is_armed(ask_channel or args.channel_id):
-                    continue
+                from agent_discord.orchestration.listen import (
+                    PAUSED_HALTED,
+                    PAUSED_OFF,
+                    notice_paused_once,
+                )
                 from agent_discord.orchestration.service import is_spend_halted
 
+                paused_channel = ask_channel or args.channel_id
+                if not store.host_is_armed(paused_channel):
+                    notice_paused_once(discord, store, paused_channel, None, PAUSED_OFF)
+                    continue
                 if is_spend_halted(store, args.workspace_id):
+                    notice_paused_once(discord, store, paused_channel, None, PAUSED_HALTED)
                     continue
                 ask_meta: dict[str, Any] = {}
                 if replay_of:
@@ -1946,6 +2280,7 @@ def cmd_listen(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                     workspace_id=args.workspace_id,
                     guild_id=args.guild_id,
                     thread_id=args.thread_id if ask_channel == args.channel_id else None,
+                    requester_id=requester_id or None,
                     metadata=ask_meta,
                 )
                 job_pool.submit(
@@ -2013,9 +2348,11 @@ def _start_panel_gateway(
     channel_id: str,
     stop: threading.Event,
     discord_down: threading.Event,
-    asks: Optional[Queue[tuple[str, str, str]]] = None,
+    asks: Optional[Queue[tuple[str, str, str, str]]] = None,
     orch: Any = None,
     host_roots: tuple[Any, ...] = (),
+    workspace: Any = None,
+    interactions: str = "",
 ) -> None:
     # Panel gateway is expected — never-READY past grace becomes Need.
     try:
@@ -2035,10 +2372,6 @@ def _start_panel_gateway(
         else:
             sender("idle", "Discord OS")
 
-    def on_ask(text: str) -> None:
-        if asks is not None and text.strip():
-            asks.put((channel_id, text.strip(), ""))
-
     def on_connected(sender: Any) -> None:
         presence.clear()
         presence.append(sender)
@@ -2056,27 +2389,24 @@ def _start_panel_gateway(
         data = payload.get("data")
         if isinstance(data, dict):
             custom_id = str(data.get("custom_id") or "")
-        print(f"panel click {custom_id}", flush=True)
+        if custom_id or int(payload.get("type") or 0) not in {2, 4}:
+            print(f"panel click {custom_id}", flush=True)
         from agent_discord.host.panel import interaction_channel_id
 
         ask_channel = interaction_channel_id(payload, channel_id)
 
-        def on_ask_here(text: str) -> None:
+        def on_ask_here(text: str, requester_id: str) -> None:
             prompt = (text or "").strip()
             if not prompt:
                 return
-            pending = ""
-            try:
-                pending = str(
-                    store.get_preference("_host", f"pending_continue:{ask_channel}") or ""
-                ).strip()
-            except Exception:
-                pending = ""
+            from agent_discord.host.panel import (
+                clear_pending_continue,
+                pending_continue_run_id,
+            )
+
+            pending = pending_continue_run_id(store, ask_channel)
             if pending and orch is not None:
-                try:
-                    store.set_preference("_host", f"pending_continue:{ask_channel}", "")
-                except Exception:
-                    pass
+                clear_pending_continue(store, ask_channel)
                 try:
                     orch.apply_job_action("continue", pending, prompt=prompt)
                     return
@@ -2089,7 +2419,39 @@ def _start_panel_gateway(
                 except Exception:
                     pass
             if asks is not None:
-                asks.put((ask_channel, prompt, ""))
+                asks.put((ask_channel, prompt, "", requester_id))
+
+        # Slash / autocomplete rides the same Gateway when the app has no
+        # Interactions Endpoint URL (AGENT_DISCORD_INTERACTIONS=gateway).
+        if workspace is not None and int(payload.get("type") or 0) in {2, 4}:
+            from agent_discord.discord.interactions import route_gateway_interaction
+
+            def on_slash_ask(target: str, text: str, requester_id: str):
+                prompt = (text or "").strip()
+                if not prompt:
+                    return None
+                if target and target != ask_channel:
+                    if asks is not None:
+                        asks.put((target, prompt, "", requester_id))
+                    return None
+                # Same channel as the panel: keep the Continue aiming rule.
+                on_ask_here(prompt, requester_id)
+                return None
+
+            try:
+                label = route_gateway_interaction(
+                    payload,
+                    workspace=workspace,
+                    roots=list(host_roots),
+                    interactions=interactions,
+                    on_ask=on_slash_ask,
+                )
+            except Exception as exc:  # noqa: BLE001 — listen must keep running
+                print(f"slash route failed: {exc}", flush=True)
+                label = None
+            if label:
+                print(label, flush=True)
+                return
 
         def on_job(action: str, run_id: str) -> None:
             if orch is not None:
@@ -2100,15 +2462,17 @@ def _start_panel_gateway(
                 if action == "retry" and asks is not None:
                     text = str((result or {}).get("intake_text") or "")
                     if text:
-                        asks.put((ask_channel, text, str((result or {}).get("replay_of") or "")))
+                        asks.put(
+                            (ask_channel, text, str((result or {}).get("replay_of") or ""), "")
+                        )
                 return
             if action == "retry" and asks is not None:
-                asks.put((ask_channel, f"retry run {run_id}", run_id))
+                asks.put((ask_channel, f"retry run {run_id}", run_id, ""))
                 return
             if action == "continue" and asks is not None:
                 from agent_discord.orchestration.job_briefing import DEFAULT_CONTINUE_PROMPT
 
-                asks.put((ask_channel, DEFAULT_CONTINUE_PROMPT, ""))
+                asks.put((ask_channel, DEFAULT_CONTINUE_PROMPT, "", ""))
                 return
             if action == "deny":
                 try:
@@ -2160,13 +2524,20 @@ def _start_panel_gateway(
         )
 
     def loop() -> None:
-        from agent_discord.discord.realtime import GatewayClosed, run_discord_gateway
+        from agent_discord.discord.realtime import (
+            GatewayClosed,
+            GatewaySession,
+            gateway_backoff_delay,
+            run_discord_gateway,
+        )
 
         armed = False
         try:
             armed = bool(store.host_is_armed(channel_id))
         except Exception:
             armed = False
+        session = GatewaySession()
+        attempt = 0
         while not stop.is_set():
             try:
                 run_discord_gateway(
@@ -2176,22 +2547,35 @@ def _start_panel_gateway(
                     on_connected=on_connected,
                     presence_status="dnd" if armed else "idle",
                     presence_name="the harness" if armed else "Discord OS",
+                    session=session,
                 )
             except GatewayClosed as exc:
                 print(f"panel gateway closed: {exc}", flush=True)
                 if exc.fatal:
                     try:
-                        store.set_host_control(channel_id, armed=False)
+                        from agent_discord.orchestration.service import set_host_armed
+
+                        set_host_armed(store, channel_id, False)
                     except Exception:
                         pass
                     discord_down.set()
                     return
-                time.sleep(0.4)
             except Exception as exc:
                 print(f"panel gateway error: {exc}", flush=True)
-                time.sleep(1.0)
             else:
                 return
+            # A session that reached READY earns a fresh backoff ladder;
+            # offline/DNS-failing retries keep climbing to the cap instead of
+            # writing thousands of lookup-failed lines an hour.
+            if session.consume_ready():
+                attempt = 0
+            attempt += 1
+            delay = gateway_backoff_delay(attempt)
+            print(
+                f"panel gateway retry in {delay:.1f}s (attempt {attempt})",
+                flush=True,
+            )
+            stop.wait(delay)
 
     threading.Thread(target=loop, name="discord-os-panel", daemon=True).start()
 
@@ -2290,12 +2674,10 @@ def cmd_host(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
         return cmd_host_hosts(args, out=out)
     if command == "doctor":
         return cmd_host_doctor(args, out=out)
-    if command == "dashboard":
-        return cmd_host_dashboard(args, out=out)
     if command == "run":
         args.announce_host = True
         return cmd_listen(args, out=out)
-    print("host: start, stop, status, doctor, dashboard, or run", file=sys.stderr)
+    print("host: start, stop, status, doctor, or run", file=sys.stderr)
     return 2
 
 
@@ -2531,7 +2913,7 @@ def _doctor_notify(
         doctor_notify_should_post,
         filter_doctor_notify_lines,
     )
-    from agent_discord.host.liveness import notify_doctor_failure
+    from agent_discord.host.status import notify_doctor_failure
     from agent_discord.host.service import read_host_meta
     from agent_discord.persistence.sqlite import SQLiteStore
 
@@ -2574,62 +2956,6 @@ def _doctor_notify(
                 closer()
     finally:
         store.close()
-
-
-def cmd_host_dashboard(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
-    """Serve (or print) the read-only companion dashboard."""
-
-    out = out or sys.stdout
-    from agent_discord.host.dashboard import (
-        DashboardBindError,
-        build_status_snapshot,
-        resolve_bind_host,
-        resolve_bind_port,
-        serve_dashboard,
-    )
-
-    config = apply_runtime_secrets(load_config())
-    once = bool(getattr(args, "once", False))
-    if once:
-        payload = build_status_snapshot(
-            workspace=config.workspace,
-            config=config,
-            probe_hosts=True,
-        )
-        print(json.dumps(payload, indent=2, sort_keys=True), file=out)
-        return 0
-    try:
-        host = resolve_bind_host(
-            getattr(args, "host", None),
-            allow_non_loopback=bool(getattr(args, "allow_non_loopback", False)),
-        )
-        port = resolve_bind_port(getattr(args, "port", None))
-    except DashboardBindError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-    try:
-        server = serve_dashboard(
-            host=host,
-            port=port,
-            allow_non_loopback=bool(getattr(args, "allow_non_loopback", False)),
-            workspace=config.workspace,
-        )
-    except DashboardBindError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-    except OSError as exc:
-        print(f"dashboard: bind failed: {exc}", file=sys.stderr)
-        return 1
-    bind_host, bind_port = server.server_address[:2]
-    print(f"dashboard: http://{bind_host}:{bind_port}/ (read-only, Ctrl-C to stop)", file=out)
-    print(f"dashboard: json http://{bind_host}:{bind_port}/api/status", file=out)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("dashboard: stopped", file=out)
-    finally:
-        server.server_close()
-    return 0
 
 
 def cmd_connect(args: argparse.Namespace, *, out: TextIO | None = None, stdin: TextIO | None = None) -> int:
@@ -2725,12 +3051,7 @@ def cmd_status(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
                 "created_at": "",
             }
         )
-    if config.discord_mcp_provider == "saseq":
-        mcp_url = config.saseq_mcp_http_url
-    elif config.discord_mcp_provider == "braindao":
-        mcp_url = config.braindao_mcp_http_url
-    else:
-        mcp_url = "https://discord.com/api/v10"
+    mcp_url = "https://discord.com/api/v10"
     payload = {
         "product": PRODUCT_NAME,
         "cli": CLI_NAME,
@@ -3119,8 +3440,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return cmd_note(args)
     if args.command == "host":
         return cmd_host(args)
-    if args.command == "dashboard":
-        return cmd_host_dashboard(args)
     if args.command == "listen":
         return cmd_listen(args)
     if args.command == "connect":
@@ -3139,6 +3458,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return cmd_brain(args)
     if args.command == "schedule":
         return cmd_schedule(args)
+    if args.command == "features":
+        return cmd_features(args)
+    if args.command == "db":
+        return cmd_db(args)
     if args.command == "spend":
         return cmd_spend(args)
     if args.command == "poll":
@@ -3149,8 +3472,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return cmd_add(args)
     if args.command == "map":
         return cmd_map(args)
+    if args.command == "repo":
+        return cmd_repo(args)
     if args.command == "lineage":
         return cmd_lineage(args)
+    if args.command == "eval":
+        return cmd_eval(args)
     if args.command == "gate-hook":
         return cmd_gate_hook(args)
     parser.error(f"unknown command {args.command}")

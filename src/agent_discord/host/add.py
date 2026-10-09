@@ -225,6 +225,77 @@ def add_memory(
     }
 
 
+def add_capture(
+    store: Any,
+    *,
+    channel_id: str,
+    workspace_id: str = "default",
+    env_file: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Arm capture-first on one channel. Short thoughts stop becoming jobs."""
+
+    from agent_discord.orchestration.capture import (
+        CAPTURE_CHANNELS_ENV,
+        enable_capture_channel,
+    )
+
+    cid = (channel_id or "").strip()
+    if not cid:
+        raise ValueError("add capture needs --channel-id")
+    enable_capture_channel(store, workspace_id=workspace_id, channel_id=cid)
+    path = env_file or dotenv_path()
+    current = read_dotenv(path)
+    upsert_dotenv(
+        path,
+        {
+            CAPTURE_CHANNELS_ENV: merge_id_csv(
+                current.get(CAPTURE_CHANNELS_ENV)
+                or os.environ.get(CAPTURE_CHANNELS_ENV)
+                or "",
+                cid,
+            )
+        },
+    )
+    return {
+        "kind": "capture",
+        "channel_id": cid,
+        "env": str(path),
+        "live": True,
+    }
+
+
+def add_pm_inbox(
+    store: Any,
+    *,
+    channel_id: str,
+    env_file: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Open the Puppetmaster job inbox on one channel.
+
+    Jobs already running when the inbox opens are not carded, so this records
+    the moment as well as the channel.
+    """
+
+    from agent_discord.orchestration.pm_inbox import (
+        PM_INBOX_CHANNEL_ENV,
+        enable_pm_inbox,
+    )
+
+    cid = (channel_id or "").strip()
+    if not cid:
+        raise ValueError("add pm-inbox needs --channel-id")
+    enabled_ms = enable_pm_inbox(store, cid)
+    dest = env_file or dotenv_path()
+    upsert_dotenv(dest, {PM_INBOX_CHANNEL_ENV: cid})
+    return {
+        "kind": "pm-inbox",
+        "channel_id": cid,
+        "enabled_ms": enabled_ms,
+        "env": str(dest),
+        "live": True,
+    }
+
+
 def add_repo(
     *,
     name: str,
@@ -410,7 +481,7 @@ def add_desk_pack(
         "channel_id": cid,
         "steps": steps,
         "restart": restart,
-        "story": "REQUIRE_OPERATORS → Pair×2 → desk-pack → add brain --dri → dual ask/steer → handoff → gate park",
+        "story": "REQUIRE_OPERATORS → Pair×2 → desk-pack → add brain → dual ask/steer → handoff → gate park",
     }
 
 
@@ -419,21 +490,19 @@ def add_brain(
     store: Any,
     *,
     channel_id: str,
-    dri: str,
     strategy_docs: str = "",
     transcripts_channel: str = "",
     journal: bool = True,
-    role: str = "",
     workspace_id: str = "default",
     realm: str = "",
     env_file: Optional[Path] = None,
 ) -> dict[str, Any]:
-    """Per-DRI brain lake: optional realm + brain bind (strategy/transcripts/journal).
+    """Brain lake: optional realm + brain bind (strategy/transcripts/journal).
 
     Honest limit: single-host SQLite — not multi-host Durable Objects.
     """
 
-    from agent_discord.host.brain import bind_brain
+    from agent_discord.host.memory import bind_brain_lake
 
     steps: list[dict[str, Any]] = []
     cid = (channel_id or "").strip()
@@ -447,24 +516,21 @@ def add_brain(
                 env_file=env_file,
             )
         )
-    brain = bind_brain(
+    brain = bind_brain_lake(
         store,
         workspace_id=workspace_id,
         channel_id=cid,
-        dri=dri,
         strategy_docs=strategy_docs,
         transcripts_channel=transcripts_channel,
         journal=journal,
-        role=role,
     )
     steps.append(brain)
     return {
         "kind": "brain",
         "channel_id": cid,
-        "dri": dri,
         "steps": steps,
         "honest_limit": brain.get("honest_limit"),
-        "story": "desk-pack → add brain --dri → journal/strategy inject → handoff lakes",
+        "story": "desk-pack → add brain → journal/strategy inject → handoff lakes",
     }
 
 
@@ -493,8 +559,15 @@ def list_added(
         for item in load_host_tools(env=merged)
         if item.ready
     ]
+    from agent_discord.orchestration.capture import capture_channel_ids
+    from agent_discord.orchestration.pm_inbox import pm_inbox_channel_id
+
     return {
         "env": str(path) if path.is_file() else "",
+        "capture": list(
+            capture_channel_ids(store, workspace_id=workspace_id, env=merged)
+        ),
+        "pm_inbox": pm_inbox_channel_id(store, env=merged),
         "repos": [{"name": repo.name, "path": str(repo.path)} for repo in repos],
         "realms": realms,
         "memory": list(memory_channel_ids(store, workspace_id=workspace_id, env=merged)),

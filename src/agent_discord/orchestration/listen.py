@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import threading
 import time
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
 from agent_discord.contracts import DiscordMessage, RunReceipt, TaskIntake
+from agent_discord.discord.facade import accepts_keyword
 from agent_discord.host.power import is_power_command, parse_power_command
 from agent_discord.host.memory import bind_memory_channel, is_memory_bind
 from agent_discord.host.realms import bind_channel_realm, is_bind_command, parse_bind_command
@@ -30,6 +33,7 @@ from agent_discord.orchestration.cards import (
 from agent_discord.orchestration.jobs import resolved_write_key
 from agent_discord.orchestration.service import (
     author_may_dispatch,
+    author_may_operate,
     expire_parked_approvals,
     inbound_queue_enabled,
     is_spend_halted,
@@ -40,12 +44,19 @@ from agent_discord.orchestration.service import (
     seed_spend_cap_from_env,
     seed_write_gate_from_env,
     session_spend_usd,
+    set_host_armed,
     spend_cap_usd,
     writes_need_approval,
 )
 
 DISCORD_EPOCH_MS = 1_420_070_400_000
 LISTEN_HISTORY_SLACK_MS = 15_000
+# Read more than we keep: harness cards are filtered out before the keep slice.
+INBOUND_PAGE_LIMIT = 100
+INBOUND_MAX_PAGES = 10
+THREAD_HISTORY_READ_LIMIT = 12
+THREAD_HISTORY_KEEP = 6
+HOST_AUTHOR_LABEL = "Discord OS"
 
 
 def snowflake_created_ms(message_id: str) -> Optional[int]:
@@ -222,6 +233,242 @@ def should_dispatch_inbound(message: DiscordMessage) -> bool:
     return True
 
 
+_VOICE_WORKERS: list[threading.Thread] = []
+_VOICE_WORKERS_LOCK = threading.Lock()
+# Transcribed memos wait here for the next drain of the same watermark key.
+# The drain routes them like typed text: schedule, claim, capture, ask.
+_VOICE_READY: list[tuple[str, DiscordMessage]] = []
+_VOICE_READY_LOCK = threading.Lock()
+_PRECLAIMED_KEY = "inbound_preclaimed"
+
+
+def _take_ready_voice(watermark_key: str) -> list[DiscordMessage]:
+    with _VOICE_READY_LOCK:
+        mine = [m for key, m in _VOICE_READY if key == watermark_key]
+        _VOICE_READY[:] = [(key, m) for key, m in _VOICE_READY if key != watermark_key]
+    return mine
+
+
+def join_voice_workers(timeout: float = 30.0) -> None:
+    """Wait for off-thread transcription workers. Shutdown and tests."""
+
+    with _VOICE_WORKERS_LOCK:
+        workers = list(_VOICE_WORKERS)
+    for worker in workers:
+        worker.join(timeout=timeout)
+
+
+def _spawn_voice_worker(work: Any) -> None:
+    worker = threading.Thread(target=work, name="discord-os-voice", daemon=True)
+    with _VOICE_WORKERS_LOCK:
+        _VOICE_WORKERS[:] = [t for t in _VOICE_WORKERS if t.is_alive()]
+        _VOICE_WORKERS.append(worker)
+    worker.start()
+
+
+def _defer_voice_intake(
+    discord: Any,
+    store: Any,
+    *,
+    message: DiscordMessage,
+    channel_id: str,
+    thread_id: Optional[str],
+    workspace_id: str,
+    watermark_key: str,
+) -> None:
+    """Transcribe a voice memo off the listen thread, then hand it back.
+
+    Whisper is a subprocess with a 60s timeout, so running it inside the drain
+    loop stalls every other channel. The gates that do not need the transcript
+    (armed, spend halt, operator) are checked here. The worker only
+    transcribes. The next drain of ``watermark_key`` routes the transcript like
+    typed text, so a spoken schedule, claim, or capture is not cooked as an ask.
+    """
+
+    if not _channel_is_armed(store, channel_id) or is_spend_halted(store, workspace_id):
+        return
+    if not author_may_dispatch(
+        store, message.author_id, role_ids=_author_role_ids(message)
+    ):
+        return
+    if not _claim_inbound(store, discord, message, channel_id):
+        return
+
+    def work() -> None:
+        try:
+            text, meta, whisper_miss, _needs = _collab_intake(message, discord)
+        except Exception:
+            text, meta, whisper_miss = "", {}, True
+        if whisper_miss or not text:
+            _post_voice_whisper_miss(discord, channel_id, thread_id)
+            return
+        ready_meta = dict(meta)
+        ready_meta["voice_transcript"] = text
+        ready_meta["voice_deferred"] = True
+        ready_meta[_PRECLAIMED_KEY] = True
+        ready = dataclasses.replace(message, metadata=ready_meta)
+        with _VOICE_READY_LOCK:
+            _VOICE_READY.append((watermark_key, ready))
+
+    _spawn_voice_worker(work)
+
+
+def record_pending_intake(store: Any, intake: TaskIntake) -> None:
+    """Durably remember a claimed ask until its task row exists.
+
+    The claim (seen_messages) is what stops a second dispatch of the same
+    Discord message, and it lands before the worker starts. Without this row a
+    crash or restart between claim and ``create_task`` would drop the ask for
+    good, because the claim makes the next poll skip it.
+    """
+
+    if store is None or not intake.message_id:
+        return
+    writer = getattr(store, "record_pending_intake", None)
+    if not callable(writer):
+        return
+    try:
+        writer(
+            message_id=intake.message_id,
+            channel_id=str(intake.channel_id or ""),
+            text=intake.text,
+            thread_id=str(intake.thread_id or ""),
+            workspace_id=str(intake.workspace_id or "default"),
+            guild_id=str(intake.guild_id or ""),
+            requester_id=str(intake.requester_id or ""),
+            metadata=dict(intake.metadata or {}),
+        )
+    except Exception:
+        pass
+
+
+def replay_pending_intakes(
+    orchestrator: Any,
+    *,
+    job_pool: Optional[Any] = None,
+    max_attempts: int = 3,
+) -> list[RunReceipt]:
+    """Re-dispatch claimed asks that never reached a task row. Call on start.
+
+    A row survives only the window between claim and ``create_task``, so this
+    runs at host start, when that window can only be a crashed or killed
+    process. Rows that keep failing are dropped after ``max_attempts`` so a
+    poisoned ask cannot replay forever.
+    """
+
+    store = getattr(orchestrator, "store", None)
+    lister = getattr(store, "list_pending_intake", None)
+    if not callable(lister):
+        return []
+    try:
+        rows = list(lister())
+    except Exception:
+        return []
+    receipts: list[RunReceipt] = []
+    for row in rows:
+        message_id = str(row.get("message_id") or "")
+        text = str(row.get("text") or "").strip()
+        if not message_id or not text:
+            _clear_pending(store, message_id)
+            continue
+        counter = getattr(store, "note_pending_intake_attempt", None)
+        attempts = 0
+        if callable(counter):
+            try:
+                attempts = int(counter(message_id))
+            except Exception:
+                attempts = 0
+        if attempts > max_attempts:
+            _clear_pending(store, message_id)
+            continue
+        meta = dict(row.get("metadata") or {})
+        meta["inbound_claimed"] = True
+        meta["intake_replayed"] = True
+        intake = TaskIntake(
+            text=text,
+            channel_id=str(row.get("channel_id") or ""),
+            workspace_id=str(row.get("workspace_id") or "default"),
+            guild_id=str(row.get("guild_id") or "") or None,
+            thread_id=str(row.get("thread_id") or "") or None,
+            message_id=message_id,
+            requester_id=str(row.get("requester_id") or "") or None,
+            metadata=meta,
+        )
+        try:
+            if job_pool is not None:
+                job_pool.submit(
+                    orchestrator.run_task,
+                    intake,
+                    write_key=resolved_write_key(intake, orchestrator),
+                )
+            else:
+                receipts.append(orchestrator.run_task(intake))
+        except Exception:
+            continue
+    return receipts
+
+
+def _clear_pending(store: Any, message_id: str) -> None:
+    clearer = getattr(store, "clear_pending_intake", None)
+    if callable(clearer) and message_id:
+        try:
+            clearer(message_id)
+        except Exception:
+            pass
+
+
+def _read_inbound_backlog(
+    discord: Any,
+    channel_id: str,
+    *,
+    thread_id: Optional[str],
+    limit: int,
+    after: str,
+) -> list[DiscordMessage]:
+    """Every message since the watermark, not just the newest page.
+
+    A burst larger than one page used to lose its older messages: the poll read
+    the newest ``limit`` and the watermark then skipped past the rest. With a
+    watermark message id we walk forward with ``after=`` until a short page.
+    Without one (first listen) a single newest page is all we are allowed to
+    take, or the seed would replay the whole channel.
+    """
+
+    anchor = (after or "").strip()
+    if not anchor:
+        return list(
+            discord.read_messages(
+                channel_id,
+                limit=limit,
+                thread_id=thread_id,
+                skip_duplicates=False,
+            )
+        )
+    collected: list[DiscordMessage] = []
+    seen: set[str] = set()
+    for _page in range(INBOUND_MAX_PAGES):
+        page = list(
+            discord.read_messages(
+                channel_id,
+                limit=INBOUND_PAGE_LIMIT,
+                thread_id=thread_id,
+                after=anchor,
+                skip_duplicates=False,
+            )
+        )
+        fresh = [m for m in page if m.message_id and m.message_id not in seen]
+        for message in fresh:
+            seen.add(message.message_id)
+            collected.append(message)
+        if len(page) < INBOUND_PAGE_LIMIT or not fresh:
+            break
+        newest = max(fresh, key=_inbound_sort_key)
+        if not _message_id_after(newest.message_id or "", anchor):
+            break
+        anchor = newest.message_id or anchor
+    return collected
+
+
 def drain_inbound(
     orchestrator: Any,
     discord: Any,
@@ -238,6 +485,7 @@ def drain_inbound(
     host_runner: Optional[Any] = None,
     browser_open: Optional[Any] = None,
     job_pool: Optional[Any] = None,
+    host_channel_id: str = "",
 ) -> Sequence[RunReceipt]:
     """Read recent channel messages and dispatch each new human task once.
 
@@ -246,12 +494,6 @@ def drain_inbound(
     opens stay on this process; Discord is only the remote.
     """
 
-    messages = discord.read_messages(
-        channel_id,
-        limit=limit,
-        thread_id=thread_id,
-        skip_duplicates=False,
-    )
     receipts: list[RunReceipt] = []
     ws = Path(workspace) if workspace is not None else _workspace_from(orchestrator)
     store = getattr(orchestrator, "store", None)
@@ -268,6 +510,13 @@ def drain_inbound(
     else:
         watermark = {"channel_id": watermark_key, "last_created_ms": seed_ms, "last_message_id": ""}
     snapshot = dict(watermark)
+    messages = _read_inbound_backlog(
+        discord,
+        channel_id,
+        thread_id=thread_id,
+        limit=limit,
+        after=str(snapshot.get("last_message_id") or ""),
+    )
     pending: list[DiscordMessage] = []
     for message in messages:
         created_ms = snowflake_created_ms(message.message_id) if message.message_id else None
@@ -275,6 +524,7 @@ def drain_inbound(
             continue
         pending.append(message)
     pending.sort(key=_inbound_sort_key)
+    pending = _take_ready_voice(watermark_key) + pending
     for message in pending:
         created_ms = snowflake_created_ms(message.message_id) if message.message_id else None
         if is_connect_command(message.content or ""):
@@ -373,7 +623,25 @@ def drain_inbound(
                 store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
-        intake_text, intake_meta, skip_voice = _collab_intake(message, discord)
+        intake_text, intake_meta, skip_voice, needs_transcribe = _collab_intake(
+            message, discord, transcribe=job_pool is None
+        )
+        if needs_transcribe:
+            # Whisper is a minute of subprocess. Never on the listen thread —
+            # one memo would stall every channel's poll.
+            _defer_voice_intake(
+                discord,
+                store,
+                message=message,
+                channel_id=channel_id,
+                thread_id=message.thread_id or thread_id,
+                workspace_id=workspace_id,
+                watermark_key=watermark_key,
+            )
+            watermark = _advance_listen_watermark(
+                store, watermark_key, created_ms, message.message_id, watermark
+            )
+            continue
         if skip_voice:
             _claim_inbound(store, discord, message, channel_id)
             _post_voice_whisper_miss(
@@ -406,22 +674,24 @@ def drain_inbound(
                 store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
+        paused = ""
         if not _channel_is_armed(store, channel_id):
-            watermark = _advance_listen_watermark(
-                store, watermark_key, created_ms, message.message_id, watermark
-            )
-            continue
+            paused = PAUSED_OFF
+        elif is_spend_halted(store, workspace_id):
+            paused = PAUSED_HALTED
         text = intake_text or (message.content or "").strip()
-        if not text:
+        if paused or not text:
+            if paused and text and author_may_operate(
+                store, message.author_id, "ask", role_ids=_author_role_ids(message)
+            ):
+                notice_paused_once(
+                    discord, store, channel_id, message.thread_id or thread_id, paused
+                )
             watermark = _advance_listen_watermark(
                 store, watermark_key, created_ms, message.message_id, watermark
             )
             continue
-        if is_spend_halted(store, workspace_id):
-            watermark = _advance_listen_watermark(
-                store, watermark_key, created_ms, message.message_id, watermark
-            )
-            continue
+        clear_paused_notice(store, channel_id)
         if not author_may_dispatch(
             store,
             message.author_id,
@@ -441,6 +711,46 @@ def drain_inbound(
             channel_id=channel_id,
             thread_id=follow_thread,
         ):
+            watermark = _advance_listen_watermark(
+                store, watermark_key, created_ms, message.message_id, watermark
+            )
+            continue
+        if _absorb_fork(
+            orchestrator,
+            discord,
+            store,
+            job_pool,
+            message=message,
+            text=text,
+            channel_id=channel_id,
+            thread_id=follow_thread,
+            workspace_id=workspace_id,
+            guild_id=guild_id,
+        ):
+            watermark = _advance_listen_watermark(
+                store, watermark_key, created_ms, message.message_id, watermark
+            )
+            continue
+        decision = _capture_decision(
+            store,
+            text=text,
+            channel_id=channel_id,
+            workspace_id=workspace_id,
+            in_job_thread=bool(follow_thread),
+            env=env,
+        )
+        text = decision.text or text
+        if decision.capture:
+            if _claim_inbound(store, discord, message, channel_id):
+                _absorb_capture(
+                    discord,
+                    store,
+                    message=message,
+                    text=text,
+                    channel_id=channel_id,
+                    workspace_id=workspace_id,
+                    guild_id=guild_id,
+                )
             watermark = _advance_listen_watermark(
                 store, watermark_key, created_ms, message.message_id, watermark
             )
@@ -587,10 +897,10 @@ def drain_inbound(
                 )
                 continue
             
-            from agent_discord.host.brain import format_meat_proxy_handoff_preamble
             from agent_discord.orchestration.handoff_envelope import (
                 build_handoff_envelope,
                 find_live_handoff_claim,
+                format_handoff_preamble,
                 spoken_already_claimed,
             )
 
@@ -617,7 +927,7 @@ def drain_inbound(
                 )
                 continue
             try:
-                enriched_prompt = format_meat_proxy_handoff_preamble(
+                enriched_prompt = format_handoff_preamble(
                     store,
                     workspace_id=workspace_id,
                     channel_id=channel_id,
@@ -626,18 +936,6 @@ def drain_inbound(
                     peer_prompt=cleaned_prompt,
                     envelope=envelope,
                 )
-            except TypeError:
-                try:
-                    enriched_prompt = format_meat_proxy_handoff_preamble(
-                        store,
-                        workspace_id=workspace_id,
-                        channel_id=channel_id,
-                        from_id=author,
-                        to_id=peer_id,
-                        peer_prompt=cleaned_prompt,
-                    )
-                except Exception:
-                    enriched_prompt = cleaned_prompt
             except Exception:
                 enriched_prompt = cleaned_prompt
             handoff_meta = envelope.as_metadata()
@@ -689,6 +987,7 @@ def drain_inbound(
             requester_id=message.author_id,
             metadata=extra_meta,
         )
+        record_pending_intake(store, intake)
         if job_pool is not None:
             job_pool.submit(
                 orchestrator.run_task,
@@ -709,6 +1008,7 @@ def drain_inbound(
             guild_id=guild_id,
             thread_id=thread_id,
             discord=discord,
+            job_pool=job_pool,
         )
     )
     receipts.extend(
@@ -724,6 +1024,13 @@ def drain_inbound(
     _tick_approval_timeout_best_effort(orchestrator, env)
     _tick_gate_queue_best_effort(orchestrator, env)
     if thread_id is None:
+        try:
+            from agent_discord.host.features import sync_feature_env
+
+            # /features toggles from Discord or the CLI land here, no restart.
+            sync_feature_env(store)
+        except Exception:
+            pass
         try:
             from agent_discord.orchestration.github_rules import admit_github_rules
             from agent_discord.orchestration.github_wake import bot_allowlist, wake_github_jobs
@@ -744,6 +1051,34 @@ def drain_inbound(
             )
         except Exception:
             pass
+        _tick_ci_watch_best_effort(
+            orchestrator,
+            discord,
+            store,
+            channel_id=channel_id,
+            workspace_id=workspace_id,
+            env=env,
+        )
+        if str(host_channel_id or "").strip() == str(channel_id or "").strip():
+            # One summary a day on the HOST channel, not one per bound realm.
+            _tick_morning_summary_best_effort(
+                orchestrator,
+                discord,
+                store,
+                channel_id=channel_id,
+                workspace_id=workspace_id,
+                env=env,
+            )
+            # One capture card a week on the same channel, same hour.
+            _tick_capture_digest_best_effort(
+                discord,
+                store,
+                channel_id=channel_id,
+                workspace_id=workspace_id,
+                env=env,
+            )
+        _tick_pm_inbox_best_effort(discord, store, env=env)
+        _tick_outcomes_best_effort(discord, store, env=env)
         _tick_host_liveness_best_effort(
             discord,
             store,
@@ -757,6 +1092,83 @@ def drain_inbound(
 
 
 
+
+
+def _absorb_fork(
+    orchestrator: Any,
+    discord: Any,
+    store: Any,
+    job_pool: Optional[Any],
+    *,
+    message: DiscordMessage,
+    text: str,
+    channel_id: str,
+    thread_id: Optional[str],
+    workspace_id: str,
+    guild_id: Optional[str],
+) -> bool:
+    """``fork from <N>: <ask>`` in a job thread → a sibling thread off that node.
+
+    The new intake carries no thread id, so the orchestrator posts a starter in
+    the parent channel and opens its own thread next to this one. Minting a job
+    is a dispatch, so it is operator-only.
+    """
+
+    from agent_discord.orchestration.fork import (
+        fork_metadata,
+        parse_fork_command,
+        resolve_fork_parent,
+    )
+    from agent_discord.orchestration.lineage import job_code_for_run
+
+    tid = (thread_id or "").strip()
+    if not tid:
+        return False
+    asked = parse_fork_command(text)
+    if asked is None:
+        return False
+    if not author_may_dispatch(
+        store, message.author_id, role_ids=_author_role_ids(message)
+    ):
+        return True
+    if not _claim_inbound(store, discord, message, channel_id):
+        return True
+    run_id = ""
+    reader = getattr(store, "latest_run_id_for_thread", None)
+    if callable(reader):
+        try:
+            run_id = str(reader(tid) or "").strip()
+        except Exception:
+            run_id = ""
+    node, step_number, refusal = resolve_fork_parent(store, run_id, asked.token)
+    if node is None:
+        _post_host_deny(discord, channel_id, tid, refusal)
+        return True
+    meta = fork_metadata(
+        node,
+        run_id=run_id,
+        step_number=step_number,
+        job_code=job_code_for_run(store, run_id),
+    )
+    meta["parent_thread_id"] = tid
+    intake = TaskIntake(
+        text=asked.prompt,
+        channel_id=channel_id,
+        workspace_id=workspace_id,
+        guild_id=guild_id,
+        requester_id=message.author_id,
+        metadata=meta,
+    )
+    record_pending_intake(store, intake)
+    if job_pool is None:
+        orchestrator.run_task(intake)
+    else:
+        job_pool.submit(
+            orchestrator.run_task,
+            intake,
+            write_key=resolved_write_key(intake, orchestrator),
+        )
+    return True
 
 
 def _absorb_spoken_gate(
@@ -1013,6 +1425,241 @@ def _post_queued_ack(discord: Any, channel_id: str, thread_id: Optional[str]) ->
         pass
 
 
+def _tick_ci_watch_best_effort(
+    orchestrator: Any,
+    discord: Any,
+    store: Any,
+    *,
+    channel_id: str,
+    workspace_id: str,
+    env: Optional[Mapping[str, str]],
+) -> None:
+    """Red CI on this channel's bound checkout → one Fix CI wake. Best-effort.
+
+    Each poll runs gh against GitHub, so it is throttled per channel
+    (DISCORD_OS_CI_WATCH_INTERVAL_S, default 300) rather than run every tick.
+    """
+
+    if not _channel_is_armed(store, channel_id):
+        return
+    if not _poll_due(
+        store,
+        f"ci_watch_next_at:{(channel_id or '').strip()}",
+        env=env,
+        env_name=CI_WATCH_INTERVAL_ENV,
+        default_s=CI_WATCH_DEFAULT_INTERVAL_S,
+    ):
+        return
+    try:
+        from agent_discord.orchestration.ci_watch import tick_ci_watch
+
+        tick_ci_watch(
+            store,
+            discord,
+            channel_id=channel_id,
+            workspace_id=workspace_id,
+            repos=getattr(orchestrator, "host_repos", None) or (),
+            env=env,
+            collector=getattr(orchestrator, "ci_failure_collector", None),
+        )
+    except Exception:
+        pass
+
+
+CI_WATCH_INTERVAL_ENV = "DISCORD_OS_CI_WATCH_INTERVAL_S"
+CI_WATCH_DEFAULT_INTERVAL_S = 300
+OUTCOMES_INTERVAL_ENV = "DISCORD_OS_OUTCOMES_INTERVAL_S"
+OUTCOMES_DEFAULT_INTERVAL_S = 300
+
+
+def _poll_due(
+    store: Any,
+    key: str,
+    *,
+    env: Optional[Mapping[str, str]],
+    env_name: str,
+    default_s: int,
+) -> bool:
+    """True at most once per interval; the next slot persists in SQLite.
+
+    Ticks that reach a rate-limited API (GitHub, Discord reaction reads) use
+    this instead of running on every listen tick. The slot is stored so a
+    restart does not burst.
+    """
+
+    import os
+
+    from agent_discord.orchestration.service import HOST_PREFS_WORKSPACE
+
+    source = env if env is not None else os.environ
+    try:
+        interval = max(30, int(str(source.get(env_name) or "").strip() or 0))
+    except ValueError:
+        interval = 0
+    interval = interval or default_s
+    now = int(time.time())
+    try:
+        due_at = int(str(store.get_preference(HOST_PREFS_WORKSPACE, key) or "0") or 0)
+        if now < due_at:
+            return False
+        store.set_preference(HOST_PREFS_WORKSPACE, key, str(now + interval))
+    except Exception:
+        return False
+    return True
+
+
+def _tick_outcomes_best_effort(
+    discord: Any,
+    store: Any,
+    *,
+    env: Optional[Mapping[str, str]],
+) -> None:
+    """Operator reactions on recently settled cards → labeled outcomes.
+
+    One reaction read per emoji per card, so it is throttled
+    (DISCORD_OS_OUTCOMES_INTERVAL_S, default 300) like the CI watcher.
+    """
+
+    if not _poll_due(
+        store,
+        "outcomes_next_at",
+        env=env,
+        env_name=OUTCOMES_INTERVAL_ENV,
+        default_s=OUTCOMES_DEFAULT_INTERVAL_S,
+    ):
+        return
+    try:
+        from agent_discord.orchestration.outcomes import collect_outcomes
+
+        collect_outcomes(store, discord, env=env)
+    except Exception:
+        pass
+
+
+def _tick_morning_summary_best_effort(
+    orchestrator: Any,
+    discord: Any,
+    store: Any,
+    *,
+    channel_id: str,
+    workspace_id: str,
+    env: Optional[Mapping[str, str]],
+) -> None:
+    """One HOST card per local day at the morning hour. Best-effort, silent."""
+
+    try:
+        from agent_discord.orchestration.morning import tick_morning_summary
+
+        tick_morning_summary(
+            store,
+            discord,
+            channel_id=channel_id,
+            workspace_id=workspace_id,
+            repos=getattr(orchestrator, "host_repos", None) or (),
+            env=env,
+            repo_status=getattr(orchestrator, "repo_status_collector", None),
+        )
+    except Exception:
+        pass
+
+
+def _capture_decision(
+    store: Any,
+    *,
+    text: str,
+    channel_id: str,
+    workspace_id: str,
+    in_job_thread: bool,
+    env: Optional[Mapping[str, str]],
+) -> Any:
+    """Capture or cook. OFF unless the operator armed capture-first here."""
+
+    from agent_discord.orchestration.capture import (
+        IntakeDecision,
+        capture_first_enabled,
+        classify_intake,
+    )
+
+    try:
+        armed = capture_first_enabled(
+            store, channel_id, workspace_id=workspace_id, env=env
+        )
+    except Exception:
+        armed = False
+    try:
+        return classify_intake(
+            text, capture_first=armed, in_job_thread=in_job_thread
+        )
+    except Exception:
+        return IntakeDecision(capture=False, text=text, reason="error")
+
+
+def _absorb_capture(
+    discord: Any,
+    store: Any,
+    *,
+    message: DiscordMessage,
+    text: str,
+    channel_id: str,
+    workspace_id: str,
+    guild_id: Optional[str],
+) -> None:
+    """Memory plus one reaction. No card, no job, no spend."""
+
+    from agent_discord.orchestration.capture import acknowledge_capture, record_capture
+
+    record_capture(
+        store,
+        workspace_id=workspace_id,
+        channel_id=channel_id,
+        text=text,
+        author_id=message.author_id or "",
+        message_id=message.message_id or "",
+        guild_id=str(guild_id or ""),
+    )
+    acknowledge_capture(discord, channel_id, message.message_id or "")
+
+
+def _tick_capture_digest_best_effort(
+    discord: Any,
+    store: Any,
+    *,
+    channel_id: str,
+    workspace_id: str,
+    env: Optional[Mapping[str, str]],
+) -> None:
+    """One weekly capture card on the HOST channel. Silent when empty."""
+
+    try:
+        from agent_discord.orchestration.capture_digest import tick_capture_digest
+
+        tick_capture_digest(
+            store,
+            discord,
+            channel_id=channel_id,
+            workspace_id=workspace_id,
+            env=env,
+        )
+    except Exception:
+        pass
+
+
+def _tick_pm_inbox_best_effort(
+    discord: Any,
+    store: Any,
+    *,
+    env: Optional[Mapping[str, str]],
+) -> None:
+    """Card Puppetmaster jobs started elsewhere on this Mac. Opt-in, read-only."""
+
+    try:
+        from agent_discord.orchestration.pm_inbox import tick_pm_inbox
+
+        tick_pm_inbox(discord, store, env=env)
+    except Exception:
+        pass
+
+
 def _tick_host_liveness_best_effort(
     discord: Any,
     store: Any,
@@ -1026,7 +1673,7 @@ def _tick_host_liveness_best_effort(
     if workspace is None:
         return
     try:
-        from agent_discord.host.liveness import tick_host_liveness
+        from agent_discord.host.status import tick_host_liveness
 
         tick_host_liveness(
             discord,
@@ -1060,12 +1707,12 @@ def _tick_status_digest_best_effort(
     workspace: Optional[Path],
     force: bool = False,
 ) -> None:
-    """P2.7 RO dashboard snapshot → Discord (debounced). Never mutates power."""
+    """P2.7 RO status snapshot → Discord (debounced). Never mutates power."""
 
     if workspace is None:
         return
     try:
-        from agent_discord.host.status_digest import tick_status_digest
+        from agent_discord.host.status import tick_status_digest
 
         tick_status_digest(
             discord,
@@ -1363,11 +2010,22 @@ def _absorb_connect(
             pass
     parsed = parse_connect_command(message.content or "")
     delete_ok = True
+    # Shred a pasted key even when the author may not connect it.
     if parsed.secret and message.message_id:
         try:
             discord.delete_message(channel_id, message.message_id)
         except Exception:
             delete_ok = False
+    if not author_may_operate(
+        store, message.author_id, "connect", role_ids=_author_role_ids(message), env=env
+    ):
+        _post_host_deny(
+            discord,
+            channel_id,
+            thread_id,
+            "Denied: only paired operators can connect provider keys.",
+        )
+        return
     if workspace is None:
         return
     result = handle_connect_message(
@@ -1440,6 +2098,10 @@ def _channel_is_armed(store: Any, channel_id: str) -> bool:
 
 
 def _claim_inbound(store: Any, discord: Any, message: DiscordMessage, channel_id: str) -> bool:
+    meta = message.metadata if isinstance(message.metadata, Mapping) else {}
+    if meta.get(_PRECLAIMED_KEY):
+        # A transcribed memo: claimed once before whisper ran.
+        return True
     claimed = True
     if store is not None and message.message_id:
         claim = getattr(store, "claim_inbound_message", None)
@@ -1474,11 +2136,20 @@ def _absorb_power(
         from agent_discord.orchestration.service import seed_owner_if_empty
 
         seed_owner_if_empty(store, message.author_id)
-    writer = getattr(store, "set_host_control", None)
-    if parsed.action in {"on", "off"} and callable(writer):
-        writer(channel_id, armed=parsed.action == "on")
+    if parsed.action in {"on", "off"} and not author_may_operate(
+        store, message.author_id, parsed.action, role_ids=_author_role_ids(message)
+    ):
+        _post_host_deny(
+            discord,
+            channel_id,
+            thread_id,
+            "Denied: only paired operators can turn the host on or off.",
+        )
+        return
+    if parsed.action in {"on", "off"} and store is not None:
+        set_host_armed(store, channel_id, parsed.action == "on")
     publish_host_card(discord, store, channel_id, thread_id=thread_id)
-    # P2.7: /status and On push RO dashboard facts to Discord (phone). Read-only.
+    # P2.7: /status and On push RO host facts to Discord (phone). Read-only.
     if parsed.action in {"on", "status"}:
         ws = _workspace_from_store_or_meta(store, discord)
         _tick_status_digest_best_effort(
@@ -1490,6 +2161,53 @@ def _absorb_power(
             force=True,
         )
 
+
+
+PAUSED_OFF = "off"
+PAUSED_HALTED = "halted"
+_PAUSED_SPOKEN = {
+    PAUSED_OFF: "Host is Off, so this ask was not started. Press On on the HOST card, then send it again.",
+    PAUSED_HALTED: (
+        "Spend is halted, so this ask was not started. Choose Resume in the HOST card's "
+        "More menu (or raise DISCORD_OS_SPEND_CAP_USD), then send it again."
+    ),
+}
+
+
+def _paused_notice_key(channel_id: str) -> str:
+    return f"paused_notice:{(channel_id or '').strip()}"
+
+
+def notice_paused_once(
+    discord: Any, store: Any, channel_id: str, thread_id: Optional[str], state: str
+) -> None:
+    """Say once why an ask did not start, with the HOST card for On / Resume.
+
+    Repeats are quiet until the channel runs an ask again (clear_paused_notice).
+    """
+
+    from agent_discord.orchestration.service import HOST_PREFS_WORKSPACE
+
+    key = _paused_notice_key(channel_id)
+    try:
+        if store.get_preference(HOST_PREFS_WORKSPACE, key) == state:
+            return
+        store.set_preference(HOST_PREFS_WORKSPACE, key, state)
+    except Exception:
+        return
+    _post_host_deny(discord, channel_id, thread_id, _PAUSED_SPOKEN[state])
+    publish_host_card(discord, store, channel_id, thread_id=thread_id)
+
+
+def clear_paused_notice(store: Any, channel_id: str) -> None:
+    from agent_discord.orchestration.service import HOST_PREFS_WORKSPACE
+
+    key = _paused_notice_key(channel_id)
+    try:
+        if store.get_preference(HOST_PREFS_WORKSPACE, key):
+            store.set_preference(HOST_PREFS_WORKSPACE, key, "")
+    except Exception:
+        return
 
 
 def _post_host_deny(
@@ -1603,21 +2321,13 @@ def _maybe_mark_forum_on_bind(
 ) -> None:
     """Forum-as-realm: auto-mark GUILD_FORUM binds; Need + refuse mark on ACL miss."""
 
-    from agent_discord.host.forum_realm import ForumRealmError, validate_and_mark_forum_bind
+    from agent_discord.host.forum_realm import (
+        ForumRealmError,
+        extract_discord_token,
+        validate_and_mark_forum_bind,
+    )
 
-    token = ""
-    for attr in ("bot_token", "token", "_token"):
-        raw = getattr(discord, attr, None)
-        if isinstance(raw, str) and raw.strip():
-            token = raw.strip()
-            break
-    provider = getattr(discord, "provider", None)
-    if not token and provider is not None:
-        for attr in ("bot_token", "token", "_token"):
-            raw = getattr(provider, attr, None)
-            if isinstance(raw, str) and raw.strip():
-                token = raw.strip()
-                break
+    token = extract_discord_token(discord)
     if not token:
         # No REST token on this facade (fake tests) — skip probe.
         return
@@ -1724,7 +2434,7 @@ def publish_host_card(
         except Exception:
             jobs = []
     try:
-        from agent_discord.host.liveness import (
+        from agent_discord.host.status import (
             last_digest_from_state,
             merge_host_need_jobs,
             resolve_digest_for_panel,
@@ -1798,6 +2508,7 @@ def publish_host_card(
         jobs=jobs,
         write_gate=write_gate,
         paired=paired,
+        halted=halted,
     )
     if card_id:
         try:
@@ -1828,26 +2539,88 @@ def publish_host_card(
             pass
 
 
-def _collab_intake(message: DiscordMessage, discord: Any) -> tuple[str, dict[str, Any], bool]:
-    """Voice + thread-history context. Fetches bot-visible attachment bytes only."""
+def _history_author_label(item: Any) -> str:
+    """Who wrote a thread line: display name, else operator id, else the host."""
+
+    meta = getattr(item, "metadata", None)
+    meta = meta if isinstance(meta, Mapping) else {}
+    if meta.get("author_bot"):
+        return HOST_AUTHOR_LABEL
+    name = str(meta.get("author_name") or "").strip()
+    if name:
+        return name
+    author = str(getattr(item, "author_id", "") or "").strip()
+    return author or HOST_AUTHOR_LABEL
+
+
+def thread_history_entries(recent: Any) -> list[dict[str, str]]:
+    """The newest thread lines, oldest-first, each attributed to its author.
+
+    Discord hands back messages newest-first, so sort by snowflake before the
+    keep slice — otherwise the newest lines are the ones that get dropped.
+    """
+
+    kept: list[Any] = []
+    for item in list(recent or ()):
+        text = str(getattr(item, "content", "") or "").strip()
+        if not text:
+            continue
+        meta = getattr(item, "metadata", None)
+        meta = meta if isinstance(meta, Mapping) else {}
+        raw_embeds = meta.get("embeds")
+        raw_components = meta.get("components")
+        if is_harness_message(
+            text,
+            raw_embeds if isinstance(raw_embeds, list) else None,
+            raw_components if isinstance(raw_components, list) else None,
+        ):
+            continue
+        kept.append(item)
+    kept.sort(key=_inbound_sort_key)
+    return [
+        {
+            "author": _history_author_label(item),
+            "text": str(getattr(item, "content", "") or "").strip(),
+        }
+        for item in kept[-THREAD_HISTORY_KEEP:]
+    ]
+
+
+def _collab_intake(
+    message: DiscordMessage,
+    discord: Any,
+    *,
+    transcribe: bool = True,
+) -> tuple[str, dict[str, Any], bool, bool]:
+    """Voice + thread-history context. Fetches bot-visible attachment bytes only.
+
+    Returns ``(intake_text, metadata, whisper_miss, needs_transcription)``. With
+    ``transcribe=False`` a voice memo is reported as needing transcription
+    rather than running whisper here, so the caller can move it off the loop.
+    """
 
     meta: dict[str, Any] = {}
     if isinstance(message.metadata, Mapping):
         meta.update(dict(message.metadata))
     mentioned = "@" in (message.content or "")
     meta["mentioned"] = mentioned
-    history: list[str] = []
+    history: list[dict[str, str]] = []
     thread_id = message.thread_id
     if thread_id:
         reader = getattr(discord, "read_messages", None)
         if callable(reader):
+            kwargs: dict[str, Any] = {
+                "limit": THREAD_HISTORY_READ_LIMIT,
+                "thread_id": thread_id,
+            }
+            # Context reads must not spend the facade's dedupe budget, or the
+            # next message in the same thread reads an empty history.
+            if accepts_keyword(reader, "skip_duplicates"):
+                kwargs["skip_duplicates"] = False
             try:
-                recent = reader(message.channel_id, limit=8, thread_id=thread_id)
-                history = [
-                    str(getattr(item, "content", "") or "").strip()
-                    for item in list(recent or [])
-                    if str(getattr(item, "content", "") or "").strip()
-                ][-6:]
+                history = thread_history_entries(
+                    reader(message.channel_id, **kwargs)
+                )
             except Exception:
                 history = []
     if history:
@@ -1860,31 +2633,33 @@ def _collab_intake(message: DiscordMessage, discord: Any) -> tuple[str, dict[str
             spoken_command_to_intake,
         )
     except Exception:
-        return "", meta, False
+        return "", meta, False, False
     try:
         intent = detect_voice_intent(message)
     except Exception:
-        return "", meta, False
+        return "", meta, False, False
     if not intent:
-        return "", meta, False
+        return "", meta, False, False
     if intent.get("kind") == "voice_attachment" and not (
         meta.get("transcript") or meta.get("voice_transcript")
     ):
+        if not transcribe:
+            return "", meta, False, True
         transcript = ""
         try:
             transcript = materialize_voice_intake(message, discord)
         except Exception:
             transcript = ""
         if not transcript:
-            return "", meta, True
+            return "", meta, True, False
         meta["voice_transcript"] = transcript
-        return spoken_command_to_intake(transcript) or transcript, meta, False
+        return spoken_command_to_intake(transcript) or transcript, meta, False, False
     transcript = str(intent.get("intake") or intent.get("transcript") or "")
     if not transcript and (meta.get("transcript") or meta.get("voice_transcript")):
         transcript = spoken_command_to_intake(
             str(meta.get("transcript") or meta.get("voice_transcript") or "")
         )
-    return transcript.strip(), meta, False
+    return transcript.strip(), meta, False, False
 
 
 def _author_role_ids(message: DiscordMessage) -> list[str]:
@@ -1944,8 +2719,14 @@ def _fire_due_schedules(
     guild_id: Optional[str],
     thread_id: Optional[str],
     discord: Any = None,
+    job_pool: Optional[Any] = None,
 ) -> list[RunReceipt]:
     """Fire due schedules while HOST is armed.
+
+    A due schedule is a job like any other: with a JobPool it goes through
+    submit, so it obeys max_live and the per-realm write lock instead of
+    cooking inline and stalling every channel's poll. Without a pool (one-shot
+    CLI drain) it still runs inline and returns its receipt.
 
     While Off (disarmed), overdue rows are **not** flooded as jobs. Instead we
     bump each schedule forward and post at most one Catch-up briefing with
@@ -2025,23 +2806,27 @@ def _fire_due_schedules(
             except Exception:
                 ask_text = prompt
                 overnight = False
-            receipts.append(
-                orchestrator.run_task(
-                    TaskIntake(
-                        text=ask_text,
-                        channel_id=channel_id,
-                        workspace_id=str(row.get("workspace_id") or workspace_id),
-                        guild_id=guild_id,
-                        thread_id=thread_id,
-                        requester_id=created_by or None,
-                        metadata={
-                            "scheduled": True,
-                            "schedule_id": schedule_id,
-                            "overnight_brief": overnight,
-                        },
-                    )
-                )
+            scheduled_intake = TaskIntake(
+                text=ask_text,
+                channel_id=channel_id,
+                workspace_id=str(row.get("workspace_id") or workspace_id),
+                guild_id=guild_id,
+                thread_id=thread_id,
+                requester_id=created_by or None,
+                metadata={
+                    "scheduled": True,
+                    "schedule_id": schedule_id,
+                    "overnight_brief": overnight,
+                },
             )
+            if job_pool is not None:
+                job_pool.submit(
+                    orchestrator.run_task,
+                    scheduled_intake,
+                    write_key=resolved_write_key(scheduled_intake, orchestrator),
+                )
+            else:
+                receipts.append(orchestrator.run_task(scheduled_intake))
         except Exception:
             continue
         if callable(bumper) and every_s > 0:

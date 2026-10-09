@@ -6,7 +6,7 @@ Filmable loop. Brand: **board + brain lakes** (product name: board + brain lakes
 
 1. **Harden** — `DISCORD_OS_REQUIRE_OPERATORS=1`, Pair×2 (2 min)
 2. **Desk-pack** — `discord-os add desk-pack --channel-id ID --realm puppetmaster` (1 min)
-3. **Brain lake** — `discord-os add brain --channel-id ID --dri alex` (1 min)
+3. **Brain lake** — `discord-os add brain --channel-id ID --strategy-docs ~/Projects/strategy` (1 min)
 4. **Dual ask** — two operators Ask / steer (3 min)
 5. **Handoff envelope** — `handoff <@peer>: … | constraints=… | expecting=…` then re-send → `already_claimed` (3 min)
 6. **Board Catch-up** — schedule `board catch-up: nightly` or Off→Catch-up Conflicts (2 min)

@@ -1,7 +1,8 @@
 """Execution lineage DAG. SQLite on this Mac, not a Temporal cluster.
 
-node_key = sha256(step, input hash, parent keys). A steer or retry is an
-upstream edit: descendants are the only steps that need another run.
+node_key = sha256(run_id, step, input hash, parent keys). Two runs with the
+same ask get their own nodes. A steer or retry is an upstream edit:
+descendants are the only steps that need another run.
 """
 
 from __future__ import annotations
@@ -42,11 +43,14 @@ def input_sha256(body: str) -> str:
     return hashlib.sha256((body or "").encode("utf-8")).hexdigest()
 
 
-def node_key(step: str, digest: str, parent_keys: Sequence[str] = ()) -> str:
+def node_key(
+    step: str, digest: str, parent_keys: Sequence[str] = (), *, run_id: str
+) -> str:
     payload = json.dumps(
         {
             "input": digest,
             "parents": list(parent_keys),
+            "run": run_id,
             "step": step,
         },
         separators=(",", ":"),
@@ -66,11 +70,11 @@ def record_node(
     artifact_id: str = "",
     status: str = "complete",
 ) -> str:
-    """Idempotent insert. Returns the node key."""
+    """Idempotent insert within one run. Returns the node key."""
 
     digest = input_sha256(body)
     parents = tuple(k for k in parent_keys if k)
-    key = node_key(step, digest, parents)
+    key = node_key(step, digest, parents, run_id=run_id)
     writer = getattr(store, "upsert_lineage_node", None)
     if callable(writer):
         writer(
@@ -212,27 +216,37 @@ def mark_stale(store: Any, node_keys: Sequence[str]) -> int:
     return int(writer(keys) or 0)
 
 
-def cite_artifact(artifact: Mapping[str, Any] | None) -> str:
-    if not artifact:
-        return ""
-    kind = str(artifact.get("kind") or "blob")
-    digest = str(artifact.get("sha256") or "")[:12]
-    name = str(artifact.get("filename") or kind)
-    if digest:
-        return f"{name} {digest}"
-    return name
-
-
 def format_nodes(nodes: Sequence[LineageNode]) -> str:
+    """Numbered steps. The number is what ``fork from <N>`` in a thread means."""
+
     if not nodes:
         return "no lineage nodes"
-    lines = ["step  key              parents  artifact"]
-    for node in nodes:
+    lines = ["  #  step  key              parents  artifact"]
+    for index, node in enumerate(nodes, start=1):
         short = node.node_key[:12]
         parents = ",".join(p[:8] for p in node.parent_keys) or "-"
         art = (node.artifact_id or "-")[:12]
-        lines.append(f"{node.step:7} {short}  {parents:16}  {art}")
+        lines.append(f"{index:3}  {node.step:7} {short}  {parents:16}  {art}")
     return "\n".join(lines)
+
+
+def node_at_step(nodes: Sequence[LineageNode], step_number: int) -> Optional[LineageNode]:
+    """The node ``format_nodes`` printed as ``step_number`` (1-based)."""
+
+    index = int(step_number) - 1
+    if index < 0 or index >= len(nodes):
+        return None
+    return nodes[index]
+
+
+def node_by_key_prefix(nodes: Sequence[LineageNode], prefix: str) -> Optional[LineageNode]:
+    """The one node whose key starts with ``prefix``. Ambiguous prefixes resolve to none."""
+
+    token = (prefix or "").strip().lower()
+    if len(token) < 4:
+        return None
+    hits = [node for node in nodes if node.node_key.lower().startswith(token)]
+    return hits[0] if len(hits) == 1 else None
 
 
 def node_payload(node: LineageNode) -> dict[str, Any]:
@@ -254,6 +268,20 @@ def latest_run_id(store: Any) -> Optional[str]:
         return None
     found = reader()
     return str(found) if found else None
+
+
+def job_code_for_run(store: Any, run_id: str) -> str:
+    """The speakable DOS-* code for a run, or empty. The inverse of resolve_run_id."""
+
+    getter = getattr(store, "get_run", None)
+    reader = getattr(store, "task_job_code", None)
+    if not callable(getter) or not callable(reader) or not (run_id or "").strip():
+        return ""
+    try:
+        run = getter(run_id) or {}
+        return str(reader(str(run.get("task_id") or "")) or "").strip()
+    except Exception:
+        return ""
 
 
 def resolve_run_id(store: Any, token: str) -> str:

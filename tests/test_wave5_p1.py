@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agent_discord.contracts import RunReceipt, TaskStatus
-from agent_discord.host.brain import (
+from agent_discord.host.memory import (
     build_compact_recall_pack,
     clip_pack_text,
     record_plan_gallery,
@@ -29,7 +29,6 @@ def test_compact_recall_pack_clips(tmp_path: Path):
         channel_id="ch",
         metadata={
             "brain": True,
-            "dri": "alex",
             "strategy_docs": str(tmp_path),
             "journal": True,
         },
@@ -44,7 +43,7 @@ def test_compact_recall_pack_clips(tmp_path: Path):
         max_bytes=400,
     )
     assert "[brain-lake]" in pack
-    assert "DRI: alex" in pack
+    assert "note one" in pack
     assert "strategy.md" in pack or "Docs:" in pack
     assert len(pack.encode()) <= 403
     assert clip_pack_text("a" * 5000, max_bytes=100).endswith("...")

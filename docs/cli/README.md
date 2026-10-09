@@ -12,6 +12,7 @@ discord-os add repo NAME --path PATH
 discord-os add wiki --url URL [--token TOKEN]
 discord-os add tool NAME [--bin BIN | --url URL] [--hint TEXT]
 discord-os add github [--token TOKEN]
+discord-os add pm-inbox --channel-id ID
 discord-os add list [--json]
 discord-os host start|stop|status|run
 discord-os run TASK --channel-id ID [--fake] [--json]
@@ -29,9 +30,15 @@ discord-os schedule --every 1h --channel-id ID PROMPT
 discord-os spend [--cap USD] [--halt] [--resume]
 discord-os jobs clear-needs --failed [--older-than DAYS] [--channel-id ID] [--dry-run]
 discord-os put|get|ls …
+discord-os repo status [NAME] [--json]
 discord-os map [QUERY] [--rank shipped|now|next|never] [--json]
 discord-os lineage [RUN_ID|DOS-10001] [--json]
+discord-os eval [--limit N --yes] [--pin MODEL] [--out PATH] [--json]
 ```
+
+`eval` replays [labeled runs](../jobs/outcomes.md) read-only and spends
+OpenRouter money, so it needs both `--limit` and `--yes`; without them it prints
+the plan and exits. See [eval](../jobs/eval.md).
 
 `python -m agent_discord` is the same entry. `--fake` is the hermetic path.
 

@@ -218,6 +218,45 @@ CREATE TABLE IF NOT EXISTS inbound_queue (
     created_ms INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_inbound_queue_open ON inbound_queue(thread_id, status);
+
+CREATE TABLE IF NOT EXISTS pending_intake (
+    message_id TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL DEFAULT '',
+    workspace_id TEXT NOT NULL DEFAULT 'default',
+    guild_id TEXT NOT NULL DEFAULT '',
+    requester_id TEXT NOT NULL DEFAULT '',
+    text TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    created_ms INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS pm_inbox_jobs (
+    job_id TEXT PRIMARY KEY,
+    state_dir TEXT NOT NULL DEFAULT '',
+    channel_id TEXT NOT NULL DEFAULT '',
+    thread_id TEXT NOT NULL DEFAULT '',
+    message_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT '',
+    revision INTEGER NOT NULL DEFAULT 0,
+    task_count INTEGER NOT NULL DEFAULT 0,
+    label TEXT NOT NULL DEFAULT '',
+    goal_preview TEXT NOT NULL DEFAULT '',
+    steer_after TEXT NOT NULL DEFAULT '',
+    created_ms INTEGER NOT NULL,
+    updated_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pm_inbox_thread ON pm_inbox_jobs(thread_id);
+
+CREATE TABLE IF NOT EXISTS run_outcomes (
+    run_id TEXT NOT NULL,
+    operator_id TEXT NOT NULL,
+    label TEXT NOT NULL,
+    created_ms INTEGER NOT NULL,
+    PRIMARY KEY (run_id, operator_id)
+);
+CREATE INDEX IF NOT EXISTS idx_run_outcomes_created ON run_outcomes(created_ms);
 """
 
 PREFERENCE_KINDS = frozenset({"preference", "style", "failure", "journal", "plan"})
@@ -245,6 +284,9 @@ class SQLiteStore:
         self._migrate_lineage_nodes(conn)
         self._migrate_job_queue(conn)
         self._migrate_inbound_queue(conn)
+        self._migrate_pending_intake(conn)
+        self._migrate_pm_inbox(conn)
+        self._migrate_run_outcomes(conn)
         self._fts_enabled = self._try_enable_fts(conn)
         conn.commit()
 
@@ -448,6 +490,62 @@ class SQLiteStore:
             """
         )
 
+    def _migrate_pending_intake(self, conn: sqlite3.Connection) -> None:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS pending_intake (
+                message_id TEXT PRIMARY KEY,
+                channel_id TEXT NOT NULL,
+                thread_id TEXT NOT NULL DEFAULT '',
+                workspace_id TEXT NOT NULL DEFAULT 'default',
+                guild_id TEXT NOT NULL DEFAULT '',
+                requester_id TEXT NOT NULL DEFAULT '',
+                text TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                attempts INTEGER NOT NULL DEFAULT 0,
+                created_ms INTEGER NOT NULL
+            );
+            """
+        )
+
+    def _migrate_pm_inbox(self, conn: sqlite3.Connection) -> None:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS pm_inbox_jobs (
+                job_id TEXT PRIMARY KEY,
+                state_dir TEXT NOT NULL DEFAULT '',
+                channel_id TEXT NOT NULL DEFAULT '',
+                thread_id TEXT NOT NULL DEFAULT '',
+                message_id TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT '',
+                revision INTEGER NOT NULL DEFAULT 0,
+                task_count INTEGER NOT NULL DEFAULT 0,
+                label TEXT NOT NULL DEFAULT '',
+                goal_preview TEXT NOT NULL DEFAULT '',
+                steer_after TEXT NOT NULL DEFAULT '',
+                created_ms INTEGER NOT NULL,
+                updated_ms INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_pm_inbox_thread
+            ON pm_inbox_jobs(thread_id);
+            """
+        )
+
+    def _migrate_run_outcomes(self, conn: sqlite3.Connection) -> None:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS run_outcomes (
+                run_id TEXT NOT NULL,
+                operator_id TEXT NOT NULL,
+                label TEXT NOT NULL,
+                created_ms INTEGER NOT NULL,
+                PRIMARY KEY (run_id, operator_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_run_outcomes_created
+            ON run_outcomes(created_ms);
+            """
+        )
+
     def _mint_job_code(self, conn: sqlite3.Connection) -> str:
         row = conn.execute(
             """
@@ -647,28 +745,52 @@ class SQLiteStore:
         )
         conn.commit()
 
-    def fail_stale_runs(self, *, reason: str = "host restarted") -> int:
-        """Mark leftover running rows failed. Lineage stays so Retry can parent a new run."""
+    def fail_stale_runs(self, *, reason: str = "host restarted") -> list[dict[str, Any]]:
+        """Fail runs a dead host left running; return them so cards can be repainted.
+
+        A parked write approval has no worker yet, so it survives a restart and
+        its Approve button still works. Lineage stays so Retry can parent a new run.
+        """
 
         conn = self._connection()
-        cur = conn.execute(
+        rows = conn.execute(
             """
-            UPDATE runs
-            SET status=?, error=?, updated_at=datetime('now')
-            WHERE status IN ('running', 'progress', 'pending')
-            """,
-            (TaskStatus.FAILED.value, reason),
-        )
-        conn.execute(
+            SELECT r.run_id, r.task_id, r.status, t.channel_id, t.thread_id, t.metadata_json
+            FROM runs r JOIN tasks t ON t.task_id = r.task_id
+            WHERE r.status IN ('running', 'progress', 'pending')
             """
-            UPDATE tasks
-            SET status=?, updated_at=datetime('now')
-            WHERE status IN ('running', 'progress', 'pending')
-            """,
-            (TaskStatus.FAILED.value,),
-        )
+        ).fetchall()
+        stale: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                meta = json.loads(row["metadata_json"] or "{}")
+            except json.JSONDecodeError:
+                meta = {}
+            if not isinstance(meta, dict):
+                meta = {}
+            parked_write = bool(meta.get("awaiting_approval")) and not meta.get("awaiting_gate")
+            if row["status"] == TaskStatus.PENDING.value and parked_write:
+                continue
+            stale.append(
+                {
+                    "run_id": row["run_id"],
+                    "task_id": row["task_id"],
+                    "channel_id": row["channel_id"],
+                    "thread_id": row["thread_id"],
+                    "metadata": meta,
+                }
+            )
+        for item in stale:
+            conn.execute(
+                "UPDATE runs SET status=?, error=?, updated_at=datetime('now') WHERE run_id=?",
+                (TaskStatus.FAILED.value, reason, item["run_id"]),
+            )
+            conn.execute(
+                "UPDATE tasks SET status=?, updated_at=datetime('now') WHERE task_id=?",
+                (TaskStatus.FAILED.value, item["task_id"]),
+            )
         conn.commit()
-        return int(cur.rowcount or 0)
+        return stale
 
     def update_run(
         self,
@@ -683,7 +805,8 @@ class SQLiteStore:
         conn.execute(
             """
             UPDATE runs SET status=?, summary=COALESCE(?, summary),
-                error=?, usage_json=?, updated_at=datetime('now')
+                error=COALESCE(?, error), usage_json=COALESCE(?, usage_json),
+                updated_at=datetime('now')
             WHERE run_id=?
             """,
             (
@@ -793,6 +916,35 @@ class SQLiteStore:
             (tid, exclude, exclude),
         ).fetchone()
         return str(row["run_id"] or "") if row else ""
+
+    def count_settled_since(
+        self, *, hours: float = 16.0, channel_id: str = ""
+    ) -> dict[str, int]:
+        """Completed / failed latest runs whose task moved inside the window."""
+
+        window = f"-{max(0.0, float(hours))} hours"
+        channel = (channel_id or "").strip()
+        rows = self._connection().execute(
+            """
+            SELECT r.status AS run_status, t.status AS task_status
+            FROM tasks t
+            LEFT JOIN runs r ON r.run_id = (
+                SELECT run_id FROM runs
+                WHERE task_id = t.task_id
+                ORDER BY created_at DESC, run_id DESC
+                LIMIT 1
+            )
+            WHERE (? = '' OR t.channel_id=?)
+              AND t.updated_at >= datetime('now', ?)
+            """,
+            (channel, channel, window),
+        ).fetchall()
+        counts = {"completed": 0, "failed": 0}
+        for row in rows:
+            status = str(row["run_status"] or row["task_status"] or "").lower()
+            if status in counts:
+                counts[status] += 1
+        return counts
 
     def list_recent_jobs(
         self, channel_id: str, *, limit: int = 5
@@ -1222,8 +1374,124 @@ class SQLiteStore:
             return False
         return True
 
+    # --- puppetmaster job inbox ---
+
+    def record_pm_inbox_job(
+        self,
+        job_id: str,
+        *,
+        state_dir: str = "",
+        channel_id: str = "",
+        thread_id: str = "",
+        message_id: str = "",
+        status: str = "",
+        revision: int = 0,
+        task_count: int = 0,
+        label: str = "",
+        goal_preview: str = "",
+        steer_after: str = "",
+    ) -> None:
+        """Remember an observed Puppetmaster job and the card that shows it.
+
+        One row per PM job id. ``revision`` and ``status`` are what stops a
+        restart reposting a card that is already in the channel.
+        """
+
+        jid = (job_id or "").strip()
+        if not jid:
+            return
+        now = int(time.time() * 1000)
+        conn = self._connection()
+        conn.execute(
+            """
+            INSERT INTO pm_inbox_jobs (
+                job_id, state_dir, channel_id, thread_id, message_id,
+                status, revision, task_count, label, goal_preview, steer_after,
+                created_ms, updated_ms
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(job_id) DO UPDATE SET
+                state_dir=excluded.state_dir,
+                channel_id=excluded.channel_id,
+                thread_id=excluded.thread_id,
+                message_id=excluded.message_id,
+                status=excluded.status,
+                revision=excluded.revision,
+                task_count=excluded.task_count,
+                label=excluded.label,
+                goal_preview=excluded.goal_preview,
+                steer_after=excluded.steer_after,
+                updated_ms=excluded.updated_ms
+            """,
+            (
+                jid,
+                str(state_dir or ""),
+                str(channel_id or ""),
+                str(thread_id or ""),
+                str(message_id or ""),
+                str(status or ""),
+                int(revision or 0),
+                int(task_count or 0),
+                redact_text_markers(str(label or "")),
+                redact_text_markers(str(goal_preview or "")),
+                str(steer_after or ""),
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+
+    def get_pm_inbox_job(self, job_id: str) -> Optional[dict[str, Any]]:
+        jid = (job_id or "").strip()
+        if not jid:
+            return None
+        row = self._connection().execute(
+            "SELECT * FROM pm_inbox_jobs WHERE job_id=?", (jid,)
+        ).fetchone()
+        return None if row is None else dict(row)
+
+    def list_pm_inbox_jobs(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        rows = self._connection().execute(
+            "SELECT * FROM pm_inbox_jobs ORDER BY updated_ms DESC LIMIT ?",
+            (int(limit),),
+        ).fetchall()
+        return [dict(row) for row in rows]
 
     # --- events ---
+
+    def compact_events(
+        self, *, older_than_days: float = 14.0, vacuum_min_rows: int = 500
+    ) -> dict[str, Any]:
+        """Drop progress events of finished runs older than the window, then VACUUM.
+
+        Progress rows are live-card token chunks. Intake, dispatch, receipt and
+        every other kind stay. VACUUM runs only when enough rows went to be
+        worth an exclusive rewrite.
+        """
+
+        conn = self._connection()
+        cutoff = f"-{float(older_than_days)} days"
+        cur = conn.execute(
+            """
+            DELETE FROM events
+            WHERE kind = 'progress'
+              AND created_at < datetime('now', ?)
+              AND run_id IN (
+                  SELECT run_id FROM runs
+                  WHERE status IN ('completed', 'failed', 'cancelled')
+              )
+            """,
+            (cutoff,),
+        )
+        deleted = int(cur.rowcount or 0)
+        conn.commit()
+        vacuumed = False
+        if deleted >= vacuum_min_rows:
+            conn.execute("VACUUM")
+            # In WAL mode the rewrite sits in the WAL until a checkpoint.
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            vacuumed = True
+        return {"deleted": deleted, "vacuumed": vacuumed}
 
     def append_event(
         self,
@@ -1351,6 +1619,32 @@ class SQLiteStore:
             """,
             (workspace_id, channel_id, like, limit),
         ).fetchall()
+        return [_memory_row(r) for r in rows]
+
+    def list_memory_by_source(
+        self,
+        *,
+        workspace_id: str,
+        source: str,
+        since: str = "",
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Every entry of one source, newest first, across channels.
+
+        ``recall`` is per-channel and query-shaped. The capture digest needs
+        the week across every capture-first channel, so it reads by source.
+        """
+
+        sql = [
+            "SELECT * FROM memory_entries WHERE workspace_id=? AND source=?",
+        ]
+        params: list[Any] = [workspace_id, source]
+        if since:
+            sql.append("AND created_at >= ?")
+            params.append(since)
+        sql.append("ORDER BY created_at DESC, rowid DESC LIMIT ?")
+        params.append(int(limit))
+        rows = self._connection().execute(" ".join(sql), tuple(params)).fetchall()
         return [_memory_row(r) for r in rows]
 
     # --- preferences / style / failure memory ---
@@ -1547,6 +1841,15 @@ class SQLiteStore:
             (rid, int(time.time() * 1000)),
         )
         conn.commit()
+
+    def remove_operator_role(self, role_id: str) -> bool:
+        conn = self._connection()
+        cursor = conn.execute(
+            "DELETE FROM operator_roles WHERE role_id=?",
+            (str(role_id or "").strip(),),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
     def list_operators(self) -> list[dict[str, Any]]:
         rows = self._connection().execute(
@@ -1815,11 +2118,14 @@ class SQLiteStore:
         conn.commit()
 
     def list_lineage_nodes(self, run_id: str) -> Sequence[Mapping[str, Any]]:
+        # rowid, not node_key, breaks the tie: created_at is whole seconds, so a
+        # fast run's nodes all share one, and `fork from <N>` needs the step
+        # numbers `discord-os lineage` prints to be execution order.
         rows = self._connection().execute(
             """
             SELECT * FROM lineage_nodes
             WHERE run_id=?
-            ORDER BY created_at ASC, node_key ASC
+            ORDER BY created_at ASC, rowid ASC
             """,
             (run_id,),
         ).fetchall()
@@ -1872,6 +2178,140 @@ class SQLiteStore:
         if row is None:
             return None
         return str(row["run_id"] or "") or None
+
+    # --- recorded outcomes ---
+
+    def list_settled_cards(
+        self,
+        *,
+        days: int = 7,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Settled runs whose card is still addressable: newest first.
+
+        One row per task (its latest run) with the card ids the live card left
+        in task metadata. Callers read reactions off those ids.
+        """
+
+        window = f"-{max(1, int(days))} days"
+        capped = max(1, min(int(limit), 200))
+        rows = self._connection().execute(
+            """
+            SELECT t.task_id, t.metadata_json, t.channel_id, t.thread_id,
+                   t.job_code, r.run_id, r.status AS run_status
+            FROM tasks t
+            JOIN runs r ON r.run_id = (
+                SELECT run_id FROM runs
+                WHERE task_id = t.task_id
+                ORDER BY created_at DESC, run_id DESC
+                LIMIT 1
+            )
+            WHERE r.status IN ('completed','failed','cancelled')
+              AND t.updated_at >= datetime('now', ?)
+            ORDER BY t.updated_at DESC
+            LIMIT ?
+            """,
+            (window, capped),
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            meta = _metadata_blob(row["metadata_json"])
+            message_id = str(meta.get("card_message_id") or "").strip()
+            if not message_id:
+                continue
+            channel = (
+                str(meta.get("card_channel_id") or "").strip()
+                or str(row["thread_id"] or "").strip()
+                or str(row["channel_id"] or "").strip()
+            )
+            if not channel:
+                continue
+            out.append(
+                {
+                    "run_id": str(row["run_id"] or ""),
+                    "task_id": str(row["task_id"] or ""),
+                    "job_code": str(row["job_code"] or ""),
+                    "status": str(row["run_status"] or ""),
+                    "card_message_id": message_id,
+                    "card_channel_id": channel,
+                }
+            )
+        return out
+
+    def record_run_outcome(
+        self,
+        *,
+        run_id: str,
+        operator_id: str,
+        label: str,
+        created_ms: Optional[int] = None,
+    ) -> bool:
+        """One label per operator per run. True when this write changed it."""
+
+        rid = (run_id or "").strip()
+        uid = (operator_id or "").strip()
+        value = (label or "").strip()
+        if not rid or not uid or not value:
+            return False
+        conn = self._connection()
+        cur = conn.execute(
+            """
+            INSERT INTO run_outcomes (run_id, operator_id, label, created_ms)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(run_id, operator_id) DO UPDATE SET
+                label=excluded.label,
+                created_ms=excluded.created_ms
+            WHERE run_outcomes.label != excluded.label
+            """,
+            (rid, uid, value, int(created_ms if created_ms is not None else time.time() * 1000)),
+        )
+        conn.commit()
+        return int(cur.rowcount or 0) > 0
+
+    def list_run_outcomes(self, run_id: str) -> list[dict[str, Any]]:
+        rid = (run_id or "").strip()
+        if not rid:
+            return []
+        rows = self._connection().execute(
+            """
+            SELECT run_id, operator_id, label, created_ms
+            FROM run_outcomes WHERE run_id=?
+            ORDER BY created_ms ASC
+            """,
+            (rid,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def outcome_tally(self, *, days: int = 7) -> dict[str, int]:
+        since = int((time.time() - max(1, int(days)) * 86400) * 1000)
+        rows = self._connection().execute(
+            """
+            SELECT label, COUNT(*) AS n FROM run_outcomes
+            WHERE created_ms >= ?
+            GROUP BY label
+            """,
+            (since,),
+        ).fetchall()
+        return {str(row["label"] or ""): int(row["n"] or 0) for row in rows if row["label"]}
+
+    def list_labeled_runs(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        """Labeled runs newest-label-first, with the ask text an eval replays."""
+
+        capped = max(1, min(int(limit), 500))
+        rows = self._connection().execute(
+            """
+            SELECT o.run_id, o.label, o.operator_id, o.created_ms,
+                   t.task_id, t.intake_text, t.channel_id, t.workspace_id,
+                   t.job_code, r.status AS run_status, r.summary
+            FROM run_outcomes o
+            JOIN runs r ON r.run_id = o.run_id
+            JOIN tasks t ON t.task_id = r.task_id
+            ORDER BY o.created_ms DESC
+            LIMIT ?
+            """,
+            (capped,),
+        ).fetchall()
+        return [dict(row) for row in rows]
 
     def list_objects(
         self,
@@ -1954,6 +2394,9 @@ class SQLiteStore:
             """,
             (task_id, run_id, channel_id, message_id),
         )
+        # The task row exists, so this claim can no longer be lost: the
+        # pending-intake replay row has done its job.
+        conn.execute("DELETE FROM pending_intake WHERE message_id=?", (message_id,))
         conn.commit()
 
     def get_inbound_message(self, message_id: str) -> Optional[dict[str, Any]]:
@@ -1963,6 +2406,104 @@ class SQLiteStore:
             "SELECT * FROM seen_messages WHERE message_id=?", (message_id,)
         ).fetchone()
         return dict(row) if row else None
+
+    # --- pending intake (claimed, not yet a task row) ---
+
+    def record_pending_intake(
+        self,
+        *,
+        message_id: str,
+        channel_id: str,
+        text: str,
+        thread_id: str = "",
+        workspace_id: str = "default",
+        guild_id: str = "",
+        requester_id: str = "",
+        metadata: Optional[Mapping[str, Any]] = None,
+        created_ms: Optional[int] = None,
+    ) -> None:
+        """Durable replay row for a claimed message that has no task row yet."""
+
+        mid = (message_id or "").strip()
+        body = (text or "").strip()
+        if not mid or not body:
+            return
+        now = int(created_ms if created_ms is not None else time.time() * 1000)
+        conn = self._connection()
+        conn.execute(
+            """
+            INSERT INTO pending_intake (
+                message_id, channel_id, thread_id, workspace_id, guild_id,
+                requester_id, text, metadata_json, attempts, created_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+            ON CONFLICT(message_id) DO UPDATE SET
+                channel_id=excluded.channel_id,
+                thread_id=excluded.thread_id,
+                workspace_id=excluded.workspace_id,
+                guild_id=excluded.guild_id,
+                requester_id=excluded.requester_id,
+                text=excluded.text,
+                metadata_json=excluded.metadata_json
+            """,
+            (
+                mid,
+                (channel_id or "").strip(),
+                (thread_id or "").strip(),
+                (workspace_id or "default").strip() or "default",
+                (guild_id or "").strip(),
+                (requester_id or "").strip(),
+                body,
+                json.dumps(dict(metadata or {})),
+                now,
+            ),
+        )
+        conn.commit()
+
+    def list_pending_intake(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        capped = max(1, min(int(limit), 200))
+        rows = self._connection().execute(
+            """
+            SELECT * FROM pending_intake
+            ORDER BY created_ms ASC, message_id ASC
+            LIMIT ?
+            """,
+            (capped,),
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["metadata"] = json.loads(item.pop("metadata_json") or "{}")
+            except json.JSONDecodeError:
+                item.pop("metadata_json", None)
+                item["metadata"] = {}
+            out.append(item)
+        return out
+
+    def clear_pending_intake(self, message_id: str) -> None:
+        mid = (message_id or "").strip()
+        if not mid:
+            return
+        conn = self._connection()
+        conn.execute("DELETE FROM pending_intake WHERE message_id=?", (mid,))
+        conn.commit()
+
+    def note_pending_intake_attempt(self, message_id: str) -> int:
+        """Count one replay. Returns the new attempt count (0 when unknown)."""
+
+        mid = (message_id or "").strip()
+        if not mid:
+            return 0
+        conn = self._connection()
+        conn.execute(
+            "UPDATE pending_intake SET attempts=attempts+1 WHERE message_id=?",
+            (mid,),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT attempts FROM pending_intake WHERE message_id=?", (mid,)
+        ).fetchone()
+        return int(row["attempts"]) if row is not None else 0
 
     def enqueue_inbound(
         self,
@@ -2308,6 +2849,14 @@ def _github_attention(raw: Any) -> str:
 def _github_last_summary(raw: Any) -> str:
     github = _github_blob(raw)
     return str(github.get("last_summary") or "").strip()
+
+
+def _metadata_blob(raw: Any) -> dict[str, Any]:
+    try:
+        meta = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return meta if isinstance(meta, dict) else {}
 
 
 def _github_blob(raw: Any) -> dict[str, Any]:

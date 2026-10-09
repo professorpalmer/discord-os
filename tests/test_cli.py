@@ -83,3 +83,43 @@ def test_cli_check_fails_closed_without_openrouter_key(tmp_path: Path, monkeypat
     assert "Problems:" in out
     assert "no OpenRouter key; run discord-os connect" in out
 
+
+def test_cli_add_brain_then_brain_show(tmp_path: Path, monkeypatch, capsys):
+    """add brain binds strategy/transcripts/journal; brain show prints the pack."""
+    monkeypatch.chdir(tmp_path)
+    ws = tmp_path / ".agent-discord"
+    monkeypatch.setenv("AGENT_DISCORD_WORKSPACE", str(ws))
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-test")
+    docs = tmp_path / "strategy"
+    docs.mkdir()
+    (docs / "ADR-001.md").write_text("# ADR\n", encoding="utf-8")
+
+    assert main(["bootstrap", "--workspace", str(ws)]) == 0
+    capsys.readouterr()
+    assert (
+        main(
+            [
+                "add",
+                "brain",
+                "--channel-id",
+                "999",
+                "--strategy-docs",
+                str(docs),
+                "--transcripts-channel",
+                "777",
+            ]
+        )
+        == 0
+    )
+    bound = capsys.readouterr().out
+    assert "brain #999" in bound
+    assert "dri" not in bound
+
+    assert main(["brain", "show", "--channel-id", "999"]) == 0
+    pack = capsys.readouterr().out
+    assert "[brain-lake]" in pack
+    assert "ADR-001.md" in pack
+    assert "Transcripts channel: 777" in pack
+    assert "DRI" not in pack and "Role SOP" not in pack
+

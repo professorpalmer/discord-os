@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Optional
 
@@ -25,6 +26,7 @@ from agent_discord.contracts import (
     TaskStatus,
     UsageReceipt,
 )
+from agent_discord.puppetmaster.cancel_honesty import terminate_process_group
 from agent_discord.redaction import (
     ALLOWED_REASONING_KEYS,
     redact_text_markers,
@@ -34,7 +36,6 @@ from agent_discord.redaction import (
 PHASE_TEXT_LIMIT = 16000
 RECEIPT_TEXT_LIMIT = 1800
 STREAM_PHASES = frozenset({"thinking", "plan", "code", "dispatch", "done"})
-_CLI_FLAG_CACHE: dict[tuple[str, str, str], bool] = {}
 _SUMMARY_SKIP_PREFIXES = (
     "# puppetmaster stitched summary",
     "---",
@@ -204,27 +205,6 @@ _FINDINGS_HEADING_RE = re.compile(r"(?im)^##\s+findings?\s*$")
 _MARKDOWN_HEADING_RE = re.compile(r"(?im)^##\s+")
 
 
-def cli_supports_flag(cli: str, subcommand: str, flag: str) -> bool:
-    """Probe ``cli subcommand --help`` once. Live Puppetmaster may lack --json-lines."""
-
-    key = (cli, subcommand, flag)
-    cached = _CLI_FLAG_CACHE.get(key)
-    if cached is not None:
-        return cached
-    supported = False
-    try:
-        proc = subprocess.run(
-            [cli, subcommand, "--help"],
-            capture_output=True,
-            text=True,
-            timeout=8,
-        )
-        blob = f"{proc.stdout}\n{proc.stderr}"
-        supported = flag in blob
-    except Exception:
-        supported = False
-    _CLI_FLAG_CACHE[key] = supported
-    return supported
 _TOKEN_EVENT_TYPES = frozenset({"token", "delta", "reasoning"})
 _PHASE_ALIASES = {
     "think": "thinking",
@@ -360,12 +340,19 @@ def usage_from_cli_meta(
         ):
             if key in nested and key not in payload:
                 payload[key] = nested[key]
+    from agent_discord.config import puppetmaster_cli_version
+
     meta: dict[str, Any] = {
         "backend": "cli",
         "cli": cli,
         "cli_model": pin.adapter_name,
         "job_id": payload.get("job_id"),
     }
+    # Which Puppetmaster actually cooked this run. Production once ran a stale
+    # 1.22.15 with no receipt saying so.
+    pm_version = puppetmaster_cli_version(cli)
+    if pm_version:
+        meta["pm_version"] = pm_version
     for key in ("cost", "total_cost", "cost_usd", "tokens"):
         if key in payload:
             meta[key] = payload[key]
@@ -376,6 +363,43 @@ def usage_from_cli_meta(
         output_tokens=_optional_int(payload.get("output_tokens")),
         metadata=meta,
     )
+
+
+def measured_job_usage(
+    cli: str, job_id: str, *, env: Optional[Mapping[str, str]] = None
+) -> dict[str, Any]:
+    """Tokens and cost Puppetmaster measured for a finished job.
+
+    Reads ``puppetmaster cost <job_id> --json``. Only measured numbers are
+    returned; estimates are not spend. Unknown cost stays absent (never $0).
+    """
+
+    ident = (job_id or "").strip()
+    if not cli or not ident:
+        return {}
+    try:
+        proc = subprocess.run(
+            with_state_dir([cli, "cost", ident, "--json"]),
+            capture_output=True,
+            text=True,
+            timeout=20,
+            env=worker_env(env),
+        )
+        data = json.loads(proc.stdout or "{}") if proc.returncode == 0 else {}
+    except Exception:  # best-effort: a cost read never fails the cook
+        return {}
+    if not isinstance(data, Mapping):
+        return {}
+    usage: dict[str, Any] = {}
+    tokens = data.get("token_usage")
+    if isinstance(tokens, Mapping) and _optional_int(tokens.get("measured_runs")):
+        usage["input_tokens"] = _optional_int(tokens.get("measured_tokens_in"))
+        usage["output_tokens"] = _optional_int(tokens.get("measured_tokens_out"))
+    actual = data.get("actual_cost")
+    cost = actual.get("measured_cost_usd") if isinstance(actual, Mapping) else None
+    if isinstance(cost, (int, float)) and cost >= 0:
+        usage["cost_usd"] = float(cost)
+    return usage
 
 
 def _optional_int(raw: Any) -> Optional[int]:
@@ -414,17 +438,104 @@ def resolved_state_dir(base: Optional[Mapping[str, str]] = None) -> str:
     return str(Path.home() / ".discord-os" / "puppetmaster")
 
 
+# Puppetmaster reads this allowlist ahead of the shared ~/.puppetmaster
+# platform.json (platform_lock.enabled_adapters, 1.27.39).
+PM_ONLY_ADAPTERS_ENV = "PUPPETMASTER_ONLY_ADAPTERS"
+
+
+# Workers run model-chosen tools, shell included. They get what a CLI needs to
+# run plus the GitHub tokens gh uses. The OpenRouter key is added by the
+# backend. Nothing else from the host environment reaches them.
+_WORKER_ENV_KEYS = frozenset(
+    {
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "LANG",
+        "TERM",
+        "TMPDIR",
+        "TZ",
+        "NO_COLOR",
+        "SSH_AUTH_SOCK",
+        "GH_HOST",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "__CF_USER_TEXT_ENCODING",
+    }
+)
+_WORKER_ENV_PREFIXES = ("LC_", "XDG_", "GIT_", "PUPPETMASTER_", "DISCORD_OS_GATE")
+
+
 def worker_env(base: Optional[Mapping[str, str]] = None) -> dict[str, str]:
     from agent_discord.host.github import load_host_tool_secrets
     from agent_discord.host.repos import host_path
 
-    env = dict(os.environ if base is None else base)
-    env["PATH"] = host_path(env)
-    env["PUPPETMASTER_STATE_DIR"] = resolved_state_dir(env)
+    source = dict(os.environ if base is None else base)
+    env = {
+        key: value
+        for key, value in source.items()
+        if key in _WORKER_ENV_KEYS or key.startswith(_WORKER_ENV_PREFIXES)
+    }
+    env["PATH"] = host_path(source)
+    env["PUPPETMASTER_STATE_DIR"] = resolved_state_dir(source)
+    # HARD lock 10 is agentic only. Forcing the allowlist means another tool
+    # disabling adapters in the shared platform.json cannot stop our cooks.
+    env[PM_ONLY_ADAPTERS_ENV] = "agentic"
     secrets = load_host_tool_secrets(env=None if base is None else base)
     for key, value in secrets.items():
         env.setdefault(key, value)
     return env
+
+
+SCRATCH_DIR_ENV = "DISCORD_OS_SCRATCH_DIR"
+
+
+def scratch_dir(env: Optional[Mapping[str, str]] = None) -> Path:
+    """Owner-only empty cwd for asks that name no checkout."""
+
+    source = os.environ if env is None else env
+    raw = str(source.get(SCRATCH_DIR_ENV) or "").strip()
+    path = Path(raw).expanduser() if raw else Path.home() / ".discord-os" / "scratch"
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return path
+
+
+def is_runtime_dir(path: Path, workspace: Optional[Path]) -> bool:
+    """The Discord OS state dir, anything inside it, or the non-repo dir holding it.
+
+    That is where ``.env`` and the SQLite store live, so no worker may use it
+    as its cwd.
+    """
+
+    if workspace is None:
+        return False
+    here = Path(path).expanduser().resolve()
+    state = Path(workspace).expanduser().resolve()
+    if here == state or state in here.parents:
+        return True
+    return here == state.parent and not (here / ".git").exists()
+
+
+def confine_worker_cwd(
+    workdir: Optional[str],
+    *,
+    workspace: Optional[Path],
+    env: Optional[Mapping[str, str]] = None,
+) -> str:
+    """Never cook in the runtime dir. Fall back to the scratch dir instead."""
+
+    candidate = Path(workdir).expanduser() if workdir else Path.cwd()
+    if is_runtime_dir(candidate, workspace):
+        return str(scratch_dir(env))
+    return str(candidate)
 
 
 def request_workdir(
@@ -524,9 +635,11 @@ def provider_failure_spoken(text: str) -> str:
         or "locked to cursor" in lower
         or "cursor-only" in lower
     ):
+        # Not a key problem: discord-os connect cannot re-enable an adapter.
         return (
-            "OpenRouter agentic compute is required on this host. "
-            "Run discord-os connect, then retry."
+            "Puppetmaster's platform lock has the agentic adapter disabled. "
+            "On the host that cooked, run `puppetmaster platform enable agentic`, "
+            "then retry."
         )
     if (
         "missing_cli" in lower
@@ -798,10 +911,6 @@ def _is_skipped_worker_line(raw: str) -> bool:
     return any(lower.startswith(prefix) for prefix in _SUMMARY_SKIP_PREFIXES)
 
 
-def _first_visible_summary_line(text: str) -> str:
-    return usable_worker_text(text, limit=500) or "completed"
-
-
 def job_show_text(cli: str, job_id: str) -> str:
     ident = (job_id or "").strip()
     if not cli or not ident:
@@ -927,6 +1036,36 @@ def _parse_safe_cli_completion(stdout: str, stderr: str) -> dict[str, Any]:
     return strip_forbidden_keys(meta) if isinstance(meta, dict) else {}
 
 
+def _parse_json_object_line(text: str) -> Optional[dict[str, Any]]:
+    """A single output line as a JSON object, or None when the line is prose.
+
+    Strict on purpose: a markdown citation like ``[1] see {foo}`` is prose, not
+    an event. Only a line that parses whole counts as structured output.
+    """
+
+    raw = (text or "").strip()
+    if not raw or raw[:1] != "{":
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _is_json_output_line(text: str) -> bool:
+    """True when a whole line is a JSON object or array (not prose with braces)."""
+
+    raw = (text or "").strip()
+    if raw[:1] not in {"{", "["}:
+        return False
+    try:
+        json.loads(raw)
+    except json.JSONDecodeError:
+        return False
+    return True
+
+
 def _try_parse_json(text: str) -> Optional[Any]:
     text = (text or "").strip()
     if not text:
@@ -1049,8 +1188,8 @@ def _parse_token_line(
     raw = (line or "").strip()
     if not raw:
         return None
-    parsed = _try_parse_json(raw)
-    if not isinstance(parsed, dict):
+    parsed = _parse_json_object_line(raw)
+    if parsed is None:
         return None
     event_type = _normalize_token_event_type(parsed)
     if event_type not in _TOKEN_EVENT_TYPES:
@@ -1146,7 +1285,10 @@ def _prose_token_event(
     raw = (line or "").strip()
     if not raw or _is_skipped_worker_line(raw):
         return None
-    if raw[:1] in "{[":
+    # A whole line of JSON is structured output already handled above. A prose
+    # line that merely starts with '[' is a markdown link or a citation like
+    # "[1] ...", and dropping it lost the answer's references.
+    if _is_json_output_line(raw):
         return None
     chunk = redact_text_markers(raw)
     if not chunk.strip():
@@ -1200,9 +1342,13 @@ def iter_cli_process_events(
     model: str,
     cli: str = "",
     timeout_seconds: float = 3600.0,
-    steer_poll: Optional[Callable[[], None]] = None,
+    on_job_id: Optional[Callable[[str], None]] = None,
 ) -> Iterator[DispatchEvent]:
-    """Read CLI stdout/stderr plus optional `deltas --follow` into live events."""
+    """Read CLI stdout/stderr plus optional `deltas --follow` into live events.
+
+    ``on_job_id`` fires once with the Puppetmaster job id from the early
+    ``job_id:`` line, so the caller can steer that job.
+    """
 
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
@@ -1231,16 +1377,23 @@ def iter_cli_process_events(
     token_buffer = TokenStreamBuffer()
     follower = None
     seen_job_id = ""
+    # Wall-clock deadline enforced inside the loop. A grandchild holding stdout
+    # keeps both pipes open after the leader exits, so waiting for EOF plus
+    # proc.poll() could spin past timeout_seconds forever. Match dispatch():
+    # kill the whole group, not just the leader.
+    deadline = time.monotonic() + max(1.0, float(timeout_seconds))
     try:
         while True:
+            if time.monotonic() >= deadline:
+                terminate_process_group(proc, started_new_session=True)
+                yield DispatchEvent(
+                    kind=EventKind.ERROR,
+                    summary=ProgressSummary(stage="dispatch", message="timeout"),
+                )
+                return
             try:
                 item = line_queue.get(timeout=0.25)
             except queue.Empty:
-                if steer_poll is not None:
-                    try:
-                        steer_poll()
-                    except Exception:
-                        pass
                 if proc.poll() is not None and main_done >= 2:
                     break
                 continue
@@ -1253,6 +1406,11 @@ def iter_cli_process_events(
             stripped = line.strip()
             if stripped.lower().startswith("job_id:") and not seen_job_id:
                 seen_job_id = stripped.split(":", 1)[1].strip()
+                if on_job_id is not None and seen_job_id:
+                    try:
+                        on_job_id(seen_job_id)
+                    except Exception:
+                        pass
                 if follower is None:
                     follower = _start_delta_follower(cli, seen_job_id, timeout_seconds)
                     if follower is not None:
@@ -1264,10 +1422,9 @@ def iter_cli_process_events(
             event = _event_from_cli_line(line, model, token_buffer)
             if event is not None:
                 yield event
-        proc.wait(timeout=timeout_seconds)
+        proc.wait(timeout=max(1.0, deadline - time.monotonic()))
     except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+        terminate_process_group(proc, started_new_session=True)
         yield DispatchEvent(
             kind=EventKind.ERROR,
             summary=ProgressSummary(stage="dispatch", message="timeout"),
@@ -1340,8 +1497,8 @@ def _parse_progress_line(line: str, model: str) -> Optional[DispatchEvent]:
     if stage_match:
         stage = stage_match.group(1)
 
-    parsed = _try_parse_json(raw)
-    if isinstance(parsed, dict):
+    parsed = _parse_json_object_line(raw)
+    if parsed is not None:
         event_type = str(parsed.get("type") or parsed.get("kind") or "").strip().lower()
         if event_type in _TOKEN_EVENT_TYPES:
             return None

@@ -12,9 +12,17 @@ Surface README is first run plus this map. Feature pages live in their own folde
 | [recipes](recipes/README.md) | Versioned playbooks / skills cadence |
 | [co-work/overnight-brief](co-work/overnight-brief.md) | Schedule + Catch-up overnight brief |
 | [host](host/README.md) | On/Off/Ask, watchdogs, status digest, TTS, REQUIRE_OPERATORS, LaunchAgent |
+| [host/morning](host/morning.md) | One HOST card a day at 07:30, silent when empty |
+| [host/capture](host/capture.md) | Opt-in capture-first: a thought becomes memory, not a cook |
 | [host/policy](host/policy.md) | **HARD locks** (SSH OPT-IN, forum tags, Path A, gateway, Update, voice, spend, desk, slash, CU PARKED) |
 | [realms](realms/README.md) | Channel = checkout |
+| [realms/repo-status](realms/repo-status.md) | "Open PRs on X?" answered from gh + git, no cook |
+| [realms/ci-watch](realms/ci-watch.md) | Red CI wake with a one-tap Fix CI button |
 | [jobs](jobs/README.md) | Parallel cooks, `DISCORD_OS_MAX_LIVE`, live session threads |
+| [jobs/pm-inbox](jobs/pm-inbox.md) | Opt-in cards for Puppetmaster jobs started outside Discord OS |
+| [jobs/outcomes](jobs/outcomes.md) | Operator reactions on a Done card as a labeled run outcome |
+| [jobs/eval](jobs/eval.md) | `discord-os eval`: replay labeled runs read-only, score win/loss/same |
+| [jobs/fork](jobs/fork.md) | `fork from N:` — a sibling thread parented at one lineage step |
 | [tools](tools/README.md) | Named CLI/HTTP catalog |
 | [wiki](wiki/README.md) | Portable LLM wiki over HTTP |
 | [memory](memory/README.md) | Think-tank channels |

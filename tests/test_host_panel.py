@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import plistlib
 from pathlib import Path
 
 from agent_discord.discord.errors import ToolInvocationError
@@ -10,7 +11,11 @@ from agent_discord.discord.realtime import GatewayClosed, run_discord_gateway
 from agent_discord.discord.rest import callback_interaction, send_channel_message
 from agent_discord.discord.ws import decode_frame, encode_frame
 from agent_discord.discord.providers.fake import FakeDiscordMCPProvider
-from agent_discord.host.install import render_launchd_plist
+from agent_discord.host.install import (
+    SERVICE_THROTTLE_INTERVAL_S,
+    render_launchd_plist,
+    render_systemd_unit,
+)
 from agent_discord.contracts import TaskStatus
 from agent_discord.host.actions import DEST_HOST, DEST_REMOTE, open_custom_id
 from agent_discord.host.panel import (
@@ -33,6 +38,7 @@ from agent_discord.host.panel import (
     ROLES_MODAL_ID,
     TERMINAL_ID,
     GITHUB_ID,
+    FEATURES_ID,
     ask_modal_payload,
     ask_text_from_interaction,
     handle_gateway_interaction,
@@ -91,7 +97,7 @@ def test_panel_buttons_and_interaction_parse():
     more = buttons[1]["components"][0]
     assert more["custom_id"] == MORE_ID
     more_values = [item["value"] for item in more["options"]]
-    assert more_values == [PAIR_ID, HALT_ID, CLEAR_NEEDS_ID, POLL_ID, GATE_ID, ROLES_ID, GITHUB_ID]
+    assert more_values == [PAIR_ID, HALT_ID, CLEAR_NEEDS_ID, POLL_ID, GATE_ID, ROLES_ID, GITHUB_ID, FEATURES_ID]
     assert more["options"][4]["label"] == "Gate writes"
     gated = host_panel_components(False, write_gate=True)
     assert gated[1]["components"][0]["options"][4]["label"] == "Auto writes"
@@ -106,6 +112,7 @@ def test_panel_buttons_and_interaction_parse():
         GATE_ID,
         ROLES_ID,
         GITHUB_ID,
+        FEATURES_ID,
         open_custom_id("files", DEST_REMOTE),
         open_custom_id("files", DEST_HOST),
         open_custom_id("terminal", DEST_HOST),
@@ -455,9 +462,58 @@ def test_launchd_plist_contains_channel_and_service_env(tmp_path: Path):
         log=tmp_path / "host.log",
     )
     assert "99" in plist
-    assert "DISCORD_OS_SERVICE" in plist
+    assert "DISCORD_OS_SERVICE" not in plist  # dead flag, never read
     assert "PYTHONUNBUFFERED" in plist
     assert "KeepAlive" in plist
+    # Audit 2026-10-02 G2-3: KeepAlive without a throttle is a 10 s respawn loop.
+    assert "<key>ThrottleInterval</key>" in plist
+    assert f"<integer>{SERVICE_THROTTLE_INTERVAL_S}</integer>" in plist
+
+
+def test_launchd_plist_throttles_keepalive_respawn(tmp_path: Path):
+    """A startup failure must back off, not spin: ThrottleInterval beside KeepAlive."""
+
+    plist = plistlib.loads(
+        render_launchd_plist(
+            argv=["/py", "-m", "agent_discord", "host", "run", "--channel-id", "99"],
+            workspace=tmp_path,
+            cwd=tmp_path,
+            log=tmp_path / "host.log",
+        ).encode("utf-8")
+    )
+    assert plist["KeepAlive"] is True
+    assert plist["ThrottleInterval"] == SERVICE_THROTTLE_INTERVAL_S
+    assert SERVICE_THROTTLE_INTERVAL_S >= 30
+
+
+def test_launchd_plist_throttle_is_overridable_and_floored(tmp_path: Path):
+    body = render_launchd_plist(
+        argv=["/py"],
+        workspace=tmp_path,
+        cwd=tmp_path,
+        log=tmp_path / "host.log",
+        throttle_interval_s=0,
+    )
+    assert plistlib.loads(body.encode("utf-8"))["ThrottleInterval"] == 1
+    body = render_launchd_plist(
+        argv=["/py"],
+        workspace=tmp_path,
+        cwd=tmp_path,
+        log=tmp_path / "host.log",
+        throttle_interval_s=90,
+    )
+    assert plistlib.loads(body.encode("utf-8"))["ThrottleInterval"] == 90
+
+
+def test_systemd_unit_backs_off_restart(tmp_path: Path):
+    unit = render_systemd_unit(
+        argv=["/py", "-m", "agent_discord", "host", "run", "--channel-id", "99"],
+        workspace=tmp_path,
+        cwd=tmp_path,
+        log=tmp_path / "host.log",
+    )
+    assert "Restart=always" in unit
+    assert f"RestartSec={SERVICE_THROTTLE_INTERVAL_S}" in unit
 
 
 def test_files_button_opens_workspace(tmp_path: Path):
@@ -517,7 +573,7 @@ def test_roles_modal_adds_operator_role(tmp_path: Path):
                     {
                         "type": 1,
                         "components": [
-                            {"type": 4, "custom_id": "discord-os:roles-text", "value": "role-99"}
+                            {"type": 4, "custom_id": "discord-os:roles-text", "value": "123456789012345678"}
                         ],
                     }
                 ],
@@ -527,7 +583,418 @@ def test_roles_modal_adds_operator_role(tmp_path: Path):
         opener=opener,
     )
     assert action == "roles"
-    assert "role-99" in store.list_operator_roles()
+    assert "123456789012345678" in store.list_operator_roles()
+    store.close()
+
+
+def test_poll_opens_the_modal_as_the_only_response(tmp_path: Path):
+    """Audit 2026-10-02 G1-7: a deferred ACK first meant the form never opened."""
+
+    from agent_discord.host.panel import POLL_MODAL_ID
+
+    store = SQLiteStore(tmp_path / "poll.sqlite3")
+    store.initialize()
+    store.set_host_control("ch", armed=True)
+    store.add_operator("owner-7", role="owner")
+    bodies: list[dict] = []
+
+    def opener(request, timeout=10):
+        if getattr(request, "data", None):
+            bodies.append(json.loads(request.data.decode("utf-8")))
+        return _FakeResponse(b"")
+
+    action = handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix",
+            "token": "tok",
+            "application_id": "app-1",
+            "user": {"id": "owner-7"},
+            "data": {"custom_id": MORE_ID, "values": [POLL_ID]},
+            "message": {"id": "panel-1"},
+        },
+        opener=opener,
+    )
+    assert action == "poll"
+    assert len(bodies) == 1
+    assert bodies[0]["type"] == 9
+    assert bodies[0]["data"]["custom_id"] == POLL_MODAL_ID
+    store.close()
+
+
+def test_jobs_pick_answers_ephemerally_without_a_channel_post(tmp_path: Path):
+    """Audit 2026-10-02 G1-10: each pick posted a second copy of the job card."""
+
+    store = SQLiteStore(tmp_path / "pick.sqlite3")
+    store.initialize()
+    store.set_host_control("ch", armed=True)
+    store.add_operator("owner-7", role="owner")
+    store.create_task(
+        task_id="t-1",
+        workspace_id="ws",
+        channel_id="ch",
+        thread_id="thread-1",
+        intake_text="ship the fix",
+    )
+    store.create_run(
+        run_id="run-1",
+        task_id="t-1",
+        model="openrouter/auto",
+        adapter_name="openrouter/auto",
+        status=TaskStatus.COMPLETED,
+    )
+    store.update_run("run-1", status=TaskStatus.COMPLETED, summary="Done. Fix shipped.")
+    calls: list[tuple[str, dict]] = []
+
+    def opener(request, timeout=10):
+        body = {}
+        if getattr(request, "data", None):
+            body = json.loads(request.data.decode("utf-8"))
+        calls.append((str(request.full_url), body))
+        return _FakeResponse(b"{}")
+
+    action = handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix",
+            "token": "tok",
+            "application_id": "app-1",
+            "guild_id": "guild-1",
+            "user": {"id": "owner-7"},
+            "data": {"custom_id": JOBS_ID, "values": ["run-1"]},
+            "message": {"id": "panel-1"},
+        },
+        token="bot-token",
+        opener=opener,
+    )
+    assert action == "job"
+    assert len(calls) == 1
+    url, body = calls[0]
+    assert "/interactions/ix/tok/callback" in url
+    assert not any("/channels/ch/messages" in u for u, _ in calls)
+    assert body["type"] == 4
+    assert body["data"]["flags"] == 64
+    content = body["data"]["content"]
+    assert "run-1" in content or "Last:" in content
+    assert "channels/guild-1/thread-1" in content
+    store.close()
+
+
+def _host_card_text(card) -> str:
+    payload = card.v2_payload()
+    out: list[str] = []
+
+    def walk(items) -> None:
+        for item in items or ():
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == 10:
+                out.append(str(item.get("content") or ""))
+            walk(item.get("components"))
+
+    walk(payload["components"])
+    return "\n".join(out)
+
+
+def test_host_card_power_rows_follow_the_host_without_host_page(monkeypatch):
+    """Same contract on the monolith layout (DISCORD_OS_HOST_PAGE=0)."""
+
+    from agent_discord.orchestration.cards import host_card
+
+    def row(text: str, name: str) -> str:
+        for line in text.splitlines():
+            bare = line.strip().strip("`")
+            if bare.startswith(name):
+                return bare[len(name) :].strip()
+        raise AssertionError(f"no {name} row in {text!r}")
+
+    monkeypatch.setenv("DISCORD_OS_HOST_PAGE", "0")
+    halted = _host_card_text(host_card(armed=True, halted=True))
+    assert row(halted, "power") == "on"
+    assert row(halted, "listen") == "halted"
+    confirm = _host_card_text(host_card(armed=True, confirm_off=True))
+    assert row(confirm, "power") == "on"
+    assert row(confirm, "listen") == "live"
+    stopped = _host_card_text(host_card(armed=False))
+    assert row(stopped, "power") == "off"
+    assert row(stopped, "listen") == "idle"
+
+
+def test_host_card_power_rows_follow_the_host_not_the_title():
+    """Audit 2026-10-02 G1-13: armed+halted and Stop? both painted power off."""
+
+    from agent_discord.orchestration.cards import host_card
+
+    running = _host_card_text(host_card(armed=True))
+    assert "`power`  on" in running
+    assert "`listen`  live" in running
+
+    halted = _host_card_text(host_card(armed=True, halted=True))
+    assert "### Halted" in halted
+    assert "`power`  on" in halted
+    assert "`listen`  halted" in halted
+
+    confirm = _host_card_text(host_card(armed=True, confirm_off=True))
+    assert "### Stop?" in confirm
+    assert "`power`  on" in confirm
+    assert "`listen`  live" in confirm
+
+    stopped = _host_card_text(host_card(armed=False))
+    assert "`power`  off" in stopped
+    assert "`listen`  idle" in stopped
+
+    # Off confirm while halted keeps power on until Confirm is tapped.
+    halted_confirm = _host_card_text(
+        host_card(armed=True, halted=True, confirm_off=True)
+    )
+    assert "`power`  on" in halted_confirm
+    assert "`listen`  halted" in halted_confirm
+
+
+def test_github_option_answers_with_auth_state_and_command(tmp_path: Path, monkeypatch):
+    """Audit 2026-10-02 G1-12: More > GitHub only repainted the panel."""
+
+    from agent_discord.host import github
+
+    store = SQLiteStore(tmp_path / "gh.sqlite3")
+    store.initialize()
+    store.set_host_control("ch", armed=True)
+    store.add_operator("owner-7", role="owner")
+    monkeypatch.setattr(
+        github, "gh_auth_state", lambda **kwargs: github.GITHUB_UNAUTHENTICATED
+    )
+    bodies: list[dict] = []
+
+    def opener(request, timeout=10):
+        if getattr(request, "data", None):
+            bodies.append(json.loads(request.data.decode("utf-8")))
+        return _FakeResponse(b"{}")
+
+    action = handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix-gh",
+            "token": "tok",
+            "application_id": "app-1",
+            "user": {"id": "owner-7"},
+            "data": {"custom_id": MORE_ID, "values": [GITHUB_ID]},
+            "message": {"id": "panel-1"},
+        },
+        token="bot-token",
+        opener=opener,
+    )
+    assert action == "github"
+    assert len(bodies) == 1
+    assert bodies[0]["type"] == 4
+    assert bodies[0]["data"]["flags"] == 64
+    content = bodies[0]["data"]["content"]
+    assert github.GITHUB_UNAUTHED_LINE in content
+    assert "gh auth login" in content
+    assert github.GITHUB_HOST_ONLY_LINE in content
+    store.close()
+
+
+def test_github_panel_message_states():
+    from agent_discord.host.github import (
+        GITHUB_AUTHED,
+        GITHUB_AUTHED_LINE,
+        GITHUB_MISSING_BIN,
+        GITHUB_MISSING_LINE,
+        github_panel_message,
+    )
+
+    assert GITHUB_AUTHED_LINE in github_panel_message(GITHUB_AUTHED)
+    assert GITHUB_MISSING_LINE in github_panel_message(GITHUB_MISSING_BIN)
+    assert "gh auth login" in github_panel_message(GITHUB_AUTHED)
+
+
+def test_more_menu_names_halt_or_resume(tmp_path: Path):
+    """Audit 2026-10-02 G1-1: one Halt label in both states hid the state."""
+
+    from agent_discord.host.panel import RESUME_ID, panel_action_from_custom_id
+    from agent_discord.orchestration.service import is_spend_halted, set_spend_halted
+
+    quiet = host_panel_components(True)[1]["components"][0]["options"][1]
+    assert quiet["label"] == "Halt"
+    assert quiet["value"] == HALT_ID
+    stopped = host_panel_components(True, halted=True)[1]["components"][0]["options"][1]
+    assert stopped["label"] == "Resume"
+    assert stopped["value"] == RESUME_ID
+    assert "halted" in stopped["description"].lower()
+    assert panel_action_from_custom_id(RESUME_ID) == "resume"
+
+    store = SQLiteStore(tmp_path / "halt.sqlite3")
+    store.initialize()
+    store.set_host_control("ch", armed=True)
+    store.add_operator("owner-7", role="owner")
+    set_spend_halted(store, True)
+
+    def opener(request, timeout=10):
+        return _FakeResponse(b"{}")
+
+    resumed = handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix-resume",
+            "token": "tok",
+            "application_id": "app-1",
+            "user": {"id": "owner-7"},
+            "data": {"custom_id": MORE_ID, "values": [RESUME_ID]},
+            "message": {"id": "panel-1"},
+        },
+        opener=opener,
+    )
+    assert resumed == "resume"
+    assert is_spend_halted(store) is False
+    # Idempotent: Resume again stays resumed instead of toggling back to Halt.
+    handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix-resume-2",
+            "token": "tok",
+            "application_id": "app-1",
+            "user": {"id": "owner-7"},
+            "data": {"custom_id": MORE_ID, "values": [RESUME_ID]},
+            "message": {"id": "panel-1"},
+        },
+        opener=opener,
+    )
+    assert is_spend_halted(store) is False
+    store.close()
+
+
+def _continue_job_store(tmp_path: Path, name: str) -> SQLiteStore:
+    store = SQLiteStore(tmp_path / name)
+    store.initialize()
+    store.set_host_control("ch", armed=True)
+    store.add_operator("owner-7", role="owner")
+    store.create_task(
+        task_id="t-9",
+        workspace_id="ws",
+        channel_id="ch",
+        thread_id="thread-9",
+        intake_text="ship the fix",
+    )
+    store.create_run(
+        run_id="run-9",
+        task_id="t-9",
+        model="openrouter/auto",
+        adapter_name="openrouter/auto",
+        status=TaskStatus.COMPLETED,
+    )
+    store.update_run("run-9", status=TaskStatus.COMPLETED, summary="Done.")
+    return store
+
+
+def test_only_an_explicit_continue_arms_the_next_ask(tmp_path: Path):
+    """Audit 2026-10-02 G1-15: viewing a job armed a hidden continue mode."""
+
+    from agent_discord.host.actions import job_custom_id
+    from agent_discord.host.panel import pending_continue_run_id
+
+    store = _continue_job_store(tmp_path, "continue.sqlite3")
+
+    def opener(request, timeout=10):
+        return _FakeResponse(b"{}")
+
+    viewed = handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix-view",
+            "token": "tok",
+            "application_id": "app-1",
+            "user": {"id": "owner-7"},
+            "data": {"custom_id": JOBS_ID, "values": ["run-9"]},
+        },
+        token="bot-token",
+        opener=opener,
+    )
+    assert viewed == "job"
+    assert pending_continue_run_id(store, "ch") == ""
+
+    tapped = handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix-cont",
+            "token": "tok",
+            "application_id": "app-1",
+            "user": {"id": "owner-7"},
+            "data": {"custom_id": job_custom_id("continue", "run-9")},
+        },
+        token="bot-token",
+        opener=opener,
+        on_job=lambda a, r: None,
+    )
+    assert tapped == "continue"
+    assert pending_continue_run_id(store, "ch") == "run-9"
+    store.close()
+
+
+def test_armed_continue_is_named_on_the_ask_modal_and_the_pick(tmp_path: Path):
+    """Audit 2026-10-02 G1-15: an armed continue must never be invisible."""
+
+    from agent_discord.host.panel import (
+        PENDING_CONTINUE_SPOKEN,
+        set_pending_continue,
+    )
+
+    store = _continue_job_store(tmp_path, "named.sqlite3")
+    set_pending_continue(store, "ch", "run-9")
+    bodies: list[dict] = []
+
+    def opener(request, timeout=10):
+        if getattr(request, "data", None):
+            bodies.append(json.loads(request.data.decode("utf-8")))
+        return _FakeResponse(b"{}")
+
+    handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix-ask",
+            "token": "tok",
+            "application_id": "app-1",
+            "user": {"id": "owner-7"},
+            "data": {"custom_id": ASK_ID},
+        },
+        token="bot-token",
+        opener=opener,
+    )
+    modal = json.dumps(bodies[-1])
+    assert bodies[-1]["type"] == 9
+    assert store.task_job_code("t-9") in modal
+    assert "continues" in modal.lower()
+
+    handle_gateway_interaction(
+        store,
+        "ch",
+        {
+            "type": 3,
+            "id": "ix-pick",
+            "token": "tok",
+            "application_id": "app-1",
+            "user": {"id": "owner-7"},
+            "data": {"custom_id": JOBS_ID, "values": ["run-9"]},
+        },
+        token="bot-token",
+        opener=opener,
+    )
+    assert PENDING_CONTINUE_SPOKEN in bodies[-1]["data"]["content"]
     store.close()
 
 

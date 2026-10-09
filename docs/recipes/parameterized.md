@@ -10,8 +10,7 @@ for operators, **no YAML recipe runtime**.
 | `channel_id` | snowflake | yes | Desk / forum / Jobs channel |
 | `workspace_id` | string | no | Default `default` |
 | `realm` | string | no | Checkout cook bind (`add desk-pack`) |
-| `dri` | Discord user | when brain | `add brain --dri` |
-| `role` | enum | no | `implementer\|reviewer\|planner` |
+| `strategy_docs` | path | when brain | `add brain --strategy-docs` |
 | `forum_id` | snowflake | forum lane | Existing tags only |
 | `schedule_prompt` | text | overnight | Prefer `overnight brief:` tag |
 | `operators` | Pair×N | shared desk | `REQUIRE_OPERATORS=1` |
@@ -54,9 +53,9 @@ See [overnight-brief](../co-work/overnight-brief.md) + [wave6-overnight-pack](..
 | Input | Example |
 |---|---|
 | `forum_id` | guild forum channel |
-| tags | manual `queued/running/done/…` (+ optional Spec Kit phases) |
+| tags | manual `queued/running/done/…` |
 
-See [forum-lane](../co-work/forum-lane.md) + [wave6-speckit-tags](../co-work/wave6-speckit-tags.md).
+See [forum-lane](../co-work/forum-lane.md).
 
 ### Wave 6 board + brain demo
 

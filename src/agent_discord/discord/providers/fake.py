@@ -36,11 +36,14 @@ class FakeDiscordMCPProvider:
     sent: list[DiscordMessage] = field(default_factory=list)
     inbox: list[DiscordMessage] = field(default_factory=list)
     fail_tools: set[str] = field(default_factory=set)
-    sampling_calls: list[Mapping[str, Any]] = field(default_factory=list)
     blobs: dict[str, bytes] = field(default_factory=dict)
     threads: dict[str, dict[str, str]] = field(default_factory=dict)
     persist_dir: Optional[Path] = None
     reactions: list[dict[str, str]] = field(default_factory=list)
+    # (channel_id, message_id, emoji) -> user objects a reaction read returns.
+    reaction_users: dict[tuple[str, str, str], list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
 
     def __post_init__(self) -> None:
         if self.persist_dir is not None:
@@ -235,6 +238,15 @@ class FakeDiscordMCPProvider:
             }
         )
 
+    def list_reactions(
+        self,
+        channel_id: str,
+        message_id: str,
+        emoji: str,
+    ) -> tuple[dict[str, Any], ...]:
+        key = (str(channel_id or ""), str(message_id or ""), str(emoji or ""))
+        return tuple(self.reaction_users.get(key, ()))
+
     def get_message(self, channel_id: str, message_id: str) -> DiscordMessage:
         for msg in (*self.sent, *self.inbox):
             if msg.message_id == message_id:
@@ -311,6 +323,7 @@ class FakeDiscordMCPProvider:
         *,
         limit: int = 20,
         thread_id: Optional[str] = None,
+        after: Optional[str] = None,
     ) -> Sequence[DiscordMessage]:
         matched = [
             m
@@ -321,6 +334,11 @@ class FakeDiscordMCPProvider:
             )
             and (thread_id is None or m.thread_id == thread_id)
         ]
+        anchor = str(after or "").strip()
+        if anchor:
+            # Discord anchors the window at `after` and walks forward.
+            newer = [m for m in matched if _id_after(m.message_id, anchor)]
+            return newer[:limit]
         return matched[-limit:]
 
     def post_thread_task(
@@ -340,10 +358,6 @@ class FakeDiscordMCPProvider:
         self.sent.append(msg)
         self._save_persist()
         return msg
-
-    def handle_sampling_request(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
-        self.sampling_calls.append(dict(payload))
-        return {"ok": True, "provider": self.name, "echo": payload.get("messages", [])}
 
     def _load_persist(self) -> None:
         assert self.persist_dir is not None
@@ -374,6 +388,13 @@ class FakeDiscordMCPProvider:
         (self.persist_dir / "messages.json").write_text(
             json.dumps(index, indent=2) + "\n", encoding="utf-8"
         )
+
+
+def _id_after(message_id: str, anchor: str) -> bool:
+    try:
+        return int(message_id) > int(anchor)
+    except (TypeError, ValueError):
+        return str(message_id or "") != anchor
 
 
 def _attachment_payload(att: DiscordAttachment) -> dict[str, Any]:

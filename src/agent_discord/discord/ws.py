@@ -7,12 +7,22 @@ import os
 import select
 import socket
 import ssl
+import threading
 from typing import Optional
 from urllib.parse import urlparse
 
 
 class WebSocketError(RuntimeError):
-    """Handshake or framing failed."""
+    """Handshake or framing failed.
+
+    ``close_code`` carries the peer's RFC 6455 close code when the peer sent a
+    close frame. Discord's reconnect policy is keyed on that code, so dropping
+    it turns a fatal 4004 and a resumable 4000 into the same event.
+    """
+
+    def __init__(self, message: str, *, close_code: Optional[int] = None) -> None:
+        super().__init__(message)
+        self.close_code = close_code
 
 
 def encode_frame(payload: bytes, *, opcode: int = 1) -> bytes:
@@ -69,12 +79,28 @@ def decode_frame(buffer: bytearray) -> Optional[tuple[int, bytes]]:
     return opcode, payload
 
 
+def _closed_error(payload: bytes) -> WebSocketError:
+    """Build the close error, keeping the peer's close code and reason."""
+
+    if len(payload) < 2:
+        return WebSocketError("websocket closed")
+    code = int.from_bytes(payload[:2], "big")
+    reason = payload[2:].decode("utf-8", "replace").strip()
+    text = f"websocket closed code={code}"
+    if reason:
+        text = f"{text} {reason}"
+    return WebSocketError(text, close_code=code)
+
+
 class WebSocketClient:
     """Blocking text WebSocket over TLS. Close is best-effort."""
 
     def __init__(self, sock: socket.socket) -> None:
         self._sock = sock
         self._buffer = bytearray()
+        # Heartbeat thread and the dispatch thread both send. Interleaved
+        # frames are a protocol error (Discord closes 4002).
+        self._send_lock = threading.Lock()
 
     @classmethod
     def connect(cls, url: str, *, timeout: float = 30.0) -> "WebSocketClient":
@@ -119,15 +145,20 @@ class WebSocketClient:
         sock.settimeout(None)
         return client
 
+    def _send_frame(self, payload: bytes, *, opcode: int) -> None:
+        frame = encode_frame(payload, opcode=opcode)
+        with self._send_lock:
+            self._sock.sendall(frame)
+
     def send_text(self, text: str) -> None:
-        self._sock.sendall(encode_frame(text.encode("utf-8"), opcode=1))
+        self._send_frame(text.encode("utf-8"), opcode=1)
 
     def send_pong(self, payload: bytes = b"") -> None:
-        self._sock.sendall(encode_frame(payload, opcode=10))
+        self._send_frame(payload, opcode=10)
 
     def send_close(self) -> None:
         try:
-            self._sock.sendall(encode_frame(b"", opcode=8))
+            self._send_frame(b"", opcode=8)
         except OSError:
             pass
 
@@ -148,7 +179,7 @@ class WebSocketClient:
                 continue
             opcode, payload = frame
             if opcode == 8:
-                raise WebSocketError("websocket closed")
+                raise _closed_error(payload)
             if opcode == 9:
                 self.send_pong(payload)
                 continue

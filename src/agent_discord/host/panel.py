@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 from typing import Any, Callable, Mapping, Optional
 
 from agent_discord.discord.layout import action_row, string_select
@@ -39,9 +41,15 @@ _PANEL_STALE_NEED_PREF = "jobs_panel_stale_need"
 _PANEL_STALE_NEED_SPOKEN = (
     "Need: HOST Jobs panel could not refresh. Tap On or open Jobs."
 )
+HOST_PREFS = "_host"
+PENDING_CONTINUE_PREF = "pending_continue"
+PENDING_CONTINUE_SPOKEN = "Next Ask continues this job."
+JOB_DENIED_SPOKEN = "Denied. Only paired operators can act on jobs."
+PANEL_DENIED_SPOKEN = "Denied. Only paired operators can use the HOST panel."
 MORE_ID = "discord-os:more"
 PAIR_ID = "discord-os:pair"
 HALT_ID = "discord-os:halt"
+RESUME_ID = "discord-os:resume"
 GATE_ID = "discord-os:gate"
 ROLES_ID = "discord-os:roles"
 ROLES_MODAL_ID = "discord-os:roles-modal"
@@ -53,6 +61,8 @@ BROWSER_MODAL_ID = "discord-os:browser-modal"
 BROWSER_REMOTE_MODAL_ID = "discord-os:browser-modal:remote"
 BROWSER_TEXT_ID = "discord-os:browser-text"
 GITHUB_ID = "discord-os:github"
+FEATURES_ID = "discord-os:features"
+FEATURE_TOGGLE_PREFIX = "discord-os:feature:"
 CLEAR_NEEDS_ID = "discord-os:clear-needs"
 CLEAR_NEEDS_CONFIRM_ID = "discord-os:clear-needs-confirm"
 CLEAR_NEEDS_CANCEL_ID = "discord-os:clear-needs-cancel"
@@ -89,6 +99,7 @@ def host_panel_components(
     jobs: Optional[list[dict[str, Any]]] = None,
     paired: bool = False,
     write_gate: bool = False,
+    halted: bool = False,
 ) -> list[dict[str, Any]]:
     if confirm_off:
         rows = [
@@ -163,6 +174,7 @@ def host_panel_components(
             armed=armed,
             paired=paired,
             write_gate=write_gate,
+            halted=halted,
         )
         if more:
             rows.append(
@@ -183,6 +195,7 @@ def _more_select_options(
     armed: bool,
     paired: bool,
     write_gate: bool,
+    halted: bool = False,
 ) -> list[dict[str, str]]:
     options: list[dict[str, str]] = []
     if not paired:
@@ -193,9 +206,18 @@ def _more_select_options(
                 "description": "First click becomes owner",
             }
         )
-    options.append(
-        {"label": "Halt", "value": HALT_ID, "description": "Stop new jobs"}
-    )
+    if halted:
+        options.append(
+            {
+                "label": "Resume",
+                "value": RESUME_ID,
+                "description": "Intake is halted — take new jobs again",
+            }
+        )
+    else:
+        options.append(
+            {"label": "Halt", "value": HALT_ID, "description": "Stop new jobs"}
+        )
     options.append(
         {
             "label": "Clear failed Needs",
@@ -238,6 +260,13 @@ def _more_select_options(
             "label": "GitHub",
             "value": GITHUB_ID,
             "description": "Host gh sign-in",
+        }
+    )
+    options.append(
+        {
+            "label": "Features",
+            "value": FEATURES_ID,
+            "description": "Turn opt-in features on or off",
         }
     )
     if armed:
@@ -303,7 +332,19 @@ def _job_select_options(jobs: list[dict[str, Any]] | tuple[dict[str, Any], ...])
 
 
 
-def ask_modal_payload() -> dict[str, Any]:
+def ask_modal_payload(*, continue_job: str = "") -> dict[str, Any]:
+    """HOST Ask form. Names the job when the next Ask continues one."""
+
+    job = (continue_job or "").strip()
+    if job:
+        return _text_modal_payload(
+            ASK_MODAL_ID,
+            "Ask Discord OS",
+            ASK_TEXT_ID,
+            f"Continues {job}"[:45],
+            f"This Ask continues {job}, not a new job."[:100],
+            max_length=4000,
+        )
     return _text_modal_payload(
         ASK_MODAL_ID,
         "Ask Discord OS",
@@ -361,12 +402,33 @@ def poll_modal_payload() -> dict[str, Any]:
 def roles_modal_payload() -> dict[str, Any]:
     return _text_modal_payload(
         ROLES_MODAL_ID,
-        "Add operator role",
+        "Operator roles",
         ROLES_TEXT_ID,
         "Discord role id",
-        "Snowflake role id",
+        "Role id to add, or -role id to remove",
         max_length=32,
     )
+
+
+_SNOWFLAKE_RE = re.compile(r"^[0-9]{17,20}$")
+
+
+def parse_role_edit(text: str, *, guild_id: str = "") -> tuple[str, str] | None:
+    """Roles modal text -> ("add" | "remove", role_id), or None when refused.
+
+    The guild id is the @everyone role id, so adding it would make every
+    member an operator. It is refused.
+    """
+
+    raw = (text or "").strip()
+    verb = "add"
+    if raw.startswith("-"):
+        verb, raw = "remove", raw[1:].strip()
+    if not _SNOWFLAKE_RE.match(raw):
+        return None
+    if verb == "add" and raw == str(guild_id or "").strip():
+        return None
+    return verb, raw
 
 
 def _ephemeral_operator_menu(
@@ -598,6 +660,11 @@ def host_panel_payload(
         update_pill = update_available_pill()
     except Exception:
         update_pill = ""
+    outcomes = ""
+    if store is not None:
+        from agent_discord.orchestration.outcomes import outcome_tally_line
+
+        outcomes = outcome_tally_line(store)
     job_rows = [j for j in (jobs or []) if str(j.get("task_id") or "") != "host-liveness"]
     empty_jobs = not bool(job_rows) and not bool((last_job or "").strip())
     card = host_card(
@@ -620,6 +687,7 @@ def host_panel_payload(
         github=_panel_github(),
         update_pill=update_pill,
         empty_jobs=empty_jobs,
+        outcomes=outcomes,
     )
     # Discord-half P1: HOST Jobs chrome accent follows top Need/Live/Done bucket.
     if (
@@ -652,6 +720,7 @@ def host_panel_payload(
                 thinking=card.thinking,
                 chrome=bucket,
                 job_code=card.job_code,
+                power=card.power,
             )
         except Exception:
             pass
@@ -663,6 +732,7 @@ def host_panel_payload(
             jobs=jobs,
             paired=paired,
             write_gate=write_gate,
+            halted=halted,
         )
     )
 
@@ -699,6 +769,8 @@ def panel_action_from_custom_id(custom_id: str) -> Optional[str]:
         return "roles-cancel"
     if raw == HALT_ID:
         return "halt"
+    if raw == RESUME_ID:
+        return "resume"
     if raw == CLEAR_NEEDS_ID:
         return "clear-needs"
     if raw == CLEAR_NEEDS_CONFIRM_ID:
@@ -716,6 +788,8 @@ def panel_action_from_custom_id(custom_id: str) -> Optional[str]:
         return intent.surface
     if raw == GITHUB_ID:
         return "github"
+    if raw == FEATURES_ID:
+        return "features"
     return None
 
 
@@ -732,9 +806,12 @@ def panel_action_from_interaction(payload: Mapping[str, Any]) -> Optional[str]:
 
 
 def apply_panel_action(store: Any, channel_id: str, action: str) -> dict[str, Any]:
-    writer = getattr(store, "set_host_control", None)
-    if action in {"on", "off-confirm"} and callable(writer):
-        return writer(channel_id, armed=action == "on")
+    if action in {"on", "off-confirm"} and callable(
+        getattr(store, "set_host_control", None)
+    ):
+        from agent_discord.orchestration.service import set_host_armed
+
+        return set_host_armed(store, channel_id, action == "on")
     reader = getattr(store, "get_host_control", None)
     if callable(reader):
         current = reader(channel_id)
@@ -842,7 +919,7 @@ def handle_gateway_interaction(
     *,
     token: str = "",
     opener: Any = None,
-    on_ask: Optional[Callable[[str], None]] = None,
+    on_ask: Optional[Callable[[str, str], None]] = None,
     on_power: Optional[Callable[[bool], None]] = None,
     on_job: Optional[Callable[[str, str], None]] = None,
     on_clear_needs: Optional[Callable[..., Any]] = None,
@@ -863,8 +940,27 @@ def handle_gateway_interaction(
     custom_id = ""
     if isinstance(data, dict):
         custom_id = str(data.get("custom_id") or "")
+    cooked = _handle_cook_click(
+        store, payload, custom_id, opener=opener, on_ask=on_ask
+    )
+    if cooked is not None:
+        return cooked
+    from agent_discord.orchestration.pm_inbox import (
+        handle_pm_inbox_click,
+        pm_inbox_action_from_custom_id,
+    )
+
+    pm_inbox = pm_inbox_action_from_custom_id(custom_id)
+    if pm_inbox is not None:
+        # Observed Puppetmaster job: approve/reject it through the PM CLI.
+        # Never a Discord OS cook, so no JobPool and no on_job hop.
+        return handle_pm_inbox_click(
+            store, payload, action=pm_inbox, opener=opener
+        )
     confirm = ask_confirm_action_from_custom_id(custom_id)
     if confirm is not None:
+        if not _operator_may_click(store, payload, "ask-confirm", opener=opener):
+            return "denied"
         interaction_id, ix_token = interaction_ids(payload)
         if interaction_id and ix_token:
             try:
@@ -886,6 +982,8 @@ def handle_gateway_interaction(
         return "ask-confirm"
     ask = ask_action_from_custom_id(custom_id)
     if ask is not None:
+        if not _operator_may_click(store, payload, "ask", opener=opener):
+            return "denied"
         interaction_id, ix_token = interaction_ids(payload)
         if interaction_id and ix_token:
             try:
@@ -910,6 +1008,8 @@ def handle_gateway_interaction(
 
     job = job_action_from_custom_id(custom_id)
     if job is not None:
+        if not _operator_may_click(store, payload, job.action, opener=opener):
+            return "denied"
         # Discord-half P1: ACK-first (defer), then edit-in-place / apply.
         interaction_id, ix_token = interaction_ids(payload)
         if interaction_id and ix_token:
@@ -925,6 +1025,9 @@ def handle_gateway_interaction(
             except Exception:
                 pass
         rid = resolve_job_run_id(store, job) or job.run_id
+        if job.action == "continue":
+            # Explicit Continue is the only thing that may aim the next Ask.
+            set_pending_continue(store, channel_id, rid)
         if callable(on_job):
             try:
                 on_job(job.action, rid)
@@ -952,11 +1055,27 @@ def handle_gateway_interaction(
             browser_open=browser_open,
         )
 
+    if custom_id.startswith(FEATURE_TOGGLE_PREFIX):
+        return _handle_feature_toggle(store, channel_id, payload, custom_id, opener=opener)
+
     action = panel_action_from_interaction(payload)
     if action is None:
         return None
+    if action == "features":
+        _ack_interaction(
+            payload,
+            {"type": CALLBACK_MESSAGE, "data": features_menu_data(store, channel_id)},
+            opener=opener,
+        )
+        return action
     if action == "ask":
-        _ack_interaction(payload, ask_modal_payload(), opener=opener)
+        _ack_interaction(
+            payload,
+            ask_modal_payload(
+                continue_job=_pending_continue_label(store, channel_id)
+            ),
+            opener=opener,
+        )
         return action
     if action == "roles":
         # Roles stays modal (snowflake id). Not an ephemeral Pair/Gate-style menu.
@@ -1086,17 +1205,12 @@ def handle_gateway_interaction(
     ):
         _ack_interaction(payload, browser_remote_modal_payload(), opener=opener)
         return action
-    _ack_interaction(payload, {"type": CALLBACK_DEFERRED_UPDATE}, opener=opener)
-
     from agent_discord.orchestration.service import (
-        author_may_operate,
         seed_owner_if_empty,
-        toggle_spend_halted,
-        toggle_write_gate,
+        set_spend_halted,
     )
 
     user_id = interaction_user_id(payload)
-    role_ids = interaction_role_ids(payload)
     if action == "on":
         # Silent first-On seed only when require flag is off (default Mac UX).
         seeded = seed_owner_if_empty(store, user_id)
@@ -1104,10 +1218,47 @@ def handle_gateway_interaction(
             f"panel {action} user={user_id or '-'} seeded={int(bool(seeded))}",
             flush=True,
         )
-    if not author_may_operate(store, user_id, action, role_ids=role_ids):
+    # Deny before the ACK: a non-operator hears Denied instead of a silent
+    # deferred update that leaves the panel unchanged. Who may act is unchanged.
+    if not _operator_may_click(
+        store,
+        payload,
+        action,
+        opener=opener,
+        content=PANEL_DENIED_SPOKEN,
+    ):
         return "denied"
-    if action == "halt":
-        toggle_spend_halted(store)
+    if action == "poll":
+        # A modal must be the first and only response to this interaction.
+        _ack_interaction(payload, poll_modal_payload(), opener=opener)
+        return action
+    if action == "github":
+        # Read-only state + the host command. Never an interactive login here.
+        _ack_interaction(
+            payload,
+            {
+                "type": CALLBACK_MESSAGE,
+                "data": {
+                    "content": _github_panel_content(),
+                    "flags": FLAG_EPHEMERAL,
+                },
+            },
+            opener=opener,
+        )
+        return action
+    if action == "job":
+        # Ephemeral read-only answer: the one live card stays in the job thread.
+        try:
+            _answer_job_pick(
+                store, payload, opener=opener, channel_id=channel_id
+            )
+        except Exception as exc:
+            print(f"panel job pick failed: {exc}", flush=True)
+        return action
+    _ack_interaction(payload, {"type": CALLBACK_DEFERRED_UPDATE}, opener=opener)
+    if action in {"halt", "resume"}:
+        # Named, idempotent: Halt stops intake, Resume takes jobs again.
+        set_spend_halted(store, action == "halt")
         _tick_rich_presence_best_effort(store, channel_id)
     if intent is not None:
         if _channel_armed(store, channel_id):
@@ -1121,17 +1272,6 @@ def handle_gateway_interaction(
                 runner=host_runner,
                 browser_open=browser_open,
             )
-    if action == "job":
-        try:
-            _publish_job_card(store, channel_id, payload, token=token, opener=opener)
-        except Exception as exc:
-            print(f"panel job card failed: {exc}", flush=True)
-        return action
-
-    if action == "poll":
-        _ack_interaction(payload, poll_modal_payload(), opener=opener)
-        return action
-
     if action == "clear-needs":
         matched = _count_dismissable_needs(store, channel_id)
         if matched <= 0:
@@ -1228,13 +1368,6 @@ def handle_gateway_interaction(
     confirm_off = action == "off"
     if action in {"on", "off-confirm"}:
         apply_panel_action(store, channel_id, action)
-        if action == "off-confirm":
-            try:
-                from agent_discord.orchestration.service import clear_write_session_allows
-
-                clear_write_session_allows(store)
-            except Exception:
-                pass
         if callable(on_power):
             try:
                 on_power(action == "on")
@@ -1267,6 +1400,189 @@ def handle_gateway_interaction(
 
 
 
+def pending_continue_run_id(store: Any, channel_id: str) -> str:
+    """Run the next HOST Ask in this channel continues, or "" for a new job.
+
+    Only an explicit Continue tap arms this. Reading a job never does — a
+    hidden continue mode is how an Ask silently landed on an old job.
+    """
+
+    reader = getattr(store, "get_preference", None)
+    if not callable(reader) or not (channel_id or "").strip():
+        return ""
+    try:
+        return str(reader(HOST_PREFS, _pending_continue_key(channel_id)) or "").strip()
+    except Exception:
+        return ""
+
+
+def set_pending_continue(store: Any, channel_id: str, run_id: str) -> None:
+    writer = getattr(store, "set_preference", None)
+    if not callable(writer) or not (channel_id or "").strip():
+        return
+    try:
+        writer(HOST_PREFS, _pending_continue_key(channel_id), str(run_id or "").strip())
+    except Exception:
+        return
+
+
+def clear_pending_continue(store: Any, channel_id: str) -> None:
+    set_pending_continue(store, channel_id, "")
+
+
+def _pending_continue_key(channel_id: str) -> str:
+    return f"{PENDING_CONTINUE_PREF}:{channel_id}"
+
+
+def _pending_continue_label(store: Any, channel_id: str) -> str:
+    """Job code (else short run id) of the armed continue. "" when none."""
+
+    from agent_discord.orchestration.lineage import job_code_for_run
+
+    run_id = pending_continue_run_id(store, channel_id)
+    if not run_id:
+        return ""
+    return job_code_for_run(store, run_id) or run_id[:16]
+
+
+def _handle_cook_click(
+    store: Any,
+    payload: Mapping[str, Any],
+    custom_id: str,
+    *,
+    opener: Any,
+    on_ask: Optional[Callable[[str, str], None]],
+) -> Optional[str]:
+    """Fix CI / morning Cook: operator-only, then the ask goes through JobPool.
+
+    The prompt is never pre-approved here — ``on_ask`` enqueues it like a typed
+    ask, so the write gate holds it exactly as it holds any other cook.
+    """
+
+    from agent_discord.orchestration.cook_button import (
+        parse_cook_custom_id,
+        stored_cook_prompt,
+    )
+
+    action = parse_cook_custom_id(custom_id)
+    if action is None:
+        return None
+    if not _operator_may_click(store, payload, "cook", opener=opener):
+        return "denied"
+    interaction_id, ix_token = interaction_ids(payload)
+    if interaction_id and ix_token:
+        try:
+            from agent_discord.discord.rest import callback_interaction
+
+            callback_interaction(
+                interaction_id=interaction_id,
+                interaction_token=ix_token,
+                payload={"type": CALLBACK_DEFERRED_UPDATE},
+                opener=opener,
+            )
+        except Exception:
+            pass
+    prompt = stored_cook_prompt(store, action)
+    if not prompt:
+        return "cook-expired"
+    if callable(on_ask):
+        try:
+            on_ask(prompt, interaction_user_id(payload))
+        except Exception:
+            pass
+    return "cook"
+
+
+def features_menu_data(store: Any, channel_id: str) -> dict[str, Any]:
+    """Ephemeral list of opt-ins with one toggle button each."""
+
+    from agent_discord.discord.layout import STYLE_SECONDARY, STYLE_SUCCESS, button
+    from agent_discord.host.features import feature_states, format_feature_list
+
+    states = feature_states(store, channel_id=channel_id)
+    buttons = [
+        button(
+            f"{state.feature.label}: {'on' if state.on else 'off'}",
+            f"{FEATURE_TOGGLE_PREFIX}{state.feature.name}:{'off' if state.on else 'on'}",
+            style=STYLE_SUCCESS if state.on else STYLE_SECONDARY,
+        )
+        for state in states
+    ]
+    return {
+        "content": format_feature_list(states) + "\nTap a button to flip it.",
+        "flags": FLAG_EPHEMERAL,
+        "components": [action_row(buttons[i : i + 5]) for i in range(0, len(buttons), 5)],
+    }
+
+
+def _handle_feature_toggle(
+    store: Any,
+    channel_id: str,
+    payload: Mapping[str, Any],
+    custom_id: str,
+    *,
+    opener: Any,
+) -> str:
+    from agent_discord.host.features import set_feature
+
+    name, _, state = custom_id[len(FEATURE_TOGGLE_PREFIX) :].partition(":")
+    if state not in {"on", "off"}:
+        return "feature"
+    if not _operator_may_click(store, payload, "feature", opener=opener):
+        return "denied"
+    try:
+        set_feature(store, name, state == "on", channel_id=channel_id)
+    except ValueError as exc:
+        _ack_interaction(
+            payload,
+            {"type": CALLBACK_MESSAGE, "data": {"content": f"features: {exc}", "flags": FLAG_EPHEMERAL}},
+            opener=opener,
+        )
+        return "feature"
+    _ack_interaction(
+        payload,
+        {"type": CALLBACK_UPDATE_MESSAGE, "data": features_menu_data(store, channel_id)},
+        opener=opener,
+    )
+    return "feature"
+
+
+def _operator_may_click(
+    store: Any,
+    payload: Mapping[str, Any],
+    action: str,
+    *,
+    opener: Any,
+    content: str = JOB_DENIED_SPOKEN,
+) -> bool:
+    """Job-card, ask-gate, and HOST panel taps change host state: operators only.
+
+    A non-operator click gets an ephemeral Denied instead of the deferred ACK,
+    so the card never changes for them and the tap is never silently dropped.
+    """
+
+    from agent_discord.orchestration.service import author_may_operate
+
+    user_id = interaction_user_id(payload)
+    if author_may_operate(
+        store, user_id, action, role_ids=interaction_role_ids(payload)
+    ):
+        return True
+    print(f"panel denied action={action} user={user_id or '-'}", flush=True)
+    _ack_interaction(
+        payload,
+        {
+            "type": CALLBACK_MESSAGE,
+            "data": {
+                "content": content or JOB_DENIED_SPOKEN,
+                "flags": FLAG_EPHEMERAL,
+            },
+        },
+        opener=opener,
+    )
+    return False
+
+
 def _tick_rich_presence_best_effort(store: Any, channel_id: str) -> None:
     """Mac Rich Presence after HOST On / Off / Halt. Fail soft."""
 
@@ -1285,12 +1601,12 @@ def _post_status_digest_on_arm(
     token: str = "",
     opener: Any = None,
 ) -> None:
-    """P2.7: push RO dashboard digest when HOST On. Never mutates power."""
+    """P2.7: push the RO status digest when HOST On. Never mutates power."""
 
     if not (token or "").strip():
         return
     try:
-        from agent_discord.host.status_digest import tick_status_digest
+        from agent_discord.host.status import tick_status_digest
     except Exception:
         return
     workspace = None
@@ -1359,7 +1675,7 @@ def _handle_modal_submit(
     *,
     token: str,
     opener: Any,
-    on_ask: Optional[Callable[[str], None]],
+    on_ask: Optional[Callable[[str, str], None]],
     host_roots: Optional[list[Any]],
     host_runner: Any,
     browser_open: Any,
@@ -1378,28 +1694,43 @@ def _handle_modal_submit(
             token=token,
             opener=opener,
         )
-    if custom_id == ASK_MODAL_ID:
-        if text and callable(on_ask):
-            try:
-                on_ask(text)
-            except Exception:
-                pass
-        return "ask" if text else None
-    from agent_discord.orchestration.service import author_may_operate
+    from agent_discord.orchestration.service import (
+        author_may_dispatch,
+        author_may_operate,
+    )
 
     user_id = interaction_user_id(payload)
     role_ids = interaction_role_ids(payload)
+    if custom_id == ASK_MODAL_ID:
+        if not text:
+            return None
+        # Same rule as a typed ask: the modal starts a cook.
+        if not author_may_dispatch(store, user_id, role_ids=role_ids):
+            print(f"panel denied action=ask user={user_id or '-'}", flush=True)
+            return "denied"
+        if callable(on_ask):
+            try:
+                on_ask(text, user_id)
+            except Exception:
+                pass
+        return "ask"
     if not author_may_operate(store, user_id, custom_id, role_ids=role_ids):
         return "denied"
     if custom_id == ROLES_MODAL_ID:
-        role_id = text.strip()
-        writer = getattr(store, "add_operator_role", None)
-        if role_id and callable(writer):
-            try:
-                writer(role_id)
-                print(f"panel role {role_id}", flush=True)
-            except Exception as exc:
-                print(f"panel role failed: {exc}", flush=True)
+        edit = parse_role_edit(text, guild_id=str(payload.get("guild_id") or ""))
+        if edit is None:
+            print("panel role refused: not a role snowflake, or @everyone", flush=True)
+        else:
+            verb, role_id = edit
+            writer = getattr(
+                store, "add_operator_role" if verb == "add" else "remove_operator_role", None
+            )
+            if callable(writer):
+                try:
+                    writer(role_id)
+                    print(f"panel role {verb} {role_id}", flush=True)
+                except Exception as exc:
+                    print(f"panel role failed: {exc}", flush=True)
         _paint_interaction(
             store, channel_id, payload, token=token, opener=opener, confirm_off=False
         )
@@ -1641,11 +1972,7 @@ def _panel_last_job(store: Any, channel_id: str) -> str:
     jobs = _panel_jobs(store, channel_id)
     if not jobs:
         return ""
-    line = briefing_line(jobs[0])
-    footer = _lane_relationship_footer(jobs)
-    if footer:
-        return f"{line} · {footer}" if line else footer
-    return line
+    return briefing_line(jobs[0])
 
 
 def _panel_realm(store: Any, channel_id: str) -> str:
@@ -1667,6 +1994,21 @@ def _panel_bank(store: Any, channel_id: str) -> bool:
         return bool(channel_is_memory(store, channel_id))
     except Exception:
         return False
+
+
+def _github_panel_content() -> str:
+    """gh auth state for the HOST More > GitHub ephemeral. Fail soft.
+
+    The probe is on the interaction ACK path, so it gets a short timeout.
+    """
+
+    from agent_discord.host import github
+
+    try:
+        state = github.gh_auth_state(timeout_s=2.0)
+    except Exception:
+        state = ""
+    return github.github_panel_message(state)
 
 
 def _panel_github() -> str:
@@ -1697,53 +2039,10 @@ def _panel_jobs(store: Any, channel_id: str) -> list[dict[str, Any]]:
             jobs = list(reader(channel_id, limit=5))
         except Exception:
             jobs = []
-    # Wave 5 P2c: tag home DRI + pull sibling brain-channel jobs for cross-DRI lanes.
-    try:
-        from agent_discord.host.brain import brain_from_binding
-
-        home_cid = (channel_id or "").strip()
-        home_brain: dict[str, Any] = {}
-        getter = getattr(store, "get_binding", None)
-        if callable(getter) and home_cid:
-            home_brain = brain_from_binding(getter("default", home_cid) or {})
-        if home_brain.get("dri"):
-            for item in jobs:
-                item.setdefault("brain_dri", home_brain["dri"])
-                if home_brain.get("brain_role"):
-                    item.setdefault("brain_role", home_brain["brain_role"])
-                item.setdefault("channel_id", home_cid)
-        lister = getattr(store, "list_bindings", None)
-        seen_codes = {str(j.get("job_code") or "") for j in jobs if j.get("job_code")}
-        if callable(lister) and callable(reader):
-            for binding in list(lister() or []):
-                cid = str(binding.get("channel_id") or "").strip()
-                if not cid or cid == home_cid:
-                    continue
-                brain = brain_from_binding(binding)
-                if not brain.get("dri"):
-                    continue
-                try:
-                    extra = list(reader(cid, limit=3))
-                except Exception:
-                    extra = []
-                for item in extra:
-                    code = str(item.get("job_code") or "")
-                    if code and code in seen_codes:
-                        continue
-                    tagged = dict(item)
-                    tagged["brain_dri"] = brain["dri"]
-                    if brain.get("brain_role"):
-                        tagged["brain_role"] = brain["brain_role"]
-                    tagged["channel_id"] = cid
-                    jobs.append(tagged)
-                    if code:
-                        seen_codes.add(code)
-    except Exception:
-        pass
     try:
         from pathlib import Path as _Path
 
-        from agent_discord.host.liveness import (
+        from agent_discord.host.status import (
             last_digest_from_state,
             merge_host_need_jobs,
             resolve_digest_for_panel,
@@ -2073,35 +2372,58 @@ def _paint_host_panel(
     )
 
 
-def _publish_job_card(
+def _answer_job_pick(
     store: Any,
-    channel_id: str,
     payload: Mapping[str, Any],
     *,
-    token: str,
     opener: Any,
+    channel_id: str = "",
 ) -> None:
-    run_id = selected_job_id(payload)
-    if not run_id or not token.strip():
-        return
-    getter = getattr(store, "get_run", None)
-    if not callable(getter):
-        return
-    run = getter(run_id)
-    if not isinstance(run, dict):
-        return
-    from agent_discord.contracts import RunReceipt, TaskStatus
-    from agent_discord.discord.rest import send_channel_message
-    from agent_discord.orchestration.cards import receipt_card
-    from agent_discord.orchestration.job_briefing import briefing_line
-    from agent_discord.orchestration.reactive import reactive_for_job
+    """Answer a HOST Jobs pick ephemerally.
 
-    status_raw = str(run.get("status") or "completed")
-    try:
-        status = TaskStatus(status_raw)
-    except ValueError:
-        status = TaskStatus.COMPLETED
-    task = {}
+    One live card per job: that card lives in the job thread. A pick here is a
+    read, so it never posts a second copy into the HOST channel.
+    """
+
+    run_id = selected_job_id(payload)
+    if not run_id:
+        return
+    content, rows = _job_pick_summary(
+        store, run_id, guild_id=str(payload.get("guild_id") or "")
+    )
+    if pending_continue_run_id(store, channel_id) == run_id:
+        content = f"{content}\n{PENDING_CONTINUE_SPOKEN}"
+    data: dict[str, Any] = {
+        "content": content[:2000],
+        "flags": FLAG_EPHEMERAL,
+    }
+    if rows:
+        data["components"] = rows
+    _ack_interaction(
+        payload,
+        {"type": CALLBACK_MESSAGE, "data": data},
+        opener=opener,
+    )
+
+
+def _job_pick_summary(
+    store: Any,
+    run_id: str,
+    *,
+    guild_id: str = "",
+) -> tuple[str, list[dict[str, Any]]]:
+    """Spoken job summary + the same job buttons the thread card carries."""
+
+    getter = getattr(store, "get_run", None)
+    run = None
+    if callable(getter):
+        try:
+            run = getter(run_id)
+        except Exception:
+            run = None
+    if not isinstance(run, dict):
+        return f"Job `{run_id}` is not in this host's SQLite.", []
+    task: Mapping[str, Any] = {}
     task_getter = getattr(store, "get_task", None)
     task_id = str(run.get("task_id") or "")
     if callable(task_getter) and task_id:
@@ -2109,70 +2431,53 @@ def _publish_job_card(
             task = task_getter(task_id) or {}
         except Exception:
             task = {}
+    code = str(task.get("job_code") or "")
+    status = str(run.get("status") or "")
     job_row = {
         "run_id": run_id,
-        "status": status.value,
+        "status": status,
         "summary": str(run.get("summary") or ""),
         "intake_text": str(task.get("intake_text") or ""),
-        "job_code": str(task.get("job_code") or ""),
+        "job_code": code,
         "thread_id": str(task.get("thread_id") or ""),
     }
-    summary = str(run.get("summary") or "No summary.")
-    line = briefing_line(job_row)
-    if line and line not in summary:
-        summary = f"{line}\n{summary}"
-    paint = reactive_for_job(job_row)
-    code = str(task.get("job_code") or "")
-    card = receipt_card(
-        RunReceipt(
-            task_id=task_id,
-            run_id=run_id,
-            status=status,
-            summary=summary,
-            error=str(run.get("error") or "") or None,
-        ),
-        actions=paint.actions,
-        job_code=code,
-    )
-    # Align Section chrome + accent from the reactive seam.
-    from agent_discord.orchestration.cards import CardMessage
+    from agent_discord.orchestration.cards import job_action_row
+    from agent_discord.orchestration.job_briefing import briefing_line
+    from agent_discord.orchestration.reactive import reactive_for_job
 
-    card = CardMessage(
-        kind=card.kind,
-        title=card.title,
-        description=card.description,
-        color=paint.accent,
-        fields=card.fields,
-        percent=card.percent,
-        file_name=card.file_name,
-        file_data=card.file_data,
-        link_url=card.link_url,
-        updated_ts=card.updated_ts,
-        avatar_url=card.avatar_url,
-        rows=card.rows,
-        thinking=card.thinking,
-        chrome=paint.chrome,
-        job_code=code,
-    )
-    if paint.actions in {"idle", "failed", "failed_done"}:
+    lines = [briefing_line(job_row) or f"{status or 'unknown'} · {run_id}"]
+    lines.append(f"`{code or run_id}` · {status or 'unknown'}")
+    link = _job_card_link(task, guild_id=guild_id)
+    lines.append(link or "No job thread yet — this job has no card to open.")
+    summary = str(run.get("summary") or "").strip()
+    if summary:
+        lines.append(summary)
+    paint = reactive_for_job(job_row)
+    rows = [job_action_row(run_id, actions=paint.actions, job_code=code)]
+    return "\n".join(lines), rows
+
+
+def _job_card_link(task: Mapping[str, Any], *, guild_id: str = "") -> str:
+    """Jump link to the job thread's live card, else to the thread itself."""
+
+    thread_id = str(task.get("thread_id") or "").strip()
+    if not thread_id:
+        return ""
+    card_message_id = ""
+    raw = task.get("metadata_json")
+    if isinstance(raw, str) and raw.strip():
         try:
-            from agent_discord.orchestration.service import set_preference_safe
-        except Exception:
-            set_preference_safe = None
-        writer = getattr(store, "set_preference", None)
-        if callable(writer):
-            try:
-                writer("_host", f"pending_continue:{channel_id}", run_id)
-            except Exception:
-                pass
-    send_channel_message(
-        token=token,
-        channel_id=channel_id,
-        content="",
-        components=card.v2_payload()["components"],
-        flags=card.v2_payload()["flags"],
-        opener=opener,
-    )
+            meta = json.loads(raw)
+        except ValueError:
+            meta = {}
+        if isinstance(meta, dict):
+            card_message_id = str(meta.get("card_message_id") or "").strip()
+    guild = (guild_id or "").strip() or "@me"
+    if card_message_id:
+        from agent_discord.contracts import discord_jump_url
+
+        return discord_jump_url(guild, thread_id, card_message_id)
+    return f"https://discord.com/channels/{guild}/{thread_id}"
 
 
 def _handle_poll_modal(
@@ -2246,15 +2551,4 @@ def _handle_poll_modal(
         print(f"panel poll failed: {exc}", flush=True)
     return "poll"
 
-
-def _lane_relationship_footer(jobs: list) -> str:
-    """Wave 4: swim-lane technical relationships for HOST Jobs."""
-    try:
-        from agent_discord.orchestration.job_briefing import lane_relationships
-        lines = lane_relationships(jobs or [])
-    except Exception:
-        return ""
-    if not lines:
-        return ""
-    return "Lanes: " + " · ".join(lines[:4])
 

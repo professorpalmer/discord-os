@@ -13,6 +13,7 @@ from agent_discord import __version__
 from agent_discord.config import (
     AppConfig,
     apply_runtime_secrets,
+    default_workspace,
     discord_token_source,
     load_config,
 )
@@ -24,8 +25,13 @@ _PID_IN_OWNER = re.compile(r"(?:^|\D)(\d{2,})(?:\D|$)")
 
 
 def preferred_live_workspace(home: Optional[Path] = None) -> Optional[Path]:
-    root = Path(home) if home is not None else Path.home()
-    candidate = root / "discord-os" / ".agent-discord"
+    """The workspace `discord-os` picks with AGENT_DISCORD_WORKSPACE unset.
+
+    Same resolver as `load_config`, so doctor cannot WARN against a path the
+    product would never choose. None when it does not exist yet.
+    """
+
+    candidate = default_workspace(home=home)
     return candidate if candidate.is_dir() else None
 
 
@@ -101,8 +107,10 @@ def run_doctor(
     else:
         lines.append(f"OK discord token source={source}")
 
+    _check_puppetmaster_cli(cfg, lines)
     fails += _check_host_allowlist(lines)
     _warn_voice_join(lines)
+    _report_voice_done(lines)
     _check_slash_self_heal(cfg, ws, lines)
     _check_policy_locks_tip(lines)
     _check_forum_tags_honesty(cfg, ws, lines)
@@ -117,8 +125,86 @@ def run_doctor(
         fails += _check_operators(None, lines)
         fails += _check_gateway_ws(ws, lines)
 
+    _check_pm_inbox(db, lines)
+
     return (1 if fails else 0, lines)
 
+
+
+def _check_puppetmaster_cli(cfg: AppConfig, lines: list[str]) -> None:
+    """Name the PM executable and version that would cook. WARN, never FAIL.
+
+    A stale CLI still runs, so this cannot gate the host — but production once
+    cooked on 1.22.15 with no line anywhere saying so.
+    """
+
+    from agent_discord.config import (
+        PUPPETMASTER_REQUIREMENT,
+        puppetmaster_cli_found,
+        puppetmaster_cli_version,
+        puppetmaster_version_in_range,
+        resolve_puppetmaster_cli,
+    )
+
+    configured = cfg.puppetmaster_cli
+    resolved = resolve_puppetmaster_cli(configured)
+    if not puppetmaster_cli_found(configured):
+        lines.append(
+            f"WARN puppetmaster CLI not found: {resolved} "
+            f"(install {PUPPETMASTER_REQUIREMENT})"
+        )
+        return
+    version = puppetmaster_cli_version(resolved)
+    if not version:
+        lines.append(f"WARN puppetmaster {resolved} version unreadable")
+    elif puppetmaster_version_in_range(version):
+        lines.append(f"OK puppetmaster {version} at {resolved}")
+    else:
+        lines.append(
+            f"WARN puppetmaster {version} at {resolved} is outside "
+            f"{PUPPETMASTER_REQUIREMENT}"
+        )
+
+
+def _check_pm_inbox(db: Optional[Path], lines: list[str]) -> None:
+    """Say whether the Puppetmaster job inbox is on. OPT-IN, so off is OK."""
+
+    from agent_discord.orchestration.pm_inbox import (
+        PM_INBOX_CHANNEL_ENV,
+        candidate_state_dirs,
+        pm_inbox_channel_id,
+    )
+    from agent_discord.persistence.sqlite import SQLiteStore
+
+    store = None
+    if db is not None and db.is_file():
+        store = SQLiteStore(db)
+        try:
+            store.initialize()
+        except Exception:
+            store = None
+    try:
+        channel_id = pm_inbox_channel_id(store)
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
+    if not channel_id:
+        lines.append(
+            "OK pm-inbox off (discord-os add pm-inbox --channel-id ID "
+            f"or {PM_INBOX_CHANNEL_ENV})"
+        )
+        return
+    dirs = candidate_state_dirs()
+    lines.append(
+        f"OK pm-inbox on channel={channel_id} state_dirs={len(dirs)}"
+    )
+    if not dirs:
+        lines.append(
+            "WARN pm-inbox found no other Puppetmaster state dirs on this Mac"
+        )
 
 
 def _interactions_public() -> bool:
@@ -463,14 +549,25 @@ def _check_gateway_ws(workspace: Path, lines: list[str]) -> int:
         cached = load_gateway_health(workspace) if workspace.exists() else None
         if cached is not None:
             health = cached
-    if not health.ready:
-        lines.append("OK gateway WS not READY this process (REST intake OK; buttons need panel)")
-        return 0
     if health.ok:
+        if not health.ready:
+            lines.append(
+                "OK gateway WS not READY this process (REST intake OK; buttons need panel)"
+            )
+            return 0
         age = health.ack_age_s
         tip = f"ack_age={age:.0f}s" if age is not None else "ack fresh"
         lines.append(f"OK gateway WS READY ({tip})")
         return 0
+    # ok=False with ready=False is the never-READY verdict past grace. Reading
+    # only `ready` printed OK for a socket that never worked.
+    if not health.ready:
+        reason = health.reason or "gateway never READY"
+        lines.append(
+            f"FAIL gateway WS unhealthy — {reason} "
+            "(panel expected; On/Off buttons never came up)"
+        )
+        return 1
     reason = health.reason or "heartbeat ACK stale / socket unhealthy"
     lines.append(
         f"FAIL gateway WS unhealthy — {reason} "
@@ -612,17 +709,28 @@ def _check_slash_self_heal(cfg: AppConfig, workspace: Path, lines: list[str]) ->
     from agent_discord.discord.interactions import (
         command_set_stamp,
         interactions_exposed,
+        interactions_mode,
         load_slash_registration_state,
     )
     from agent_discord.orchestration.service import interactions_public
 
-    exposed = interactions_exposed(getattr(cfg, "interactions", "") or "") or interactions_public()
+    raw = getattr(cfg, "interactions", "") or ""
+    exposed = interactions_exposed(raw) or interactions_public()
     if not exposed:
         return
 
+    mode = interactions_mode(raw) if raw else "http"
+    if mode == "gateway":
+        lines.append(
+            "OK interactions mode=gateway (slash on the existing Gateway; "
+            "no Interactions Endpoint URL, no public key)"
+        )
+    else:
+        lines.append("OK interactions mode=http (needs a public HTTPS endpoint)")
+
     token_ok = bool(str(getattr(cfg, "discord_bot_token", "") or "").strip())
     app_ok = bool(str(getattr(cfg, "discord_application_id", "") or "").strip())
-    pub_ok = bool(str(getattr(cfg, "discord_public_key", "") or "").strip())
+    pub_ok = bool(str(getattr(cfg, "discord_public_key", "") or "").strip()) or mode == "gateway"
     if not token_ok:
         lines.append("WARN slash self-heal: DISCORD_BOT_TOKEN missing (register skipped)")
     if not app_ok:
@@ -675,6 +783,39 @@ def _warn_voice_join(lines: list[str]) -> None:
             f"close {VOICE_CLOSE_DAVE_REQUIRED}; no libdave / voice UDP; "
             "unset to silence this WARN)"
         )
+
+
+def _report_voice_done(lines: list[str]) -> None:
+    """Report DISCORD_OS_VOICE_DONE and whether say/espeak + ffmpeg resolve."""
+
+    from agent_discord.discord.tts import ENV_VOICE_DONE, voice_done_tools
+
+    tools = voice_done_tools()
+    if not tools["enabled"]:
+        lines.append(f"OK {ENV_VOICE_DONE} off — no voice message on Done")
+        return
+    if tools["ready"]:
+        lines.append(
+            f"OK {ENV_VOICE_DONE}=1 voice message on Done "
+            f"(tts={tools['tts_cli']}, ffmpeg={tools['ffmpeg_cli']})"
+        )
+        return
+    if tools["tts_cli"] and tools["ffmpeg_cli"]:
+        lines.append(
+            f"WARN {ENV_VOICE_DONE}=1 but {tools['ffmpeg_cli']} does not start "
+            f"(exit {tools['ffmpeg_exit']}); reinstall ffmpeg. Voice message fails "
+            "soft; the Done card is unaffected"
+        )
+        return
+    missing = " + ".join(
+        name
+        for name, found in (("say/espeak", tools["tts_cli"]), ("ffmpeg", tools["ffmpeg_cli"]))
+        if not found
+    )
+    lines.append(
+        f"WARN {ENV_VOICE_DONE}=1 but {missing} not on PATH — voice message "
+        "fails soft; the Done card is unaffected"
+    )
 
 
 def filter_doctor_notify_lines(

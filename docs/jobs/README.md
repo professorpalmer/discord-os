@@ -17,9 +17,19 @@ The host loop REST-polls live thread ids and recent idle session threads (from S
 
 Parked write-gate and per-tool / AskUserQuestion gates auto-deny after `DISCORD_OS_APPROVAL_TIMEOUT_MINUTES` (default 20). A live tool-class hold blocks the worker until Allow / Deny / Always or that timeout (local agentic PreToolUse via gate-inject sitecustomize → `discord-os gate-hook`). Path A SSH: `DISCORD_OS_SSH_GATES=bridge` for live phone Allow/Deny across remote cook; default unset → write-gate on speaks Need + remote write Deny. See [ask-gate](../cards/ask-gate.md).
 
-Each run writes a SQLite lineage DAG (`node_key = sha256(step, input, parents)`). Done cites artifact sha256. Retry starts a new run parented at the previous tip. Query: `discord-os lineage [RUN_ID|DOS-10001]`.
+Each run writes a SQLite lineage DAG (`node_key = sha256(step, input, parents)`). Done cites artifact sha256. Retry starts a new run parented at the previous tip. Query: `discord-os lineage [RUN_ID|DOS-10001]`, which numbers the steps. A reply `fork from <N>: <ask>` branches instead of continuing: a sibling thread whose run is parented at step N, not the tip. Operator-only. See [fork](fork.md).
 
 A job that opened a GitHub PR (or is bound as last pusher) gets check conclusions and human review comments in **that job thread**. HOST ranks a failing check as Need. In-flight checks are Waiting, which is not failed. Speakable ids are `DOS-` codes next to the Discord snowflake. A stacked PR whose base is another job's head is a child in that lineage DAG (`discord-os lineage DOS-10001` lists the child). Stored GitHub rules cook a stored prompt: `new` mints a job thread when no bind exists, `single` enqueues into the owning job (steer if live, otherwise a cook in that thread). Bound PRs still wake in place.
+
+Puppetmaster jobs the operator started **outside** Discord OS (Marionette, the
+Claude Code MCP server, a bare CLI) can get one live card each in an opt-in
+inbox channel. Observe only — those jobs never cook here. See
+[pm-inbox](pm-inbox.md).
+
+An operator reaction on a settled card is that run's recorded outcome: thumbs up
+good, shrug partial, thumbs down bad. Read over REST on a throttled tick, stored
+in SQLite, tallied on the HOST card and printed by `discord-os lineage`. See
+[outcomes](outcomes.md).
 
 ## Code
 
@@ -29,6 +39,7 @@ A job that opened a GitHub PR (or is bound as last pusher) gets check conclusion
 - `src/agent_discord/persistence/sqlite.py` — session thread ids, parent channel, tip run, DOS-* mint
 - `src/agent_discord/orchestration/github_wake.py` — PR/CI wake into the owning thread
 - `src/agent_discord/orchestration/github_rules.py` — unbound GitHub events as job threads
+- `src/agent_discord/orchestration/pm_inbox.py` — observed Puppetmaster jobs ([pm-inbox](pm-inbox.md))
 - `src/agent_discord/orchestration/job_briefing.py` — Need / Waiting / Live / Last (failed → Need; dismissed/cancelled → Last)
 - `src/agent_discord/host/panel.py` — `refresh_host_jobs_panel` after dismiss/cancel ranking flips
 - `src/agent_discord/orchestration/lineage.py` — DAG nodes, stacked descendants

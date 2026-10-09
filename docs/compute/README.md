@@ -17,6 +17,27 @@ Vault: `{workspace}/keys/`. Key goes into the **subprocess env** as `OPENROUTER_
 
 Optional Marionette HTTP: `AGENT_DISCORD_BACKEND=marionette` plus `MARIONETTE_BASE_URL`. Unconfigured Marionette fails closed. Marionette uses the same `openrouter/auto` pin (or fails closed).
 
+## A shared platform lock cannot disable Discord OS
+
+`~/.puppetmaster` is shared with every other Puppetmaster host on this Mac.
+Marionette disabling adapters in the global `platform.json` failed two
+production Discord OS cooks with `adapter(s) agentic are disabled`. The worker
+env now forces `PUPPETMASTER_ONLY_ADAPTERS=agentic`, which Puppetmaster reads
+ahead of `platform.json` (checked against puppetmaster-ai 1.27.39,
+`platform_lock.enabled_adapters`). HARD lock 10 is agentic only, so a host-set
+allowlist cannot widen it. `PUPPETMASTER_STATE_DIR` is already
+`{workspace}/puppetmaster`. The model registry stays the shared one.
+
+## Puppetmaster version floor
+
+`pyproject.toml` declares `puppetmaster-ai>=1.27.24,<2`. `steer` first shipped
+in v1.27.24. `cost --json` (with `token_usage` and `actual_cost`) and
+`--emit-job-id-early` are older. Production once ran a stale 1.22.15, which had
+no `steer` at all, because `dependencies` was empty and
+`resolve_puppetmaster_cli` prefers the CLI next to this Python. `discord-os host doctor` now prints the resolved
+CLI path and version and WARNs when it falls outside the declared range; the
+same version lands in run usage metadata as `pm_version`.
+
 ## Code
 
 - `src/agent_discord/config.py` — `resolve_compute` (agentic-or-fail)
@@ -39,6 +60,15 @@ so `ssh -O exit` can confirm more often. Orchestrator Cancel targets the active
 SSH cook backend for the run — never silent local cook. If interrupt cannot be
 confirmed, Discord speaks **Cancel unconfirmed** and does not paint Cancelled.
 See [cards/reactive.md](../cards/reactive.md).
+
+Local children spawn with `start_new_session`, so an abrupt host exit orphans
+them: they keep cooking, spending, and writing the checkout after the write lock
+is released. Both halves leave a durable pid sidecar — Path A remote pids under
+`remote_pids/`, local agentic groups under `{workspace}/local_pids/` (override
+`DISCORD_OS_LOCAL_PID_DIR`) — and `discord-os listen` reaps live groups at
+startup, beside `fail_stale_runs()`. A group is only signalled when the recorded
+pid still looks like a Puppetmaster process (`ps` command line), so a reused pid
+is cleared, never killed. Every outcome prints a line.
 
 ## Path A edge races (beyond 0.5.54)
 

@@ -180,7 +180,7 @@ def test_fail_stale_runs(tmp_path: Path):
         adapter_name="openrouter/auto",
         status=TaskStatus.RUNNING,
     )
-    assert store.fail_stale_runs() == 1
+    assert len(store.fail_stale_runs()) == 1
     assert store.get_run("r1")["status"] == "failed"
     store.close()
 

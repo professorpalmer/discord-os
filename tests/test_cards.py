@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from agent_discord.discord.layout import (
-    ACTIVITY_NAME_MAX,
     CUSTOM_ID_MAX,
     FLAG_COMPONENTS_V2,
     TYPE_ACTION_ROW,
@@ -16,7 +15,6 @@ from agent_discord.discord.layout import (
     iter_component_text,
     progress_bar,
     status_table,
-    working_presence,
 )
 from agent_discord.host.panel import ASK_ID, OFF_ID, ON_ID
 from agent_discord.contracts import RunReceipt, TaskStatus
@@ -199,16 +197,6 @@ def test_job_action_custom_ids_stay_under_discord_limit():
     ]
     assert all(len(item) <= CUSTOM_ID_MAX for item in ids)
     assert all(item not in {ON_ID, OFF_ID, ASK_ID} for item in ids)
-
-
-def test_working_presence_name_and_status():
-    payload = working_presence("wave 2")
-    assert payload["op"] == 3
-    assert payload["d"]["status"] == "dnd"
-    assert payload["d"]["activities"][0]["name"] == "Working on wave 2"
-    long_name = working_presence("x" * 200)["d"]["activities"][0]["name"]
-    assert long_name.startswith("Working on ")
-    assert len(long_name) <= ACTIVITY_NAME_MAX
 
 
 def test_host_card_github_row():

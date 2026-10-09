@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from agent_discord.keys.vault import KeyVault
+from agent_discord.keys.vault import KeyVault, write_private
 
 
 KNOWN_PROVIDERS = frozenset({"openrouter"})
@@ -272,7 +272,6 @@ def _read_tickets(workspace: Path) -> dict[str, Any]:
 
 
 def _write_tickets(workspace: Path, tickets: Mapping[str, Any]) -> None:
-    path = _tickets_path(workspace)
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"version": 1, "tickets": dict(tickets)}
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    write_private(_tickets_path(workspace), text.encode("utf-8"))

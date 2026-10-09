@@ -16,6 +16,7 @@ from agent_discord.orchestration.routing import (
     MODE_IMPLEMENT,
     MODE_SWARM,
     compute_dispatch_mode,
+    swarm_worker_count,
 )
 
 
@@ -189,8 +190,43 @@ class JobPool:
 
 
 def _needs_write_lock(intake: TaskIntake) -> bool:
-    mode = compute_dispatch_mode(intake.text)
-    return mode in {MODE_IMPLEMENT, MODE_SWARM}
+    from agent_discord.orchestration.evaluate import is_eval_metadata
+
+    if is_eval_metadata(intake.metadata):
+        # Eval replays are analyze-only, so they overlap like any other read.
+        return False
+    if compute_dispatch_mode(intake.text) in {MODE_IMPLEMENT, MODE_SWARM}:
+        return True
+    # run_task becomes a swarm when metadata asks for workers, whatever the text.
+    requested = (intake.metadata or {}).get("workers")
+    return swarm_worker_count(intake.text, requested) > 0
+
+
+def resolve_run_checkout(
+    store: Any,
+    intake: TaskIntake,
+    repos: Any,
+    *,
+    default_cwd: Any = None,
+) -> Any:
+    """The checkout a run cooks in: a repo named in the ask, else the channel realm.
+
+    run_task and the JobPool write lock both use this, so the lock always
+    covers the tree the worker writes.
+    """
+
+    from agent_discord.host.realms import realm_for_channel
+    from agent_discord.host.repos import resolve_host_repo
+
+    chosen = resolve_host_repo(intake.text, tuple(repos), default_cwd=default_cwd)
+    if chosen is not None:
+        return chosen
+    return realm_for_channel(
+        store,
+        intake.channel_id,
+        workspace_id=str(intake.workspace_id or "default"),
+        repos=tuple(repos),
+    )
 
 
 def realm_write_key(intake: TaskIntake, cwd: str = "") -> str:
@@ -203,16 +239,12 @@ def realm_write_key(intake: TaskIntake, cwd: str = "") -> str:
 def resolved_write_key(intake: TaskIntake, orchestrator: Any = None) -> str:
     cwd = ""
     if orchestrator is not None:
-        from agent_discord.host.realms import realm_for_channel
-
-        repos = getattr(orchestrator, "host_repos", None) or ()
-        store = getattr(orchestrator, "store", None)
-        realm = realm_for_channel(
-            store,
-            intake.channel_id,
-            workspace_id=str(intake.workspace_id or "default"),
-            repos=tuple(repos),
+        checkout = resolve_run_checkout(
+            getattr(orchestrator, "store", None),
+            intake,
+            getattr(orchestrator, "host_repos", None) or (),
+            default_cwd=getattr(orchestrator, "compute_cwd", None),
         )
-        if realm is not None:
-            cwd = str(realm.path)
+        if checkout is not None:
+            cwd = str(checkout.path)
     return realm_write_key(intake, cwd)

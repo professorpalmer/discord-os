@@ -15,6 +15,7 @@ from typing import Any, Optional, Sequence
 
 from agent_discord import PRODUCT_NAME
 from agent_discord.contracts import RunReceipt, TaskStatus
+from agent_discord.discord.host_page import POWER_HALTED, POWER_OFF, POWER_ON
 from agent_discord.discord.layout import (
     FLAG_COMPONENTS_V2,
     STYLE_DANGER,
@@ -91,6 +92,7 @@ class CardMessage:
     thinking: str = ""
     chrome: str = ""  # Need / Live / Done Section label
     job_code: str = ""
+    power: str = ""  # HOST only: on / off / halted (not derived from the title)
 
     @property
     def text(self) -> str:
@@ -144,6 +146,7 @@ class CardMessage:
                         action_rows=extra,
                         avatar_url=self.avatar_url or "",
                         updated_ts=self.updated_ts,
+                        power=self.power,
                     )
             except Exception:
                 pass
@@ -173,11 +176,14 @@ class CardMessage:
             children = [text_display(heading)]
             used = len(heading)
         if self.kind == "HOST":
-            live = self.title == "Running"
-            table = [
-                ("power", "on" if live else "off"),
-                ("listen", "live" if live else "idle"),
-            ]
+            from agent_discord.discord.host_page import (
+                host_power_table,
+                power_from_host_title,
+            )
+
+            table = list(
+                host_power_table(self.power or power_from_host_title(self.title))
+            )
             table.extend((name, value) for name, value, _inline in self.fields)
             table_text = status_table(table)
             children.append(text_display(table_text))
@@ -314,18 +320,6 @@ def github_wake_card(summary: str, *, kind: str = "") -> CardMessage:
         description=redact_text_markers(summary or ""),
         color=color,
     )
-
-
-def render_progress_card(
-    *,
-    stage: str,
-    message: str,
-    percent: Optional[float] = None,
-    run_id: str = "",
-) -> str:
-    return progress_card(
-        stage=stage, message=message, percent=percent, run_id=run_id
-    ).text
 
 
 def progress_card(
@@ -484,10 +478,6 @@ def job_action_row(run_id: str, *, actions: str = "parked", job_code: str = "") 
     return action_row(items)
 
 
-def render_receipt_card(receipt: RunReceipt, *, max_progress: int = 5) -> str:
-    return receipt_card(receipt, max_progress=max_progress).text
-
-
 def receipt_card(
     receipt: RunReceipt,
     *,
@@ -637,24 +627,18 @@ def open_card(
     )
 
 
-def render_host_card(
-    *,
-    armed: bool,
-    channel_id: str = "",
-) -> str:
-    return host_card(armed=armed, channel_id=channel_id).text
-
-
 def _host_description(
     *,
     last_job: str = "",
     update_pill: str = "",
     paired: bool = True,
     empty_jobs: bool = False,
+    outcomes: str = "",
 ) -> str:
     """HOST card body: optional Update-available pill above the Jobs briefing line.
 
     Wave 7 P0a: unpaired + no jobs → one spoken tip (Pair → Ask → Done). No wizard.
+    The recorded-outcome tally sits under the briefing line when any run is labeled.
     """
 
     pill = (update_pill or "").strip()
@@ -662,10 +646,8 @@ def _host_description(
     tip = ""
     if empty_jobs and not paired:
         tip = "Tip: Pair → Ask → Done"
-    body = job or tip
-    if pill and body:
-        return f"{pill}\n{body}"
-    return pill or body
+    lines = [part for part in (pill, job or tip, (outcomes or "").strip()) if part]
+    return "\n".join(lines)
 
 
 def host_card(
@@ -689,6 +671,7 @@ def host_card(
     spend_known: bool = True,
     update_pill: str = "",
     empty_jobs: bool = False,
+    outcomes: str = "",
 ) -> CardMessage:
     _ = channel_id
     fields = _host_status_fields(
@@ -704,6 +687,14 @@ def host_card(
         github=github,
         spend_known=spend_known,
     )
+    # Power is carried, not read back off the title: a confirm screen and an
+    # armed-but-halted host both kept painting "power off / listen idle".
+    if not armed:
+        power = POWER_OFF
+    elif halted:
+        power = POWER_HALTED
+    else:
+        power = POWER_ON
     if confirm_off:
         return CardMessage(
             kind="HOST",
@@ -712,6 +703,7 @@ def host_card(
             color=COLOR_WORK,
             avatar_url=avatar_url,
             fields=fields,
+            power=power,
         )
     if int(confirm_clear_needs or 0) > 0:
         n = int(confirm_clear_needs)
@@ -725,6 +717,7 @@ def host_card(
             color=COLOR_WORK,
             avatar_url=avatar_url,
             fields=fields,
+            power=power,
         )
     return CardMessage(
         kind="HOST",
@@ -734,10 +727,12 @@ def host_card(
             update_pill=update_pill,
             paired=paired,
             empty_jobs=empty_jobs,
+            outcomes=outcomes,
         ),
         color=COLOR_FAIL if halted and armed else (COLOR_LIVE if armed else COLOR_IDLE),
         avatar_url=avatar_url,
         fields=fields,
+        power=power,
     )
 
 
@@ -794,45 +789,6 @@ def note_card(text: str, *, source_channel: str = "") -> CardMessage:
         title="Note",
         description=body or "Empty note.",
         color=COLOR_IDLE,
-    )
-
-
-def render_overflow_card(
-    *,
-    filename: str,
-    sha256: str,
-    size: int,
-    jump_url: str,
-    local_stash: str = "",
-) -> str:
-    return overflow_card(
-        filename=filename,
-        sha256=sha256,
-        size=size,
-        jump_url=jump_url,
-        local_stash=local_stash,
-    ).text
-
-
-def overflow_card(
-    *,
-    filename: str,
-    sha256: str,
-    size: int,
-    jump_url: str,
-    local_stash: str = "",
-) -> CardMessage:
-    _ = sha256
-    fields: list[tuple[str, str, bool]] = [("Size", format_size(size), True)]
-    if local_stash:
-        fields.append(("Host copy", local_stash, False))
-    return CardMessage(
-        kind="OVERFLOW",
-        title="Too large for Discord",
-        description=filename,
-        color=COLOR_FAIL,
-        fields=tuple(fields),
-        link_url=jump_url,
     )
 
 

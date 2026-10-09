@@ -11,7 +11,9 @@ from typing import Optional
 
 SERVICE_LABEL = "com.discord-os.host"
 DOCTOR_NOTIFY_LABEL = "com.discord-os.doctor-notify"
-SERVICE_ENV = "DISCORD_OS_SERVICE"
+# KeepAlive alone respawns a crash-at-startup host every 10 s forever. Floor the
+# gap so a bad token / ConfigError / sqlite lock is a readable log, not a loop.
+SERVICE_THROTTLE_INTERVAL_S = 30
 
 
 def launchd_plist_path() -> Path:
@@ -41,8 +43,10 @@ def render_launchd_plist(
     workspace: Path,
     cwd: Path,
     log: Path,
+    throttle_interval_s: int = SERVICE_THROTTLE_INTERVAL_S,
 ) -> str:
     args = "\n".join(f"      <string>{_xml(item)}</string>" for item in argv)
+    throttle = max(1, int(throttle_interval_s))
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
@@ -55,12 +59,12 @@ def render_launchd_plist(
         "  <true/>\n"
         "  <key>KeepAlive</key>\n"
         "  <true/>\n"
+        "  <key>ThrottleInterval</key>\n"
+        f"  <integer>{throttle}</integer>\n"
         "  <key>WorkingDirectory</key>\n"
         f"  <string>{_xml(str(cwd))}</string>\n"
         "  <key>EnvironmentVariables</key>\n"
         "  <dict>\n"
-        f"    <key>{SERVICE_ENV}</key>\n"
-        "    <string>1</string>\n"
         "    <key>PYTHONUNBUFFERED</key>\n"
         "    <string>1</string>\n"
         "    <key>AGENT_DISCORD_WORKSPACE</key>\n"
@@ -92,10 +96,10 @@ def render_systemd_unit(
         "Description=Discord OS host\n"
         "[Service]\n"
         f"WorkingDirectory={cwd}\n"
-        f"Environment={SERVICE_ENV}=1\n"
         f"Environment=AGENT_DISCORD_WORKSPACE={workspace}\n"
         f"ExecStart={exec_start}\n"
         "Restart=always\n"
+        f"RestartSec={max(1, int(SERVICE_THROTTLE_INTERVAL_S))}\n"
         f"StandardOutput=append:{log}\n"
         f"StandardError=append:{log}\n"
         "[Install]\n"

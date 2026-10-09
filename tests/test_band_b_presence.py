@@ -59,9 +59,9 @@ def _reset_presence():
     reset_rich_presence_for_tests()
 
 
-def test_presence_flag_default_on(monkeypatch):
+def test_presence_flag_default_off(monkeypatch):
     monkeypatch.delenv("DISCORD_OS_PRESENCE", raising=False)
-    assert presence_enabled() is True
+    assert presence_enabled() is False
     monkeypatch.setenv("DISCORD_OS_PRESENCE", "0")
     assert presence_enabled() is False
     monkeypatch.setenv("DISCORD_OS_PRESENCE", "off")
@@ -72,8 +72,9 @@ def test_presence_flag_default_on(monkeypatch):
 
 def test_presence_flag_respects_env_mapping():
     assert presence_enabled({"DISCORD_OS_PRESENCE": "0"}) is False
-    assert presence_enabled({"DISCORD_OS_PRESENCE": ""}) is True
-    assert presence_enabled({}) is True
+    assert presence_enabled({"DISCORD_OS_PRESENCE": ""}) is False
+    assert presence_enabled({}) is False
+    assert presence_enabled({"DISCORD_OS_PRESENCE": "1"}) is True
 
 
 def test_payload_mapping_idle_on_off_halt():
@@ -200,7 +201,8 @@ def test_soft_fail_ipc_missing_does_not_raise():
     assert rpc.closed is True
 
 
-def test_soft_fail_ipc_update_then_retry():
+def test_soft_fail_ipc_update_then_retry(monkeypatch):
+    monkeypatch.setenv("DISCORD_OS_PRESENCE", "1")
     rpc = _FakeRPC(fail_update=True)
     session = RichPresence(client=rpc, application_id="99", retry_s=0.0)
     assert session.tick({"details": "idle", "state": "Off"}) is False
@@ -209,7 +211,8 @@ def test_soft_fail_ipc_update_then_retry():
     assert rpc.updates[-1] == {"details": "idle", "state": "Off"}
 
 
-def test_tick_uses_injected_client_and_dedupes():
+def test_tick_uses_injected_client_and_dedupes(monkeypatch):
+    monkeypatch.setenv("DISCORD_OS_PRESENCE", "1")
     rpc = _FakeRPC()
     session = RichPresence(client=rpc, application_id="99")
     assert session.tick({"details": "DOS-1 · haul", "state": "On"}) is True
@@ -230,7 +233,8 @@ def test_tick_rich_presence_honors_disable(monkeypatch, tmp_path: Path):
     store.close()
 
 
-def test_tick_rich_presence_process_session(tmp_path: Path):
+def test_tick_rich_presence_process_session(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("DISCORD_OS_PRESENCE", "1")
     store = SQLiteStore(tmp_path / "db.sqlite3")
     store.initialize()
     store.set_host_control("ch", armed=False)
@@ -258,18 +262,6 @@ def test_listen_tick_swallows_errors():
 
 def test_pypresence_available_is_bool():
     assert pypresence_available() in {True, False}
-
-
-def test_band_b_doc_records_flag_and_parks():
-    text = (
-        Path(__file__).resolve().parents[1] / "docs/co-work/band-b-pypresence.md"
-    ).read_text()
-    lowered = text.lower()
-    assert "discord_os_presence=0" in lowered
-    assert "pypresence" in lowered
-    assert "fail soft" in lowered or "fail-soft" in lowered
-    assert "graham" not in lowered or "never graham" in lowered
-    assert "webhook" not in lowered or "band c" in lowered
 
 
 def test_tick_resolves_application_id_from_config(monkeypatch, tmp_path):

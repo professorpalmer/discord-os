@@ -1,5 +1,274 @@
 # Changelog
 
+## 0.6.0
+
+### One switchboard for the opt-ins
+- `/features`, HOST **More > Features**, and `discord-os features [on|off] <name>` list and change every opt-in: CI watcher, morning summary, voice Done, capture first, and the Puppetmaster inbox. Operators only.
+- A change takes effect on the next listen tick, with no restart. Host toggles live in the store and win over `.env`.
+- The CI watcher and the morning summary are now off by default, like the other opt-ins.
+
+### A spoken command is routed like a typed one
+- A transcribed voice memo goes through the same routing as typed text on the next listen tick. A spoken `schedule every 1h: ...`, `claim DOS-...`, handoff, or capture-channel thought is no longer cooked as a plain ask. Whisper still runs off the listen thread.
+
+### Operator checks on every state-changing Discord surface
+- Job-card buttons (Approve, Always, Deny, Cancel, Retry, Continue, Dismiss) and ask-gate options answer non-operators with an ephemeral Denied.
+- The HOST Ask modal follows the typed-ask rule and records the requester on the task.
+- Text `/connect`, `/on` and `/off` need an operator. A pasted key from anyone else is still deleted, never stored.
+- Slash `/connect`, `/open`, `/on`, `/off`, `/stop`, `/bind`, `/job` and `/clear-needs` need an operator. `/status` stays open.
+- Unpaired desk default (HARD lock 8) is unchanged.
+
+### Every Off path revokes Always grants
+- Text `/off`, slash `/off` and `/stop`, and a fatal gateway close now clear Always-allow grants, like the panel Off button already did. One helper, `set_host_armed`, owns arm/disarm.
+
+### Key files are owner-only from creation
+- `keys/tickets.json`, `vault.json` and `master.key` are created 0600 in a 0700 `keys/` directory, with no world-readable window. Existing files are tightened on the next write.
+
+### Roles modal validates role ids
+- Only a 17-20 digit role snowflake is accepted. The guild id (the @everyone role) is refused.
+- Prefix the id with `-` to remove an operator role from Discord.
+
+### GitHub wakes trust only the repo's own people
+- PR review and issue comments wake a job only when the author is OWNER, MEMBER or COLLABORATOR, or is on `DISCORD_OS_GITHUB_BOT_ALLOW`. The allowlist now works for `[bot]` logins too.
+- Rule cooks quote GitHub event text as data. A cook carrying a review comment or failed check names waits for the write gate instead of running pre-approved.
+- Failed check names are reduced to a safe label of at most 60 characters.
+- A PR URL in a job summary binds the job only when the repo is a GitHub remote of a host checkout, or is listed in `DISCORD_OS_GITHUB_REPOS`.
+
+### Workers never run in the Discord OS runtime directory
+- When a run's cwd would be the state dir (`.agent-discord`), anything inside it, or the non-repo directory that holds it and `.env`, the worker runs in an owner-only scratch dir instead (`~/.discord-os/scratch`, or `DISCORD_OS_SCRATCH_DIR`).
+- The gate hook refuses read tools on `.env` / `.env.*` (templates excepted), `.netrc`, `.git-credentials`, key files, SQLite files, and anything under `.agent-discord`, `.ssh`, `.aws` or `.gnupg`.
+
+### Gate queue always under the host workspace
+- Local cooks stamped the ask-gate queue at `<checkout>/gates/<run>`, while listen drained `<workspace>/gates`. Held tool calls in a realm checkout never parked a card and self-denied after the timeout. The queue now always lives under the host workspace, outside the worker's checkout.
+
+### Worker environment is an allowlist
+- Local workers no longer inherit the whole host environment. They get locale, home, shell, proxy and CA settings, `SSH_AUTH_SOCK`, `GIT_*`, `PUPPETMASTER_*`, the gate stamps, and `GH_TOKEN` / `GITHUB_TOKEN` for `gh`. The backend adds the OpenRouter key. `DISCORD_BOT_TOKEN`, cloud keys and other host variables stay out.
+
+### Gate knows every Puppetmaster tool
+- `apply_hashline` maps to edit and `browser_*` tools map to browser. Before, the gate denied them as an unknown class on every local cook.
+
+### Path A bridge queue is private
+- The remote gate queue is a fresh `mktemp -d` directory (0700), not a predictable `/tmp/discord-os-ssh-gate-<run_id>` made with `mkdir -p`. Pending lines already report the real path back.
+- Writeback accepts only that path shape, and writes only into a queue the SSH user owns and that is not a symlink.
+
+### SSH remote command is one quoted string
+- Without a host workdir, the remote argv went to ssh as separate words. sshd re-split it, so the `bash -lc` PID/trap/watchdog prelude ran in the wrong shell and Cancel/orphan reaping broke. The remote command is now always one shell-quoted string, and `--` precedes the target.
+
+### File tools never write inside `.git`
+- The gate hook refuses write, edit, hashline and delete tools on any path inside `.git`. A written `.git/hooks/*` or `.git/config` would run later, outside any gate. Git commands still change `.git` as usual.
+
+### Shell Always is scoped to the command
+- Always on a shell tool remembers the command prefix (`git status`, `pytest`, `npm run`), not the whole tool. Other shell commands still park a card.
+- Compound commands (`;`, `&&`, pipes, redirects, `$(...)`) and interpreters (`bash`, `python -c`, `env`, `curl`, ...) are allowed once and never remembered.
+
+### A crash inside a job settles it
+- Any exception inside `run_task` after the run exists now fails the run with an `internal error` reason, finishes the live card, and frees the job thread. Before, the run stayed RUNNING, the card froze, and every later message in that thread was swallowed as a steer until restart. JobPool receipts now carry the real run id.
+
+### Live steers reach the worker
+- A thread follow-up during a local cook is handed to the worker with `puppetmaster steer <job_id> <text>`, using the job id the worker prints early. Before, steers were only appended to the card text and acked as success.
+- Steers sent before the job id is known are retried on each stream event. Any still undelivered at the end are named on the Done card.
+- A cook backend with no steer support (for example Path A SSH) is an honest miss: listen queues the follow-up or says it could not steer.
+
+### Approve cooks in JobPool
+- Approve and Always on a parked write now submit the cook to the host JobPool (realm write lock, live slot, live-thread tracking). Before, the whole implement ran on the Gateway reader thread, which stalled heartbeat ACKs and bypassed the write lock.
+
+### Asks while Off or halted get one reply
+- A typed ask or a HOST Ask-modal ask that arrives while the host is Off or spend-halted now gets one reply saying why it did not start, plus the HOST card with On / More > Resume. Repeats stay quiet until an ask runs again. Before, these asks were dropped silently.
+
+### Lineage keys are per run
+- `node_key` now includes the run id. Two runs with the same ask text used to share the intake node, so the second run's lineage was pinned to the first run and `discord-os lineage` showed it empty. Existing rows keep their keys.
+
+### Status-only run updates keep usage and error
+- `update_run` no longer nulls `usage_json` or `error` when a later call only changes status (approve, dismiss, cancel, complete). Spend receipts and root causes survive.
+
+### Tokens and cost come from `puppetmaster cost`
+- After each local cook the final receipt carries Puppetmaster's measured tokens and cost, read with `puppetmaster cost <job_id> --json`. Before, usage came from worker stdout, which has neither, so tokens were null on every run. Only measured numbers count. An unpriced job stays unknown, never `$0`.
+
+### Write lock covers the tree the worker writes
+- The JobPool write lock now keys on the same checkout `run_task` cooks in: a repo named in the ask, else the channel realm. Before, a channel bound to X asking to implement in Y locked X and wrote Y, so two writers could land in one checkout. A metadata-requested swarm now takes the lock too.
+
+### host.log lines carry a timestamp
+- The long-running host wraps stdout and stderr so every complete line in `host.log` starts with a local ISO-8601 timestamp. One-shot `--once` / `--json` output stays plain.
+
+### host.log rotates at 10 MB
+- The host copy-truncates `host.log` into `host.log.1`..`.3` past 10 MB, at startup and at most once a minute. Copy-truncate keeps launchd's open descriptor on the live file.
+
+### LaunchAgent ThrottleInterval
+- The rendered plist sets `ThrottleInterval` 30 (and the systemd unit `RestartSec=30`), so a crash at startup is a readable log, not a 10 s respawn loop.
+
+### Workspace and .env no longer depend on the current directory
+- With `AGENT_DISCORD_WORKSPACE` unset, the workspace is `~/discord-os/.agent-discord` when it exists, else `~/.discord-os/workspace`, and `.env` is read from beside it. Running `discord-os` from a checkout no longer creates a second database there.
+
+### Discord REST honors rate limits
+- 429 responses are retried after `retry_after` (body, else `Retry-After`), global and per-route. Exhausted `X-RateLimit-Bucket`s are waited out before sending. HTTP 500 is retried for idempotent methods.
+- A POST is no longer replayed after a timeout or reset, which could post duplicate cards. Only a request that provably never left the host is retried.
+- Discord error bodies are included in the raised error, with the bot token redacted.
+
+### Components v2 cards always fit
+- Cards are trimmed to Discord's 40-component and 4,000-character limits before send or edit. Long text is truncated, and buttons and selects are never dropped. Before, an oversized card got a 400 and the live card silently stopped updating.
+
+### Facade checks provider capability
+- The Discord facade picks the call shape with `inspect.signature`, not `except TypeError`. A real TypeError during send or edit now surfaces, instead of silently dropping Components v2 or posting the message twice.
+
+### Gateway socket writes are serialized
+- The heartbeat thread and the main thread share one send lock, so frames no longer interleave (Discord closed with 4002).
+
+### Panel Gateway resumes and backs off
+- Reconnects use exponential backoff with full jitter (1 s base, 60 s cap), reset after READY, instead of a flat 0.4 s loop that flooded `host.log` while offline.
+- The gateway RESUMEs (op 6) with session id, sequence and `resume_gateway_url`, honors op 7 Reconnect, and treats op 9 as resumable or a fresh IDENTIFY per its payload. Before, op 9 disarmed the host and exited.
+- Close codes surface. Only 4004 and 4010-4014 are fatal. 4007/4009 re-identify.
+
+### Gateway READY deadline
+- A socket that sends Hello but never READY is reconnected after 30 s.
+
+### Doctor and liveness see a never-READY gateway
+- `discord-os host doctor` FAILs and the HOST Need shows `gateway BAD` when the panel gateway never reached READY past grace. The separate `doctor --notify` process no longer overwrites the host's gateway health file with its own snapshot.
+
+### Restart keeps parked approvals and repaints stopped cards
+- A host restart no longer fails parked write approvals. Their Approve button still starts the write.
+- Runs the restart did stop are failed as before, and their live cards are repainted to say so, with Retry. Before, the phone kept showing Working and Cancel. Each run's live card id is now recorded on first paint so the restart can find it.
+
+### Progress events stop bloating the database
+- Progress events store only the text each event added (`token_delta`), not the cumulative 16k-char window. Progress rows were 33 MB of the 37 MB production database.
+- On host start, progress events of finished runs older than 14 days are pruned, and the database is vacuumed when that frees enough. `discord-os db compact [--days N]` does the same on demand. On a copy of production it took the file from 37.1 MB to 0.6 MB. Intake, dispatch, receipt and other events are kept.
+
+### Rich Presence is opt-in
+- Mac Rich Presence (`pypresence`) now defaults off. Set `DISCORD_OS_PRESENCE=1` to enable it. The bot's Gateway presence already shows host state on the phone.
+
+### Dead `DISCORD_OS_SERVICE` flag removed
+- The LaunchAgent plist and systemd unit no longer set `DISCORD_OS_SERVICE`, which nothing read.
+
+### Tests no longer pin docs or the version
+- Tests that asserted wording in `docs/co-work` delivery logs or the CHANGELOG are gone. The exact-version pin is now a check that `__version__` matches `pyproject.toml`. A release no longer needs test edits.
+- One repo-wide test keeps the old internal name out of product text (src, product docs, READMEs) instead of nine per-doc checks.
+
+### CHANGELOG headers in order
+- 0.5.62-0.5.71 headers are descending, empty ones say where their notes are, and the stray mid-file Unreleased header is gone. A test keeps the shape.
+
+### Thread history is the newest six, in order, with authors
+- Context from a job thread now holds the newest six human messages, oldest first, each labeled with its author, and framed as conversation from Discord users (data, not instructions). Before, the two newest were dropped and the rest arrived in reverse order, unattributed and mixed with host cards.
+
+### Listen paginates from the watermark
+- Each poll reads forward from the last seen message with `after=`, 100 per page and up to 10 pages per tick. A burst of more than 20 messages between polls is no longer lost.
+
+### A claimed ask survives a crash or restart
+- A durable pending-intake row covers the window between claiming a message and creating its task row. Host start replays any left behind, up to three tries.
+
+### Schedules and voice memos run off the listen thread
+- Due schedules go through JobPool with the realm write key, so the live slot limit and write lock apply. Voice memo transcription runs in a worker thread, so one long whisper run no longer stalls every channel.
+
+### New listen destinations start at first poll
+- A thread or channel discovered after host start is seeded at the time it is first polled, not at process start, so it no longer replays everything since boot.
+
+### A shared Puppetmaster platform lock cannot disable cooks
+- Workers run with `PUPPETMASTER_ONLY_ADAPTERS=agentic`, which Puppetmaster reads ahead of the shared `~/.puppetmaster/platform.json`. Before, another tool disabling adapters there failed Discord OS cooks with `adapter(s) agentic are disabled` (two production runs).
+
+### Platform-lock failures name the real fix
+- A Puppetmaster platform-lock refusal now says to run `puppetmaster platform enable agentic` on the host that cooked. Before, it said to run `discord-os connect`, which only stores a key.
+
+### Puppetmaster is a declared dependency
+- `discord-os` now depends on `puppetmaster-ai>=1.27.24,<2` (`steer` first shipped in 1.27.24). Production had been running a stale 1.22.15 with no `steer`.
+- One resolver picks the Puppetmaster CLI everywhere. `discord-os host doctor` prints its path and version and WARNs outside the range. Run usage records `pm_version`.
+
+### Dead `--json-lines` probe removed
+- The capability probe for a `--json-lines` flag that no Puppetmaster version has is gone, along with its dead branch. That saves a `--help` subprocess per cook.
+
+### Host restart reaps orphaned local workers
+- Local agentic children record a pid sidecar. On host start, any whose process group is still alive and still a Puppetmaster process gets SIGTERM, then SIGKILL after a grace period, and each one is logged. Before, an orphan kept cooking, spending and writing the checkout after its write lock was gone.
+
+### Stream timeout is enforced
+- The streaming read loop now checks its deadline on every pass and kills the whole process group on timeout. Before, a grandchild holding stdout open kept the loop spinning forever, and the timeout path killed only the leader.
+
+### Prose lines starting with `[` or `{` survive
+- A stream line counts as JSON only when the whole line parses as a JSON object. Markdown links, `[1]` citations and sentences quoting JSON stay in the live text. Oversized prompts sent by file now also get the early job id, so live steer and deltas start for them too.
+
+### Non-operator panel taps get a Denied reply
+- A non-operator tapping a HOST panel action now gets an ephemeral Denied instead of a silent no-op. Who may act is unchanged.
+
+### Preference poll form opens
+- More > Post preference poll opens its form as the only response. Before, it acknowledged the tap first, then tried to open the form as a second response, which Discord rejected.
+
+### HOST Jobs pick answers ephemerally
+- Picking a job from the HOST Jobs select shows an ephemeral summary with a link to the job's card, plus its buttons. Before, each pick posted another copy of the job card into the HOST channel.
+
+### Only Continue arms a continue
+- Viewing a failed or idle job no longer makes the next HOST Ask continue it. Only the Continue button does, and the Ask form names the job it will continue.
+
+### Halt and Resume are separate, named actions
+- The More menu shows Halt when running and Resume when halted. Each sets the state outright instead of toggling one label.
+
+### More > GitHub reports gh sign-in state
+- More > GitHub replies with the host's `gh` auth state and the command to run on the Mac to sign in. Before, it did nothing. No interactive login starts from Discord.
+
+### HOST status shows halted correctly
+- Armed but halted shows as power on, intake halted. The Off confirm screen keeps showing on until Off is confirmed. Before, both read `power off / listen idle`.
+
+### saseq and braindao providers removed
+- Discord OS talks to Discord over REST only. The saseq and BrainDAO MCP adapters, their MCP transports, and `DISCORD_MCP_TRANSPORT` / `DISCORD_MCP_STDIO_COMMAND` / `SASEQ_MCP_HTTP_URL` / `BRAINDAO_MCP_HTTP_URL` are gone (about 1,800 lines). `DISCORD_MCP_PROVIDER` must be `rest`, and any other value is a config error that names the removal.
+
+### kagekit spike leftovers removed
+- The always-false `kagekit_spike_adopted()` and the `kagekit` extra are gone.
+
+### Dead code removed
+- 22 top-level functions and classes that nothing in `src` referenced are gone (about 400 lines), including two never-registered import hooks in the gate inject. Test seams and helpers that drive live paths in tests stay.
+
+### Forum realms cut to bind plus the status tag map
+- Forum realms keep the two paths in use: binding a forum as a realm, and mapping job status to the forum's existing tags (never creating tags, HARD lock 2). The Spec Kit lifecycle tag map and its `lifecycle=` output on `add forum-tags` are gone.
+
+### Brain lakes folded into memory
+- The brain lake is now a prompt block in host memory (`[brain-lake]` inject and `discord-os brain show` stay). DRI and role binding metadata are gone: `add brain --dri/--role`, the `DRI:` / `Role SOP:` lines, and the cross-DRI `Lanes:` footer on HOST Jobs.
+- Fixes `discord-os run` without `--fake`, which could raise NameError from a misplaced `add brain` print.
+
+### Liveness and status digest are one module
+- `host/liveness.py` and `host/status_digest.py` became `host/status.py`, with one snapshot type and no duplicated helpers (about 200 fewer lines). The HOST Need lines, the digest the panel shows, `host doctor`, and the never-post-to-Discord rule are unchanged.
+
+### Loopback web dashboard removed
+- `discord-os host dashboard`, the `discord-os dashboard` alias, the `127.0.0.1:8765` page and its JSON endpoints, and `DISCORD_OS_DASHBOARD_HOST` / `_PORT` are gone. The HOST card shows the same facts. `/status` no longer runs doctor or probes SSH hosts on the repaint path.
+
+### Slash commands over the Gateway
+- `AGENT_DISCORD_INTERACTIONS=gateway` routes slash commands and autocomplete through the existing Gateway. No public HTTPS endpoint or `DISCORD_PUBLIC_KEY` needed. Still one Gateway (HARD lock 4). Default stays `off`. Gateway mode counts as exposed, so the operator allowlist is required like `http`.
+
+### /ask
+- `/ask prompt [realm]` starts a job like the HOST Ask modal: dispatch check, requester recorded, realm autocomplete, and an ephemeral `On it.` receipt with the job code.
+
+### Send to Discord OS
+- A message context-menu command (long-press, Apps) turns any message, with its attachments and a provenance line, into an ask in the home channel. Operator-only. Ephemeral receipt.
+
+### Forwarded messages become asks
+- A message forwarded into a bound channel is read from its snapshot (content, attachments, embeds) behind a `forwarded` line. Before, forwards landed as empty asks.
+
+### User-installable commands
+- `/ask` and Send to Discord OS can be user-installed, so they work in DMs and servers without the bot. These calls answer through the interaction webhook, land in the home channel, and require a paired operator even on an unpaired desk. Setup steps are in `docs/host/slash.md`.
+
+### Repo status without a cook
+- "Any open PRs on X?", "issues on X" and "status of X" for a bound or named repo now answer with one card built from `gh` and git (branch, ahead/behind, last commit, CI, open PRs with checks, open issues). No worker runs and no OpenRouter spend. Also `discord-os repo status [NAME] [--json]`.
+
+### CI watcher with Fix CI
+- A red check on an open PR to main/dev, or a red default branch, on a bound realm's repo posts one card per failing commit with a Fix CI button. The button is operator-only and starts an implement job through JobPool and the write gate, not pre-approved. Off by default (`DISCORD_OS_CI_WATCH=1` turns it on). Polled at most every 5 minutes per channel (`DISCORD_OS_CI_WATCH_INTERVAL_S`).
+
+### Morning summary
+- Once a day (default 07:30 local, `DISCORD_OS_MORNING_AT=HH:MM`), an armed host posts one card with up to five work items: overnight results, open Needs, and red CI or PRs, with a Cook button per actionable line. Silent when there is nothing to report. Off by default (`DISCORD_OS_MORNING=1` turns it on).
+
+### Puppetmaster job inbox (opt-in)
+- `discord-os add pm-inbox --channel-id ID` gives each Puppetmaster job started elsewhere on this Mac (Marionette, MCP, CLI) one live card in its own thread, edited as it changes. Approve/Reject when parked, and thread replies steer the job. Operator-only. There is no Cancel, since Puppetmaster has no cancel verb. Discovery limits are in `docs/jobs/pm-inbox.md`.
+
+### Capture-first intake (opt-in)
+- With capture-first on for a channel (`discord-os add capture --channel-id ID` or `DISCORD_OS_CAPTURE_FIRST=1`), a short top-level message that is not an instruction is saved to memory, redacted and cited by message link, and acknowledged with a reaction. No card, no job, no spend. `do:` or `cook:` always cooks. Commands, imperatives, long messages, repo-status questions and job-thread replies cook as before.
+
+### Weekly capture digest
+- Once a week (default Monday at the morning hour, `DISCORD_OS_CAPTURE_DIGEST_DAY`), the HOST channel gets one card listing the week's captures, with a Cook this button on up to five. Operator-only, through JobPool. Silent when there were none.
+
+### Outcomes from reactions
+- An operator's thumbs up, shrug or thumbs down on a Done card is stored as that run's outcome (good, partial, bad). Reactions are read over REST, polled at most every 5 minutes for runs settled in the last 7 days. The HOST card shows a 7-day tally, and `discord-os lineage` shows each run's outcomes.
+
+### discord-os eval
+- `discord-os eval --limit N --yes` replays labeled runs read-only (analyze mode, no Discord posts) under the current or an allowlisted pin. It scores win, loss or same with a documented rubric and can write a JSON report. Without `--yes` it only prints the plan. A pin outside the allowlist exits 2.
+
+### Fork from a lineage step
+- `fork from <N>: <ask>` in a job thread opens a sibling thread whose run is parented at step N of that job, not its tip. `discord-os lineage` now numbers steps in execution order. Before, steps in the same second sorted by key hash. Operator-only.
+
+### Voice Done summaries (opt-in)
+- With `DISCORD_OS_VOICE_DONE=1`, the redacted Done summary is also posted in the job thread as a native Discord voice message, rendered locally with `say`/`espeak` and `ffmpeg`. Missing tools or a rejected upload fail soft, and the card is unaffected. No guild voice join (HARD lock 6).
+
 ## 0.5.87
 
 ### Never post doctor / liveness to Discord
@@ -119,8 +388,6 @@ Wave 5 P2 stretch (board + brain lakes):
 
 Still parked: mailbox/IRC, multi-host DO lakes, CU/docker, phone companion, auto forum tags, second JobPool, multi-gateway, silent ssh.
 
-## Unreleased
-
 ## 0.5.75
 
 Wave 5 P1 — compact brain recall pack (`brain show`), progress ledger strip,
@@ -161,14 +428,6 @@ multi-host brain lakes / Durable Objects clones; CU/docker/mailbox parked.
 Docs: [board-catchup](docs/co-work/board-catchup.md), [brain-lake](docs/co-work/brain-lake.md).
 Tests: `tests/test_wave4_board_brain.py`.
 
-## 0.5.67
-
-## 0.5.68
-
-## 0.5.69
-
-## 0.5.70
-
 ## 0.5.71
 
 - README / PyPI: show the three phone screenshots side-by-side in one row (table), not stacked.
@@ -183,6 +442,22 @@ Wave 3 shareability polish (docs-first): overnight brief recipe (schedule +
 Catch-up honesty), versioned [recipes](docs/recipes/README.md) cadence index,
 shared-desk demo &lt;15 min (handoff + overnight brief), COMPARISON Wave 2 bump
 (cross-host RO + forum-tags lock). Mailbox/CU/auto-tags stay parked.
+
+## 0.5.70
+
+- No separate notes. These changes are listed under 0.5.71.
+
+## 0.5.69
+
+- No separate notes. These changes are listed under 0.5.71.
+
+## 0.5.68
+
+- No separate notes. These changes are listed under 0.5.71.
+
+## 0.5.67
+
+- No separate notes. These changes are listed under 0.5.71.
 
 ## 0.5.66
 
@@ -199,8 +474,6 @@ crhq.ai ranked notes under `docs/co-work/`.
 
 - Fix `UnboundLocalError` on `resolved_write_key` in listen (handoff branch local import shadowed the module binding) — restores JobPool dispatch / CI greens from 0.5.62+.
 
-## 0.5.62
-
 ## 0.5.63
 
 - Refresh README / cards screenshots from current phone UI (HOST More, parallel job threads, Done card).
@@ -210,6 +483,9 @@ Co-work P1: JobPool-only `handoff`/`peer` tasks, operator/lane fields on receipt
 cards, `discord-os add desk-pack`, `schedule --list` (+ `schedule --every`).
 Docs under `docs/co-work/`.
 
+## 0.5.62
+
+- No separate notes. These changes are listed under 0.5.63.
 
 ## 0.5.61
 

@@ -1,23 +1,6 @@
 # Third-Party Notices
 
-**Discord OS** is a GitHub-first, open-source Discord harness. It does **not** copy source code from the upstream Discord MCP servers below. It talks to them as optional external processes or HTTP endpoints through a product-owned facade and thin provider adapters. Default I/O is official Discord REST.
-
-## SaseQ / discord-mcp
-
-- Repository: https://github.com/SaseQ/discord-mcp
-- License: MIT (see upstream repository)
-- Role in this project: optional MCP Discord provider adapter (`saseq`)
-- HTTP convention: when `DISCORD_MCP_TRANSPORT=http`, this project expects an MCP-over-HTTP endpoint at `SASEQ_MCP_HTTP_URL` (default `http://127.0.0.1:8085/mcp`, matching upstream docs). Exact tool names and payloads are discovered at runtime via MCP catalog listing; this repository does not vendor upstream tool implementations.
-- Stdio convention: when `DISCORD_MCP_TRANSPORT=stdio`, **`DISCORD_MCP_STDIO_COMMAND` is required**. There is no fabricated default npm package for SaseQ; prefer the upstream HTTP/Docker profile.
-
-## BrainDAO / mcp-discord (`@iqai/mcp-discord`)
-
-- Repository: https://github.com/BrainDAO/mcp-discord
-- Package family: `@iqai/mcp-discord` (see upstream)
-- License: MIT (see upstream repository)
-- Role in this project: optional MCP Discord provider adapter (`braindao`)
-- Sampling / tool convention: BrainDAO sampling-compatible ingress is exposed as an **adapter seam** on the product facade. This project models **one active Gateway owner per bot token** and does **not** require a second Discord Gateway solely to accept sampling-compatible tool traffic.
-- HTTP / stdio: same transport knobs as above via `BRAINDAO_MCP_HTTP_URL` / `DISCORD_MCP_STDIO_COMMAND`. For stdio, set an explicit command such as the documented `npx -y @iqai/mcp-discord`.
+**Discord OS** is a GitHub-first, open-source Discord harness. Discord I/O is official Discord REST through a product-owned facade. There is no MCP bus inside Discord and no Discord MCP server source is vendored here.
 
 ## Puppetmaster
 
@@ -36,4 +19,4 @@
 ## Other
 
 - Python standard library and optional `pytest` for development tests.
-- No Discord Gateway library is vendored here; Discord I/O goes through the selected MCP provider.
+- No Discord Gateway library is vendored here; Discord I/O goes through the REST provider.

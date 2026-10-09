@@ -13,12 +13,14 @@ GITHUB_AUTHED = "authed"
 GITHUB_MISSING_BIN = "missing_bin"
 GITHUB_UNAUTHENTICATED = "unauthenticated"
 
+GITHUB_AUTHED_LINE = "GitHub CLI is signed in on this Mac."
 GITHUB_UNAUTHED_LINE = "GitHub CLI is installed but not signed in on this Mac."
 GITHUB_MISSING_LINE = "GitHub CLI is not installed on this Mac."
 GITHUB_HOWTO = (
     "Sign in on the host: discord-os add github\n"
     "or: gh auth login"
 )
+GITHUB_HOST_ONLY_LINE = "Run it on the host Mac. Discord never starts the login."
 
 _AUTH_DUMP_MARKERS = (
     "gh auth login",
@@ -116,6 +118,14 @@ def github_status_card(state: str) -> str:
     return f"{GITHUB_UNAUTHED_LINE}\n{GITHUB_HOWTO}"
 
 
+def github_panel_message(state: str) -> str:
+    """HOST More > GitHub answer: the gh state plus the command for the Mac."""
+
+    if state == GITHUB_AUTHED:
+        return f"{GITHUB_AUTHED_LINE}\n{GITHUB_HOWTO}\n{GITHUB_HOST_ONLY_LINE}"
+    return f"{github_status_card(state)}\n{GITHUB_HOST_ONLY_LINE}"
+
+
 def github_host_row(state: str = "") -> str:
     if (state or gh_auth_state()) == GITHUB_AUTHED:
         return "ok"
@@ -126,6 +136,7 @@ def gh_auth_state(
     *,
     env: Optional[Mapping[str, str]] = None,
     runner: Optional[Callable[..., subprocess.CompletedProcess[str]]] = None,
+    timeout_s: float = 15.0,
 ) -> str:
     child = github_host_env(env=env)
     gh = which_on_host("gh", env=child)
@@ -139,7 +150,7 @@ def gh_auth_state(
             [gh, "auth", "status"],
             capture_output=True,
             text=True,
-            timeout=15,
+            timeout=max(1.0, float(timeout_s)),
             env=child,
         )
     except Exception:

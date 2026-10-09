@@ -32,7 +32,7 @@ Bind a channel: `bind host lab` (or `/bind host lab`). Doctor reports allowlist 
 **Path A (remote cook).** Oversized prompts use SSH **stdin** handoff (not argv) so OS ``ARG_MAX`` does not abort the cook — see [compute README](../compute/README.md).  Allowlisted `kind=ssh` hosts cook off this Mac: control plane builds `host_runner_argv` (`ssh -o BatchMode=yes user@host …`) and runs remote `puppetmaster agentic` (OpenRouter). Doctor/preflight probe checks SSH **and** remote CLI + OpenRouter presence (no key tunnel). Probe fails or `DISCORD_OS_SSH_COOK=0` → spoken Deny — never a silent local cook. Remote must already have OpenRouter configured (key never on argv). Live progress pipe: remote agentic stdout/stderr → Discord `PROGRESS` cards while SSH runs (same parsers as local). Phone **Cancel** kills the local ssh process group and best-effort remote pid / ControlMaster; failure speaks **Cancel unconfirmed** (no false Cancelled paint).
 
 
-`discord-os setup` / `host start` detaches it and posts the HOST card: On, Off, Ask, a More menu (Pair / Halt / Clear failed Needs / Gate / Roles / GitHub / Files here or on host / Terminal on host / Browser here or on host), and Jobs. Dest is a noun: **here** stays in Discord (the tapping client — phone or desktop — opens the link or reads the listing). **host** opens a GUI on the listen machine. Discord does not send which client tapped; presence `client_status` is not a dest. The job line and select are a deterministic briefing over SQLite: parked / failed first, then waiting-on-CI, then live, then last Done. Not a second board. Selecting a failed job opens its card with **Dismiss** so phone/HOST can ack the Need without Continue/Retry. Dismiss / ack / cancel settle immediately refresh the HOST Jobs select (and Need line); if the panel message id is missing the host recovers or repaints it, else speaks Need once. Message intake is REST. A Gateway is open **only** so those controls work. Do not run a second bot process on the same token. Discord has no tabs — the More select is the grouping. Pair / Gate open ephemeral Confirm menus; Roles opens the role-id **modal** (not an ephemeral Roles fantasy). More → Post preference poll is a non-blocking survey only — never a live gate replace. HOST Jobs select labels prefix Need / Live / Done; panel accent follows the top job.
+`discord-os setup` / `host start` detaches it and posts the HOST card: On, Off, Ask, a More menu (Pair / Halt or Resume / Clear failed Needs / Gate / Roles / GitHub / Files here or on host / Terminal on host / Browser here or on host), and Jobs. Dest is a noun: **here** stays in Discord (the tapping client — phone or desktop — opens the link or reads the listing). **host** opens a GUI on the listen machine. Discord does not send which client tapped; presence `client_status` is not a dest. The job line and select are a deterministic briefing over SQLite: parked / failed first, then waiting-on-CI, then live, then last Done. Not a second board. Selecting a job answers **ephemerally** — status line, job code, a link to that job's thread card, and the same buttons (**Dismiss** on a failed Need, Continue / Retry on a done one). It never posts a second copy of the job card into the HOST channel: one live card per job, in its thread. Dismiss / ack / cancel settle immediately refresh the HOST Jobs select (and Need line); if the panel message id is missing the host recovers or repaints it, else speaks Need once. Message intake is REST. A Gateway is open **only** so those controls work. Do not run a second bot process on the same token. Discord has no tabs — the More select is the grouping. Pair / Gate open ephemeral Confirm menus; Roles opens the role-id **modal** (not an ephemeral Roles fantasy). More → Post preference poll is a non-blocking survey only — never a live gate replace. HOST Jobs select labels prefix Need / Live / Done; panel accent follows the top job.
 
 ## Power
 
@@ -42,7 +42,7 @@ Bind a channel: `bind host lab` (or `/bind host lab`). Doctor reports allowlist 
 | Off → Confirm | Disarmed. Helper stays so On still works. |
 | Ask | Prompt into that channel. |
 | Pair | Owner / operators. Intentional bootstrap even when require is on. |
-| Halt | Spend cap (OpenRouter usage cost on agentic receipts). `discord-os spend --resume` clears it. |
+| Halt / Resume | Halt stops new jobs (OpenRouter usage cost on agentic receipts). While halted the More option reads **Resume** instead, so the state is visible and each action is named — not one label that toggles. Both are idempotent. `discord-os spend --resume` also clears it. |
 | Clear failed Needs | Confirm, then bulk-dismiss failed / attention Needs for this channel (same as job-card Dismiss). CLI: `discord-os jobs clear-needs --failed`. |
 
 Work is accepted only while On, and only from a paired operator after the first pair (or immediately when `DISCORD_OS_REQUIRE_OPERATORS=1` and operators are empty — dispatch refuses until Pair).
@@ -71,17 +71,63 @@ discord-os pair --user-id YOUR_DISCORD_USER_SNOWFLAKE --role owner
 
 ## Login helper
 
-macOS LaunchAgent (`com.discord-os.host`) or the Windows equivalent from `host/install.py`. After a PyPI bump, install into that venv and kick the helper. The HOST card shows an **Update available · X.Y.Z** pill when the installed package lags PyPI latest (fail soft if PyPI is unreachable; no auto-upgrade). Upgrade: `pip install -U discord-os` in `~/discord-os/.venv`, then `discord-os host restart` (or bounce `com.discord-os.host`).
+macOS LaunchAgent (`com.discord-os.host`) or the Windows equivalent from `host/install.py`.
+`KeepAlive` is paired with **`ThrottleInterval` 30** (systemd: `RestartSec=30`) so a
+host that dies at startup — bad token, `ConfigError`, sqlite lock — backs off into a
+readable `host.log` instead of a silent 10 s respawn loop. After a PyPI bump, install into that venv and kick the helper. The HOST card shows an **Update available · X.Y.Z** pill when the installed package lags PyPI latest (fail soft if PyPI is unreachable; no auto-upgrade). Upgrade: `pip install -U discord-os` in `~/discord-os/.venv`, then `discord-os host restart` (or bounce `com.discord-os.host`).
 
 ```bash
 discord-os host status
 discord-os host doctor          # LaunchAgent / workspace / pid / gateway
 discord-os host doctor --fix   # clear dead-pid gateway locks only
 discord-os host doctor --notify # refresh Need state; never posts to Discord
-discord-os host dashboard       # read-only companion at http://127.0.0.1:8765/
 discord-os host stop
 discord-os host start --channel-id ID
 ```
+
+## Workspace and .env resolution
+
+Resolution is **CWD-independent**. Running `discord-os ...` from a git checkout
+used to create or open a second SQLite database next to the source; it no longer
+can.
+
+| Input | Resolves to |
+|---|---|
+| `AGENT_DISCORD_WORKSPACE` set | That path, expanded and resolved. Unchanged. |
+| Unset, `~/discord-os/.agent-discord` exists | **That** — the documented live workspace. |
+| Unset, live layout absent | `~/.discord-os/workspace`. |
+| `.env` | Beside the workspace: `<workspace>/../.env`, i.e. `~/discord-os/.env` for the live layout. Never the current directory. |
+| Explicit `dotenv_path=` / `workspace=` | Honored exactly as passed. |
+
+A `.env` may still declare `AGENT_DISCORD_WORKSPACE`; the file is located from
+the stable default first, then that declaration wins over the default.
+`host doctor`'s preferred-workspace WARN uses the same resolver, so it cannot
+warn against a path the product would never choose. Code:
+`default_workspace` / `default_dotenv_path` in `src/agent_discord/config.py`.
+
+## Host log
+
+`.agent-discord/logs/host.log` is the LaunchAgent's `StandardOutPath` **and**
+`StandardErrorPath`. The host process wraps `sys.stdout` / `sys.stderr` once at
+startup (`src/agent_discord/host/logstream.py`) so every bare `print()` line in
+the codebase lands with an ISO-8601 local timestamp. Call sites stay plain.
+
+| Rule | Behavior |
+|---|---|
+| Who stamps | Only the long-running `host run` / `listen` entry point. One-shot CLI commands print plain. |
+| Foreground | No-op when both streams are a terminal. |
+| Partial line | Held until its newline, so one logical line is never split across two stamps. |
+
+### Rotation
+
+The host rotates its own log — at startup and then at most once a minute from
+the writer. No logrotate, no cron.
+
+| Rule | Behavior |
+|---|---|
+| Ceiling | `host.log` over **10 MB** rotates. |
+| Generations | `host.log.1` .. `host.log.3`; the fourth is deleted. |
+| Method | **Copy-truncate.** launchd opens `StandardOutPath` once per spawn and holds that descriptor for the life of the process, so a rename would leave the host writing into an unlinked inode until the next respawn. The bytes are copied to `host.log.1` and `host.log` is truncated in place; launchd and `start_detached` both open it append, so writes resume at the new end of file. |
 
 ## Approval timeout (P0.3)
 
@@ -91,36 +137,38 @@ with spoken `Expired. Write was not started.` Set `0` or `off` to disable.
 
 ## Phone-visible host liveness (P0.2)
 
-Desk doctor + loopback dashboard stay on the Mac. A thin digest (`power` /
-`pid` / `doctor`) ranks as a HOST **Need** line. It does **not** post to the
-host channel (0.5.87). See [liveness.md](liveness.md).
-
-## Companion dashboard (read-only)
-
-Local HTTP glance at host status — version, power/armed, spend, recent jobs, doctor summary, and multi-host allowlist **ids** (no secrets). Mutating controls stay on the Discord HOST panel.
-
-```bash
-discord-os host dashboard          # http://127.0.0.1:8765/
-discord-os dashboard               # same (alias)
-discord-os host dashboard --once   # print JSON snapshot, no server
-```
-
-| Rule | Behavior |
-|---|---|
-| Bind | **Fail closed** to `127.0.0.1` (or `DISCORD_OS_DASHBOARD_HOST` if loopback). |
-| Non-loopback | Refused unless `--allow-non-loopback` (not recommended; no auth). |
-| Methods | GET / HEAD only. POST/PUT/PATCH/DELETE → 405. |
-| Secrets | No bot tokens, env dumps, SSH targets, or credentials in responses. |
-| Allowlist | Ids / labels / kinds only — never `target` / ssh user@host. |
-
-JSON: `GET /api/status`. HTML: `GET /`. Code: `src/agent_discord/host/dashboard.py`.
+Desk doctor stays on the Mac. A thin digest (`power` / `pid` / `doctor` /
+`gateway`) ranks as a HOST **Need** line. It does **not** post to the host
+channel (0.5.87). See [status.md](status.md).
 
 ## Discord RO status digest (P2.7)
 
-Phone-visible copy of the dashboard RO facts (power / spend / jobs / allowlist
-ids). Posts to the host channel (or `DISCORD_OS_STATUS_THREAD_ID`) on **On**,
-`/status`, and listen on-change. Debounced. Never mutates power. See
-[status-digest.md](status-digest.md).
+Phone-visible read-only facts (power / spend / jobs / allowlist ids). Posts to
+the host channel (or `DISCORD_OS_STATUS_THREAD_ID`) on **On**, `/status`, and
+listen on-change. Debounced. Never mutates power. See
+[status.md](status.md).
+
+## Features (opt-ins)
+
+Every opt-in is off by default. Turn one on with `/features`, HOST
+**More > Features**, or `discord-os features on <name>`. See
+[features.md](features.md).
+
+## Capture-first intake (opt-in)
+
+Short declarative messages become host memory instead of paid cooks. OFF by
+default. `discord-os add capture --channel-id ID` or
+`DISCORD_OS_CAPTURE_FIRST=1`. `do:` / `cook:` always cooks; job threads are
+never captured. One weekly digest card carries a **Cook this** button per
+capture. See [capture.md](capture.md).
+
+## Morning summary
+
+One HOST card per local day at 07:30 (`DISCORD_OS_MORNING_AT`), built from
+overnight settles, open Needs, and bound-repo PR/CI state. Silent when there
+is nothing to report. Off by default. Turn it on with `/features` or
+`DISCORD_OS_MORNING=1`. See
+[morning.md](morning.md).
 
 
 ## Other host verbs
@@ -141,6 +189,7 @@ Opt-in local spoken Done on this Mac. Discord guild voice join re-checked:
 | Default | `DISCORD_OS_TTS` unset/off — no subprocess, no sound. |
 | Opt-in | `DISCORD_OS_TTS=1` + `say` / `espeak` on PATH. Argv only; keys never in argv. |
 | Missing CLI | Spoken Deny. Host keeps running. |
+| Voice message Done | `DISCORD_OS_VOICE_DONE=1` + `ffmpeg` → native voice message in the job thread, once per run. Default off; missing tool = no send. |
 | Voice join | Always Denied (DAVE / libdave not shipped; no half-wired Opcode 4). |
 | Guild speak/listen | Parked Deny — use local TTS + voice memos. |
 | Activities | Never. |
@@ -163,21 +212,33 @@ Not a product feature. Optional extra `discord-os[debug]`. Default **off.** `DIS
 - `src/agent_discord/host/presence.py` — optional pypresence (Job title + On/Off/Halt)
 - `src/agent_discord/host/webhook.py` — optional discord-webhook ops side-channel
 - `src/agent_discord/host/jishaku.py` — optional jishaku tip-debug gate (default off; owner only)
+- `src/agent_discord/orchestration/capture.py` — capture-first classifier and memory write (opt-in)
+- `src/agent_discord/orchestration/capture_digest.py` — weekly capture card
 - `src/agent_discord/host/power.py` — armed / pid
 - `src/agent_discord/host/runners.py` — multi-host allowlist (fail-closed)
 - `src/agent_discord/orchestration/service.py` — operators / REQUIRE_OPERATORS
 - `src/agent_discord/host/doctor.py` — operators require check
-- `src/agent_discord/host/dashboard.py` — read-only companion web dashboard
-- `src/agent_discord/host/liveness.py` — phone-visible digest / HOST Need (P0.2)
-- `src/agent_discord/host/status_digest.py` — Discord RO status digest from dashboard (P2.7)
+- `src/agent_discord/host/status.py` — RO snapshot, HOST Need digest (P0.2), Discord RO status digest (P2.7)
 - `src/agent_discord/discord/tts.py` — local TTS + voice join/leave honesty (DAVE Deny)
 - `src/agent_discord/host/install.py` — login item
+- `src/agent_discord/host/logstream.py` — timestamped host.log lines + copy-truncate rotation
 - `src/agent_discord/host/actions.py` — Terminal / files / browser
 - `src/agent_discord/cli.py` — `cmd_host_*`, `cmd_setup`
 
 ## Slash (opt-in)
 
-Text binds and the HOST panel are the default. Slash is optional (default off) and mirrors the same verbs when registered — `/bind` (name autocomplete), `/job` (DOS-* autocomplete), `/status`, `/on`, `/off`, `/stop`, `/open`, `/connect`. When interactions are exposed, the host self-heals registration (version-aware; fail soft). Not required for doctor, binds, or jobs. No `/add`. See [slash.md](slash.md). Code: `src/agent_discord/discord/interactions.py`.
+Text binds and the HOST panel are the default. Slash is optional (default off) and mirrors the same verbs when registered — `/bind` (name autocomplete), `/ask` (prompt + realm autocomplete), `/job` (DOS-* autocomplete), `/status`, `/on`, `/off`, `/stop`, `/open`, `/connect`, plus the `Send to Discord OS` message context menu. `AGENT_DISCORD_INTERACTIONS=gateway` carries them on the Gateway the host already owns (no public URL, no public key); `=http` keeps the HTTPS endpoint. Commands are guild- and user-installable; an interaction from outside the host server is answered on the interaction webhook and needs a paired operator. When interactions are exposed, the host self-heals registration (version-aware; fail soft). Not required for doctor, binds, or jobs. No `/add`. See [slash.md](slash.md). Code: `src/agent_discord/discord/interactions.py`.
+
+## Forwarded messages
+
+Discord forwarding sends an **empty** outer `content` with
+`message_reference.type = 1` (FORWARD) and the real payload in
+`message_snapshots[].message`. `message_from_rest_payload` merges snapshot
+content, attachments, and embeds into the intake behind a `forwarded`
+provenance line (the forwarder's own comment, when they wrote one, stays
+first) and stamps `metadata["forwarded"]`. A reply (`type` 0) is not a
+forward and keeps its own content. Without the merge a forwarded ask lands
+blank.
 
 ## Schedules while Off
 

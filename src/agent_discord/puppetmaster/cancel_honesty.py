@@ -481,6 +481,295 @@ def reap_orphaned_remote_pids(
     return out
 
 
+LOCAL_PID_DIR_ENV = "DISCORD_OS_LOCAL_PID_DIR"
+
+
+def local_pid_sidecar_dir(
+    *,
+    workspace: Any = None,
+    env: Optional[Mapping[str, str]] = None,
+) -> str:
+    """Directory for local agentic pid sidecars (orphan reap after host restart)."""
+
+    source = dict(os.environ if env is None else env)
+    explicit = (source.get(LOCAL_PID_DIR_ENV) or "").strip()
+    candidates = []
+    if explicit:
+        candidates.append(explicit)
+    if workspace is not None:
+        candidates.append(os.path.join(str(workspace), "local_pids"))
+    ws_env = (source.get("AGENT_DISCORD_WORKSPACE") or "").strip()
+    if ws_env:
+        candidates.append(os.path.join(os.path.expanduser(ws_env), "local_pids"))
+    candidates.append("/tmp/discord-os-local-pids")
+    for root in candidates:
+        try:
+            os.makedirs(root, mode=0o700, exist_ok=True)
+            return root
+        except OSError:
+            continue
+    return candidates[-1]
+
+
+def _sidecar_path(folder: str, run_id: str) -> str:
+    safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in run_id)[:80]
+    return os.path.join(folder, f"{safe or 'unknown'}.json")
+
+
+def process_command_line(pid: int, *, ps_fn: Any = None) -> str:
+    """Best-effort command line for ``pid``. Empty when it cannot be read."""
+
+    target = int(pid or 0)
+    if target <= 0:
+        return ""
+    if ps_fn is not None:
+        try:
+            return str(ps_fn(target) or "")
+        except Exception:
+            return ""
+    try:
+        completed = subprocess.run(
+            ["ps", "-o", "command=", "-p", str(target)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        return ""
+    return (completed.stdout or "").strip()
+
+
+_START_SKEW_MS = 5 * 60 * 1000
+
+
+def _parse_etime(text: str) -> Optional[int]:
+    """``ps -o etime`` ``[[dd-]hh:]mm:ss`` to seconds. None when unparseable."""
+
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    days = 0
+    if "-" in raw:
+        head, _, raw = raw.partition("-")
+        if not head.isdigit():
+            return None
+        days = int(head)
+    parts = raw.split(":")
+    if not all(part.isdigit() for part in parts) or not 2 <= len(parts) <= 3:
+        return None
+    seconds = 0
+    for part in parts:
+        seconds = seconds * 60 + int(part)
+    return days * 86400 + seconds
+
+
+def process_start_ms(
+    pid: int, *, etime_fn: Any = None, now_ms: Optional[int] = None
+) -> Optional[int]:
+    """When ``pid`` started (epoch ms), from ``ps -o etime``. None when unknown."""
+
+    target = int(pid or 0)
+    if target <= 0:
+        return None
+    try:
+        if etime_fn is not None:
+            text = str(etime_fn(target) or "")
+        else:
+            completed = subprocess.run(
+                ["ps", "-o", "etime=", "-p", str(target)],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            text = completed.stdout or ""
+    except Exception:
+        return None
+    elapsed = _parse_etime(text)
+    if elapsed is None:
+        return None
+    base = int(now_ms if now_ms is not None else time.time() * 1000)
+    return base - elapsed * 1000
+
+
+def process_group_is_alive(pgid: int) -> bool:
+    """True when signal 0 reaches the process group."""
+
+    group = int(pgid or 0)
+    if group <= 0 or os.name != "posix":
+        return False
+    try:
+        os.killpg(group, 0)
+        return True
+    except (ProcessLookupError, OSError):
+        return False
+
+
+def persist_local_pid_sidecar(
+    *,
+    run_id: str,
+    pid: int,
+    pgid: int = 0,
+    job_id: str = "",
+    workspace: Any = None,
+    env: Optional[Mapping[str, str]] = None,
+    command: str = "",
+) -> str:
+    """Record a live local worker so a host restart can reap it. Never raises.
+
+    Local agentic children start in their own session, so an abrupt host exit
+    orphans them: they keep cooking, spending, and writing the checkout after
+    the write lock is gone. Path A has had this for remote pids.
+    """
+
+    import json
+
+    rid = (run_id or "").strip()
+    child = int(pid or 0)
+    if not rid or child <= 0:
+        return ""
+    folder = local_pid_sidecar_dir(workspace=workspace, env=env)
+    path = _sidecar_path(folder, rid)
+    payload = {
+        "run_id": rid,
+        "pid": child,
+        "pgid": int(pgid or child),
+        "job_id": (job_id or "").strip(),
+        "command": (command or "")[:500],
+        "started_at_ms": int(time.time() * 1000),
+    }
+    try:
+        tmp = f"{path}.tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, separators=(",", ":"))
+        os.replace(tmp, path)
+    except OSError:
+        return ""
+    return path
+
+
+def clear_local_pid_sidecar(
+    run_id: str,
+    *,
+    workspace: Any = None,
+    env: Optional[Mapping[str, str]] = None,
+) -> None:
+    rid = (run_id or "").strip()
+    if not rid:
+        return
+    folder = local_pid_sidecar_dir(workspace=workspace, env=env)
+    try:
+        os.unlink(_sidecar_path(folder, rid))
+    except OSError:
+        pass
+
+
+def reap_orphaned_local_pids(
+    *,
+    workspace: Any = None,
+    env: Optional[Mapping[str, str]] = None,
+    grace_seconds: float = 2.0,
+    max_age_seconds: float = 24 * 3600,
+    ps_fn: Any = None,
+    killpg_fn: Any = None,
+    etime_fn: Any = None,
+) -> list[dict[str, Any]]:
+    """Terminate local worker groups left alive by an abrupt host exit.
+
+    A pid can be reused, so a group is only signalled when the recorded pid
+    still looks like a Puppetmaster process (``ps`` command line). Mismatches
+    clear the sidecar without signalling anything. Never raises; returns one
+    record per sidecar so the caller can log what happened.
+    """
+
+    import json
+
+    folder = local_pid_sidecar_dir(workspace=workspace, env=env)
+    out: list[dict[str, Any]] = []
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return out
+    killpg = killpg_fn if killpg_fn is not None else os.killpg
+    now_ms = int(time.time() * 1000)
+    max_age_ms = int(max(60.0, float(max_age_seconds)) * 1000)
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        path = os.path.join(folder, name)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            continue
+        if not isinstance(data, dict):
+            continue
+        rid = str(data.get("run_id") or "").strip()
+        pid = int(data.get("pid") or 0)
+        pgid = int(data.get("pgid") or pid)
+        created = int(data.get("started_at_ms") or 0)
+        record: dict[str, Any] = {
+            "run_id": rid,
+            "pid": pid,
+            "pgid": pgid,
+            "job_id": str(data.get("job_id") or ""),
+        }
+        if created and (now_ms - created) > max_age_ms:
+            record["action"] = "expired"
+        elif pgid <= 1 or pid <= 1 or pgid == os.getpgrp():
+            # A corrupt sidecar must never signal init or this host's own group.
+            record["action"] = "unsafe"
+        elif not process_group_is_alive(pgid):
+            record["action"] = "gone"
+        else:
+            command = process_command_line(pid, ps_fn=ps_fn)
+            started = process_start_ms(pid, etime_fn=etime_fn, now_ms=now_ms)
+            if "puppetmaster" not in command.lower():
+                # Pid reuse (or an unreadable ps): do not signal a stranger.
+                record["action"] = "not-ours"
+                record["command"] = command[:200]
+            elif created and (
+                started is None or abs(started - created) > _START_SKEW_MS
+            ):
+                # Another Puppetmaster process (Marionette, an MCP worker) that
+                # reused the pid started at a different time than our child.
+                record["action"] = "not-ours"
+                record["command"] = command[:200]
+            else:
+                record["action"] = "reaped"
+                record["killed"] = _kill_group(killpg, pgid, grace_seconds)
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        out.append(record)
+    return out
+
+
+def _kill_group(killpg: Any, pgid: int, grace_seconds: float) -> bool:
+    """SIGTERM the group, then SIGKILL after a grace period. True when dead."""
+
+    try:
+        killpg(pgid, signal.SIGTERM)
+    except Exception:
+        return False
+    deadline = time.monotonic() + max(0.05, float(grace_seconds))
+    while time.monotonic() < deadline:
+        if not process_group_is_alive(pgid):
+            return True
+        time.sleep(0.05)
+    try:
+        killpg(pgid, signal.SIGKILL)
+    except Exception:
+        return False
+    return not process_group_is_alive(pgid)
+
+
 def wait_briefly_for_remote_pid(
     getter,
     *,

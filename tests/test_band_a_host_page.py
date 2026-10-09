@@ -1,21 +1,14 @@
-"""Band A — kagekit spike fail + thin HOST Page layout."""
+"""Band A — thin HOST Page layout."""
 
 from __future__ import annotations
 
-from pathlib import Path
 
 from agent_discord.discord.host_page import (
     host_page_enabled,
-    host_v2_payload,
-    kagekit_spike_adopted,
     split_host_v2_components,
 )
 from agent_discord.discord.layout import TYPE_ACTION_ROW, TYPE_CONTAINER, action_row, button
 from agent_discord.orchestration.cards import host_card
-
-
-def test_kagekit_not_adopted():
-    assert kagekit_spike_adopted() is False
 
 
 def test_host_page_flag_default_on(monkeypatch):
@@ -55,10 +48,3 @@ def test_host_card_v2_uses_page_layout(monkeypatch):
     assert comps[0]["type"] == TYPE_CONTAINER
     assert any(c.get("type") == TYPE_ACTION_ROW for c in comps[1:])
     assert "Pair → Ask → Done" in (card.description or "")
-
-
-def test_spike_doc_records_fail():
-    text = (Path(__file__).resolve().parents[1] / "docs/co-work/band-a-kagekit-spike.md").read_text()
-    assert "Do not adopt" in text or "FAIL" in text
-    assert "graham" not in text.lower() or "never graham" in text.lower()
-    assert "host_page" in text

@@ -206,44 +206,6 @@ def install_agentic_pretool_patch(*, runner: Any = None) -> bool:
         return applied
 
 
-class _AgenticImportFinder:
-    """After ``puppetmaster.adapters.agentic`` loads, install the PreToolUse wrap."""
-
-    def find_module(self, fullname: str, path: Any = None):  # pragma: no cover - py2 API
-        return None
-
-    def find_spec(self, fullname: str, path: Any = None, target: Any = None):
-        if fullname == "puppetmaster.adapters.agentic":
-            # Defer: let the normal finder load, then patch on next opportunity.
-            # We schedule via a meta path wrapper on the loaded module below.
-            pass
-        return None
-
-
-class _AgenticLoadWatcher:
-    """``sys.meta_path`` shim that patches once the agentic module appears."""
-
-    def __init__(self) -> None:
-        self._done = False
-
-    def find_spec(self, fullname: str, path: Any = None, target: Any = None):
-        if self._done:
-            return None
-        if fullname == "puppetmaster.adapters.agentic" or (
-            fullname == "puppetmaster.adapters" and path is not None
-        ):
-            # Continue normal import; patch after via exec_module wrap is heavy.
-            # Instead poll after import completes using a path hook on the package.
-            return None
-        if fullname.startswith("puppetmaster.") and "agentic" in sys.modules:
-            try:
-                if install_agentic_pretool_patch():
-                    self._done = True
-            except Exception:
-                pass
-        return None
-
-
 def _install_import_watcher() -> None:
     # Prefer wrapping builtins.__import__ — reliable across CPython versions.
     if getattr(sys, "_discord_os_gate_import_wrapped", False):

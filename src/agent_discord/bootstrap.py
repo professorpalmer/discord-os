@@ -43,7 +43,6 @@ def bootstrap_workspace(
         "workspace": str(config.workspace),
         "database": str(config.database_path),
         "discord_mcp_provider": config.discord_mcp_provider,
-        "discord_mcp_transport": config.discord_mcp_transport,
         "agent_backend": config.agent_backend,
         "puppetmaster_model": config.puppetmaster_model,
         "puppetmaster_adapter_name": "openrouter/auto",

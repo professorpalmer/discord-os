@@ -238,19 +238,15 @@ def host_runner_argv(
                 "ControlPersist=60",
             ]
         )
-    argv.append(target)
+    argv.extend(["--", target])
+    # sshd joins everything after the target with spaces and hands it to the
+    # login shell, so send exactly one already-quoted command string.
+    remote = " ".join(shlex.quote(part) for part in cmd)
     workdir = (host.workdir or "").strip()
     if workdir:
         _refuse_credential_argv([workdir])
-        remote = (
-            "cd "
-            + shlex.quote(workdir)
-            + " && "
-            + " ".join(shlex.quote(part) for part in cmd)
-        )
-        argv.append(remote)
-    else:
-        argv.extend(cmd)
+        remote = "cd " + shlex.quote(workdir) + " && " + remote
+    argv.append(remote)
     _refuse_credential_argv(argv)
     return argv
 

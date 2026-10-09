@@ -3,8 +3,12 @@
 Default listen stays message-prefix (poverty path). This module is the same
 host verbs behind slash chrome. It does not open a second Gateway.
 
-Discord requires a public HTTPS URL and a 3s ACK. Bind loopback; tunnel if
-you opt in. Slash ``/connect`` never accepts a secret option.
+``AGENT_DISCORD_INTERACTIONS=http`` requires a public HTTPS URL and a 3s ACK.
+Bind loopback; tunnel if you opt in. ``=gateway`` skips both: Discord delivers
+APPLICATION_COMMAND / AUTOCOMPLETE as ``INTERACTION_CREATE`` on the existing
+panel Gateway (no Interactions Endpoint URL, no ``DISCORD_PUBLIC_KEY``), and
+``route_gateway_interaction`` POSTs the reply to the callback route. Still one
+Gateway (HARD lock 4). Slash ``/connect`` never accepts a secret option.
 
 P2.9 / Discord-half EXTRAS: slash aliases ``/bind`` ``/status`` ``/on``
 ``/off`` ``/stop`` plus read-only ``/job`` and ``/clear-needs`` when
@@ -31,6 +35,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence
 from urllib.parse import urlparse
 
+from agent_discord.host.features import FEATURES
 from agent_discord.host.verbs import handle_open_message
 from agent_discord.keys.connect import handle_connect_message
 
@@ -42,6 +47,23 @@ RESPONSE_PONG = 1
 RESPONSE_CHANNEL_MESSAGE = 4
 RESPONSE_AUTOCOMPLETE = 8
 EPHEMERAL = 64
+COMMAND_TYPE_MESSAGE = 3
+GUILD_INSTALL = 0
+USER_INSTALL = 1
+# Guild / bot DM / private channel (group DM or a DM with someone else).
+INSTALL_CONTEXT_GUILD = 0
+INSTALL_CONTEXT_BOT_DM = 1
+INSTALL_CONTEXT_PRIVATE = 2
+INSTALL_CONTEXTS = [
+    INSTALL_CONTEXT_GUILD,
+    INSTALL_CONTEXT_BOT_DM,
+    INSTALL_CONTEXT_PRIVATE,
+]
+INTEGRATION_TYPES = [GUILD_INSTALL, USER_INSTALL]
+_INSTALL_FIELDS = {
+    "integration_types": INTEGRATION_TYPES,
+    "contexts": INSTALL_CONTEXTS,
+}
 MAX_AUTOCOMPLETE_CHOICES = 25
 
 CONNECT_COMMAND = {
@@ -131,6 +153,32 @@ STOP_COMMAND = {
     "description": "Disarm this channel (alias of /off)",
     "type": 1,
 }
+ASK_COMMAND = {
+    "name": "ask",
+    "description": "Start a cook here (same as the HOST Ask modal)",
+    "type": 1,
+    "options": [
+        {
+            "name": "prompt",
+            "description": "What to cook",
+            "type": 3,
+            "required": True,
+        },
+        {
+            "name": "realm",
+            "description": "Bound realm to cook in (default: this channel)",
+            "type": 3,
+            "required": False,
+            "autocomplete": True,
+        },
+    ],
+}
+MESSAGE_COMMAND_NAME = "Send to Discord OS"
+MESSAGE_ASK_COMMAND = {
+    # Application command type 3 — right-click / long-press a message.
+    "name": MESSAGE_COMMAND_NAME,
+    "type": COMMAND_TYPE_MESSAGE,
+}
 CLEAR_NEEDS_COMMAND = {
     "name": "clear-needs",
     "description": "Dismiss failed Needs (same as HOST More / jobs clear-needs --failed)",
@@ -151,20 +199,56 @@ CLEAR_NEEDS_COMMAND = {
     ],
 }
 
+FEATURES_COMMAND = {
+    "name": "features",
+    "description": "List opt-in features, or turn one on or off here",
+    "type": 1,
+    "options": [
+        {
+            "name": "feature",
+            "description": "Feature to change (omit to list them all)",
+            "type": 3,
+            "required": False,
+            "choices": [
+                {"name": feature.label, "value": feature.name} for feature in FEATURES
+            ],
+        },
+        {
+            "name": "state",
+            "description": "on or off",
+            "type": 3,
+            "required": False,
+            "choices": [{"name": "on", "value": "on"}, {"name": "off", "value": "off"}],
+        },
+    ],
+}
+
 OPT_IN_COMMANDS = (
     CONNECT_COMMAND,
     OPEN_COMMAND,
     BIND_COMMAND,
+    ASK_COMMAND,
     JOB_COMMAND,
     STATUS_COMMAND,
     ON_COMMAND,
     OFF_COMMAND,
     STOP_COMMAND,
     CLEAR_NEEDS_COMMAND,
+    FEATURES_COMMAND,
+    MESSAGE_ASK_COMMAND,
 )
 
+# Every opt-in command is guild- and user-installable in all three contexts.
+# One source of truth: the command literals above carry the same dicts the
+# registration POSTs and the command-set stamp read.
+for _command in OPT_IN_COMMANDS:
+    _command.update(_INSTALL_FIELDS)
+del _command
+
 SLASH_REGISTRATION_STATE = "slash_registration.json"
-_INTERACTIONS_EXPOSED = frozenset({"http", "https", "public", "on", "1", "true", "yes"})
+_INTERACTIONS_GATEWAY = frozenset({"gateway", "gw"})
+_INTERACTIONS_HTTP = frozenset({"http", "https", "public", "on", "1", "true", "yes"})
+_INTERACTIONS_EXPOSED = _INTERACTIONS_HTTP | _INTERACTIONS_GATEWAY
 
 
 @dataclass(frozen=True)
@@ -226,20 +310,57 @@ def save_slash_registration_state(
     )
 
 
+def _interactions_raw(
+    interactions: str = "",
+    *,
+    env: Optional[Mapping[str, str]] = None,
+) -> str:
+    raw = str(interactions or "").strip().lower()
+    if raw:
+        return raw
+    source = env if env is not None else os.environ
+    return str(source.get("AGENT_DISCORD_INTERACTIONS") or "").strip().lower()
+
+
+def interactions_mode(
+    interactions: str = "",
+    *,
+    env: Optional[Mapping[str, str]] = None,
+) -> str:
+    """Normalize the opt-in knob to ``off`` / ``http`` / ``gateway``."""
+
+    raw = _interactions_raw(interactions, env=env)
+    if raw in _INTERACTIONS_GATEWAY:
+        return "gateway"
+    if raw in _INTERACTIONS_HTTP:
+        return "http"
+    return "off"
+
+
 def interactions_exposed(
     interactions: str = "",
     *,
     env: Optional[Mapping[str, str]] = None,
 ) -> bool:
-    """True when slash Interactions are opted in (http/public path)."""
+    """True when slash Interactions are opted in (http/public or gateway)."""
 
-    raw = str(interactions or "").strip().lower()
-    if raw:
-        return raw in _INTERACTIONS_EXPOSED
-    source = env if env is not None else os.environ
-    return str(source.get("AGENT_DISCORD_INTERACTIONS") or "").strip().lower() in (
-        _INTERACTIONS_EXPOSED
-    )
+    return _interactions_raw(interactions, env=env) in _INTERACTIONS_EXPOSED
+
+
+def interactions_over_gateway(
+    interactions: str = "",
+    *,
+    env: Optional[Mapping[str, str]] = None,
+) -> bool:
+    """True for ``AGENT_DISCORD_INTERACTIONS=gateway``.
+
+    Discord delivers APPLICATION_COMMAND / AUTOCOMPLETE as
+    ``INTERACTION_CREATE`` on the Gateway when the app has no Interactions
+    Endpoint URL. Still one Gateway (HARD lock 4) — the panel listen socket
+    carries slash too; no public HTTPS URL and no ``DISCORD_PUBLIC_KEY``.
+    """
+
+    return _interactions_raw(interactions, env=env) in _INTERACTIONS_GATEWAY
 
 
 def maybe_self_heal_slash_registration(
@@ -287,7 +408,7 @@ def maybe_self_heal_slash_registration(
         warnings.append("DISCORD_BOT_TOKEN missing — slash self-heal skipped")
     if not app_id:
         warnings.append("DISCORD_APPLICATION_ID missing — slash self-heal skipped")
-    if not pub:
+    if not pub and not interactions_over_gateway(interactions, env=env):
         warnings.append(
             "DISCORD_PUBLIC_KEY missing — slash serve/verify unavailable "
             "(registration still needs token + application id)"
@@ -406,6 +527,7 @@ def handle_interaction_payload(
     env: Optional[Mapping[str, str]] = None,
     runner: Optional[Callable[..., object]] = None,
     browser_open: Optional[Callable[[str], object]] = None,
+    on_ask: Optional[Callable[[str, str, str], Optional[str]]] = None,
 ) -> dict[str, Any]:
     kind = int(payload.get("type") or 0)
     if kind == INTERACTION_PING:
@@ -416,6 +538,20 @@ def handle_interaction_payload(
         return _ephemeral("unsupported interaction")
     data = payload.get("data") if isinstance(payload.get("data"), Mapping) else {}
     name = str(data.get("name") or "").lower()
+    if (
+        int(data.get("type") or 0) == COMMAND_TYPE_MESSAGE
+        or name == MESSAGE_COMMAND_NAME.lower()
+    ):
+        return _handle_message_command(
+            payload,
+            workspace=workspace,
+            env=env,
+            on_ask=on_ask,
+        )
+    if name in _OPERATOR_COMMANDS and not _slash_author_may_operate(
+        payload, name=name, workspace=workspace, env=env
+    ):
+        return _ephemeral(f"Denied: only paired operators can use /{name}.")
     if name == "connect":
         result = handle_connect_message("/connect", workspace=workspace, env=env)
         return _ephemeral(result.card or result.error or "connect")
@@ -442,6 +578,16 @@ def handle_interaction_payload(
             workspace=workspace,
             env=env,
         )
+    if name == "ask":
+        options = _option_map(data.get("options"))
+        return _handle_ask_slash(
+            payload,
+            prompt=str(options.get("prompt") or "").strip(),
+            realm=str(options.get("realm") or "").strip(),
+            workspace=workspace,
+            env=env,
+            on_ask=on_ask,
+        )
     if name == "job":
         options = _option_map(data.get("options"))
         return _handle_job_slash(
@@ -451,7 +597,108 @@ def handle_interaction_payload(
         )
     if name == "clear-needs":
         return _handle_clear_needs_slash(payload, workspace=workspace)
+    if name == "features":
+        options = _option_map(data.get("options"))
+        return _handle_features_slash(
+            payload,
+            feature=str(options.get("feature") or "").strip(),
+            state=str(options.get("state") or "").strip().lower(),
+            workspace=workspace,
+        )
     return _ephemeral("unknown command")
+
+
+def _handle_features_slash(
+    payload: Mapping[str, Any],
+    *,
+    feature: str,
+    state: str,
+    workspace: Path,
+) -> dict[str, Any]:
+    from agent_discord.host.features import (
+        feature_states,
+        format_feature_list,
+        set_feature,
+    )
+
+    channel_id = _channel_id(payload)
+    store = None
+    try:
+        store = _open_store(workspace)
+        if not feature:
+            return _ephemeral(
+                format_feature_list(feature_states(store, channel_id=channel_id))
+            )
+        if state not in {"on", "off"}:
+            return _ephemeral(f"Pick state on or off for {feature}.")
+        result = set_feature(store, feature, state == "on", channel_id=channel_id)
+        return _ephemeral(result.line)
+    except ValueError as exc:
+        return _ephemeral(f"features: {exc}")
+    except Exception as exc:  # noqa: BLE001 — ephemeral fail-closed
+        return _ephemeral(f"features failed: {exc}")
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
+
+
+def route_gateway_interaction(
+    payload: Mapping[str, Any],
+    *,
+    workspace: Path,
+    roots: Sequence[Path] = (),
+    interactions: str = "",
+    env: Optional[Mapping[str, str]] = None,
+    opener: Optional[Callable[..., Any]] = None,
+    runner: Optional[Callable[..., object]] = None,
+    browser_open: Optional[Callable[[str], object]] = None,
+    on_ask: Optional[Callable[[str, str, str], Optional[str]]] = None,
+) -> Optional[str]:
+    """Answer a slash / autocomplete interaction that arrived on the Gateway.
+
+    Returns ``None`` when the knob is not ``gateway`` or the payload is a
+    component / modal interaction — the caller then falls through to the HOST
+    panel's ``custom_id`` routing. Never raises: a failed callback POST is a
+    dropped reply, not a dead listen loop.
+    """
+
+    if not interactions_over_gateway(interactions, env=env):
+        return None
+    kind = int(payload.get("type") or 0)
+    if kind not in {
+        INTERACTION_APPLICATION_COMMAND,
+        INTERACTION_APPLICATION_COMMAND_AUTOCOMPLETE,
+    }:
+        return None
+    data = payload.get("data") if isinstance(payload.get("data"), Mapping) else {}
+    name = str(data.get("name") or "").lower()
+    reply = handle_interaction_payload(
+        payload,
+        workspace=workspace,
+        roots=list(roots),
+        env=env,
+        runner=runner,
+        browser_open=browser_open,
+        on_ask=on_ask,
+    )
+    interaction_id = str(payload.get("id") or "").strip()
+    interaction_token = str(payload.get("token") or "").strip()
+    if interaction_id and interaction_token:
+        from agent_discord.discord.rest import callback_interaction
+
+        try:
+            callback_interaction(
+                interaction_id=interaction_id,
+                interaction_token=interaction_token,
+                payload=reply,
+                opener=opener,
+            )
+        except Exception as exc:  # noqa: BLE001 — listen must keep running
+            print(f"slash callback failed: {exc}", flush=True)
+    return f"slash:{name}" if name else "slash"
 
 
 def register_opt_in_commands(
@@ -569,6 +816,60 @@ def _option_map(raw: Any) -> dict[str, str]:
     return out
 
 
+# Every slash command except read-only /status changes host state or shows
+# job content, so it needs an operator.
+_OPERATOR_COMMANDS = frozenset(
+    {
+        "connect",
+        "open",
+        "on",
+        "off",
+        "stop",
+        "bind",
+        "ask",
+        "job",
+        "clear-needs",
+        "features",
+    }
+)
+
+
+def _slash_author_may_operate(
+    payload: Mapping[str, Any],
+    *,
+    name: str,
+    workspace: Path,
+    env: Optional[Mapping[str, str]],
+) -> bool:
+    from agent_discord.orchestration.service import (
+        author_is_operator,
+        author_may_operate,
+        seed_owner_if_empty,
+    )
+
+    user_id = _author_id(payload)
+    role_ids = _role_ids(payload)
+    store = None
+    try:
+        store = _open_store(workspace)
+        if is_user_install_context(payload):
+            # Outside our server the soft first-armed-human seed does not
+            # apply: only a paired operator, even on an unpaired desk.
+            return author_is_operator(store, user_id, role_ids=role_ids)
+        if name == "on":
+            # Same first-armed-human seed as the panel On button.
+            seed_owner_if_empty(store, user_id or None, env=env)
+        return author_may_operate(store, user_id, name, role_ids=role_ids, env=env)
+    except Exception:
+        return False
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
+
+
 def _ephemeral(content: str) -> dict[str, Any]:
     return {
         "type": RESPONSE_CHANNEL_MESSAGE,
@@ -598,6 +899,41 @@ def _author_id(payload: Mapping[str, Any]) -> str:
     return ""
 
 
+def authorizing_owners(payload: Mapping[str, Any]) -> dict[str, str]:
+    """``authorizing_integration_owners`` keyed by integration type as a string."""
+
+    raw = payload.get("authorizing_integration_owners")
+    if not isinstance(raw, Mapping):
+        return {}
+    return {str(key): str(value) for key, value in raw.items()}
+
+
+def is_user_install_context(payload: Mapping[str, Any]) -> bool:
+    """True when the bot is not installed where this interaction came from.
+
+    A user-install command reaches guilds the bot was never added to and DMs
+    with third parties. Discord names the authorizing installs: key ``"0"`` is
+    the guild install, ``"1"`` the user install. No guild install means there
+    is no channel of ours to answer in — only the interaction webhook.
+    ``context`` 2 (PRIVATE_CHANNEL) is a group DM or someone else's DM, which
+    is never ours either.
+    """
+
+    owners = authorizing_owners(payload)
+    if owners and str(GUILD_INSTALL) not in owners:
+        return True
+    try:
+        return int(payload.get("context")) == INSTALL_CONTEXT_PRIVATE
+    except (TypeError, ValueError):
+        return False
+
+
+def _role_ids(payload: Mapping[str, Any]) -> list[str]:
+    member = payload.get("member")
+    roles = member.get("roles") if isinstance(member, Mapping) else None
+    return [str(r) for r in roles or () if str(r).strip()]
+
+
 def _open_store(workspace: Path):
     from agent_discord.persistence.sqlite import SQLiteStore
 
@@ -625,18 +961,13 @@ def _handle_power_slash(
     store = None
     try:
         store = _open_store(workspace)
-        if parsed.action == "on":
-            from agent_discord.orchestration.service import seed_owner_if_empty
+        from agent_discord.orchestration.service import set_host_armed
 
-            seed_owner_if_empty(store, _author_id(payload) or None)
-            writer = getattr(store, "set_host_control", None)
-            if callable(writer):
-                writer(channel_id, armed=True)
+        if parsed.action == "on":
+            set_host_armed(store, channel_id, True)
             return _ephemeral("On")
         if parsed.action == "off":
-            writer = getattr(store, "set_host_control", None)
-            if callable(writer):
-                writer(channel_id, armed=False)
+            set_host_armed(store, channel_id, False)
             label = "Stopped" if name == "stop" else "Off"
             return _ephemeral(label)
         # status — read-only; never mutates power
@@ -656,12 +987,11 @@ def _handle_power_slash(
 def _status_line(*, workspace: Path, store: object, armed: bool) -> str:
     power = "on" if armed else "off"
     try:
-        from agent_discord.host.dashboard import build_status_snapshot
-        from agent_discord.host.status_digest import format_status_digest
+        from agent_discord.host.status import build_status_snapshot, format_status_digest
 
         snap = build_status_snapshot(workspace=workspace)
         if isinstance(snap, Mapping):
-            # Prefer dashboard armed if present; else inject channel armed.
+            # Prefer the snapshot's armed if present; else inject channel armed.
             host = snap.get("host") if isinstance(snap.get("host"), Mapping) else {}
             if "armed" not in host:
                 host = dict(host)
@@ -760,6 +1090,236 @@ def _handle_bind_slash(
                 pass
 
 
+def _handle_ask_slash(
+    payload: Mapping[str, Any],
+    *,
+    prompt: str,
+    realm: str,
+    workspace: Path,
+    env: Optional[Mapping[str, str]] = None,
+    on_ask: Optional[Callable[[str, str, str], Optional[str]]] = None,
+) -> dict[str, Any]:
+    """Enqueue a cook the same way the HOST Ask modal does.
+
+    Dispatch rule, requester, and channel match the modal: starting a cook is
+    a dispatch, not a panel click, and the realm option only picks which bound
+    channel it lands in.
+    """
+
+    from agent_discord.host.realms import channel_for_realm
+    from agent_discord.host.repos import load_host_repos
+
+    text = (prompt or "").strip()
+    if not text:
+        return _ephemeral("ask needs a prompt")
+    channel_id = _channel_id(payload)
+    outside = is_user_install_context(payload)
+    user_id = _author_id(payload)
+    role_ids = _role_ids(payload)
+    link = ""
+    store = None
+    try:
+        store = _open_store(workspace)
+        if realm:
+            repos = list(load_host_repos(env=env) if env is not None else load_host_repos())
+            bound = channel_for_realm(store, realm, repos=repos)
+            if not bound:
+                return _ephemeral(f"No channel bound to {realm}. Use /bind first.")
+            channel_id = bound
+        elif outside:
+            channel_id = _home_channel(store)
+            if not channel_id:
+                return _ephemeral(
+                    "No bound channel to cook in. Run bind in the host channel first."
+                )
+        if not channel_id:
+            return _ephemeral("missing channel_id")
+        if outside:
+            link = _channel_link(store, channel_id)
+        if not _may_dispatch(
+            store, user_id=user_id, role_ids=role_ids, env=env, outside=outside
+        ):
+            return _ephemeral("Denied: only paired operators can start a cook.")
+    except Exception as exc:  # noqa: BLE001 — ephemeral fail-closed
+        return _ephemeral(f"ask failed: {exc}")
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
+
+    if not callable(on_ask):
+        return _ephemeral(
+            "ask needs the listen host queue — run discord-os listen with "
+            "AGENT_DISCORD_INTERACTIONS=gateway"
+        )
+    try:
+        code = on_ask(channel_id, text, user_id)
+    except Exception as exc:  # noqa: BLE001
+        return _ephemeral(f"ask failed: {exc}")
+    return _ephemeral(_ask_receipt(channel_id, code, link))
+
+
+def _handle_message_command(
+    payload: Mapping[str, Any],
+    *,
+    workspace: Path,
+    env: Optional[Mapping[str, str]] = None,
+    on_ask: Optional[Callable[[str, str, str], Optional[str]]] = None,
+) -> dict[str, Any]:
+    """'Send to Discord OS' — a picked message becomes an ask. Operator-only."""
+
+    data = payload.get("data") if isinstance(payload.get("data"), Mapping) else {}
+    target_id = str(data.get("target_id") or "").strip()
+    resolved = data.get("resolved") if isinstance(data.get("resolved"), Mapping) else {}
+    messages = (
+        resolved.get("messages") if isinstance(resolved.get("messages"), Mapping) else {}
+    )
+    message = messages.get(target_id) if target_id else None
+    if not isinstance(message, Mapping):
+        return _ephemeral("Could not read that message.")
+    text = _message_ask_text(message, payload)
+    if not text:
+        return _ephemeral("That message has no content or attachments.")
+
+    channel_id = _channel_id(payload)
+    outside = is_user_install_context(payload)
+    user_id = _author_id(payload)
+    role_ids = _role_ids(payload)
+    link = ""
+    store = None
+    try:
+        store = _open_store(workspace)
+        if outside:
+            channel_id = _home_channel(store)
+            if not channel_id:
+                return _ephemeral(
+                    "No bound channel to send to. Run bind in the host channel first."
+                )
+            link = _channel_link(store, channel_id)
+        if not _may_dispatch(
+            store, user_id=user_id, role_ids=role_ids, env=env, outside=outside
+        ):
+            return _ephemeral("Denied: only paired operators can send a message here.")
+    except Exception as exc:  # noqa: BLE001
+        return _ephemeral(f"send failed: {exc}")
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
+
+    if not channel_id:
+        return _ephemeral("missing channel_id")
+    if not callable(on_ask):
+        return _ephemeral(
+            "send needs the listen host queue — run discord-os listen with "
+            "AGENT_DISCORD_INTERACTIONS=gateway"
+        )
+    try:
+        code = on_ask(channel_id, text, user_id)
+    except Exception as exc:  # noqa: BLE001
+        return _ephemeral(f"send failed: {exc}")
+    return _ephemeral(_ask_receipt(channel_id, code, link))
+
+
+def _may_dispatch(
+    store: Any,
+    *,
+    user_id: str,
+    role_ids: Sequence[str],
+    env: Optional[Mapping[str, str]],
+    outside: bool,
+) -> bool:
+    """Dispatch rule for an ask. Fails closed outside our own server."""
+
+    from agent_discord.orchestration.service import author_is_operator, author_may_dispatch
+
+    if outside:
+        # User-install reaches outside the operator's server, so the soft
+        # first-armed-human seed is not enough — pair first.
+        return author_is_operator(store, user_id, role_ids=list(role_ids))
+    return author_may_dispatch(store, user_id, role_ids=list(role_ids), env=env)
+
+
+def _home_channel(store: Any) -> str:
+    from agent_discord.host.realms import home_channel
+
+    channel, _guild = home_channel(store)
+    return channel
+
+
+def _channel_link(store: Any, channel_id: str) -> str:
+    """Jump link for a bound channel, when the binding knows its guild."""
+
+    reader = getattr(store, "get_binding", None)
+    if not callable(reader):
+        return ""
+    try:
+        row = reader("default", channel_id) or {}
+    except Exception:
+        return ""
+    guild = str(row.get("guild_id") or "").strip()
+    if not guild or not channel_id:
+        return ""
+    return f"https://discord.com/channels/{guild}/{channel_id}"
+
+
+def _message_ask_text(
+    message: Mapping[str, Any],
+    payload: Mapping[str, Any],
+) -> str:
+    """Provenance line, the picked message's content, then its attachments."""
+
+    author = message.get("author") if isinstance(message.get("author"), Mapping) else {}
+    who = str(
+        author.get("global_name") or author.get("username") or author.get("id") or "unknown"
+    )
+    source_channel = str(message.get("channel_id") or _channel_id(payload) or "").strip()
+    where = f"<#{source_channel}>" if source_channel else "a channel"
+    lines = [f"from {who} in {where}"]
+    content = str(message.get("content") or "").strip()
+    if content:
+        lines.append("")
+        lines.append(content)
+    attachments = _attachment_lines(message.get("attachments"))
+    if attachments:
+        lines.append("")
+        lines.append("attachments:")
+        lines.extend(attachments)
+    if not content and not attachments:
+        return ""
+    return "\n".join(lines)
+
+
+def _attachment_lines(raw: Any) -> list[str]:
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        return []
+    out: list[str] = []
+    for item in raw:
+        if not isinstance(item, Mapping):
+            continue
+        name = str(item.get("filename") or item.get("name") or "").strip()
+        url = str(item.get("url") or item.get("proxy_url") or "").strip()
+        if not name and not url:
+            continue
+        out.append(f"- {name or 'attachment'}" + (f" {url}" if url else ""))
+    return out
+
+
+def _ask_receipt(channel_id: str, code: Optional[str] = None, link: str = "") -> str:
+    bits = ["On it."]
+    if code:
+        bits.append(str(code))
+    if link:
+        bits.append(link)
+    elif channel_id:
+        bits.append(f"<#{channel_id}>")
+    return " ".join(bits)
+
+
 def _handle_autocomplete(
     payload: Mapping[str, Any],
     *,
@@ -772,6 +1332,9 @@ def _handle_autocomplete(
     name = str(data.get("name") or "").lower()
     focused = _focused_option(data.get("options"))
     needle = str(focused.get("value") or "").strip().lower()
+    if name == "ask" and focused.get("name") == "realm":
+        choices = _bind_autocomplete_choices(needle, workspace=workspace, env=env)
+        return {"type": RESPONSE_AUTOCOMPLETE, "data": {"choices": choices}}
     if name == "bind" and focused.get("name") == "name":
         choices = _bind_autocomplete_choices(needle, workspace=workspace, env=env)
         return {"type": RESPONSE_AUTOCOMPLETE, "data": {"choices": choices}}

@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Optional, Sequence
@@ -21,6 +23,9 @@ HOST_PATH_PREFIXES = (
     str(Path.home() / ".local" / "bin"),
 )
 _STATE_DIR_NAMES = frozenset({".agent-discord", "fake_discord"})
+_GITHUB_REMOTE_RE = re.compile(
+    r"github\.com[:/]([^/\s]+)/([^/\s]+?)(?:\.git)?/?$", re.IGNORECASE
+)
 _FOLDER_ALIASES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("puppetmaster", ("puppetmaster", "puppet master")),
     ("dugout", ("dugout",)),
@@ -76,6 +81,54 @@ def load_host_repos(
             found[name] = HostRepo(name=name, path=path.resolve(), aliases=aliases)
             break
     return tuple(sorted(found.values(), key=lambda item: item.name))
+
+
+def host_github_slugs(
+    *,
+    env: Optional[Mapping[str, str]] = None,
+    projects_dir: Optional[Path] = None,
+) -> frozenset[str]:
+    """Lowercase owner/repo of every host checkout's GitHub remotes.
+
+    ``DISCORD_OS_GITHUB_REPOS`` (comma-separated owner/repo) adds more.
+    """
+
+    source = dict(os.environ if env is None else env)
+    slugs = {
+        item.strip().lower()
+        for item in str(source.get("DISCORD_OS_GITHUB_REPOS") or "").split(",")
+        if "/" in item
+    }
+    for repo in load_host_repos(env=source, projects_dir=projects_dir):
+        slugs.update(_github_remote_slugs(repo.path))
+    return frozenset(slugs)
+
+
+def github_slugs_for(path: Path | str) -> tuple[str, ...]:
+    """Lowercase owner/repo of one checkout's GitHub remotes."""
+
+    return tuple(sorted(_github_remote_slugs(Path(path).expanduser())))
+
+
+def _github_remote_slugs(path: Path) -> set[str]:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(path), "remote", "-v"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    slugs: set[str] = set()
+    for line in (proc.stdout or "").splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        match = _GITHUB_REMOTE_RE.search(parts[1])
+        if match:
+            slugs.add(f"{match.group(1)}/{match.group(2)}".lower())
+    return slugs
 
 
 def association_block(repo: Optional[HostRepo], *, github: str = "") -> str:
@@ -161,8 +214,8 @@ def host_reach_block(
         lines.append(f"- This run cwd: {work.resolve()}")
     else:
         lines.append(
-            "- This run cwd is the Discord OS runtime, not a product repo. "
-            "cd into a named checkout first when the ask names one."
+            "- This run cwd is an empty scratch directory, not a product repo. "
+            "Name a checkout in the ask to work in it."
         )
     lines.append("Do not treat .agent-discord as the subject repository.")
     return "\n".join(lines)

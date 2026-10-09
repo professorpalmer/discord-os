@@ -18,6 +18,7 @@ Do not crawl the tree first. Each `docs/<feature>/README.md` lists the modules t
 - `bind puppetmaster` / `discord-os add realm` pins a channel to a checkout. Naming a repo in the prompt still overrides.
 - Up to eight live jobs by default (`JobPool` / `DISCORD_OS_MAX_LIVE`). Analyze can overlap; implement/swarm serialize per realm. Real ceilings: OpenRouter RPM/TPM/spend + machine + Discord — not "two cooks".
 - Discord job threads are live sessions: live follow-ups steer; idle follow-ups cook again in-thread with lineage tip parent.
+- `discord-os add pm-inbox` is opt-in **observe**: Puppetmaster jobs started elsewhere on this Mac get one live card each. Those jobs never cook here. Approve / Reject / thread-reply steer go out through the PM CLI; 1.27.39 has no cancel verb, so there is no Cancel button.
 - Product compute is OpenRouter / puppetmaster agentic only (Cursor compute removed). Missing key fails closed (`discord-os connect`).
 - OpenRouter usage cost populates Halt spend receipts when present; omitted cost shows **unknown**, not `$0`.
 - Phone **Cancel** must kill the local/SSH cook or speak **Cancel unconfirmed** (no false Cancelled paint).
@@ -32,9 +33,10 @@ Do not crawl the tree first. Each `docs/<feature>/README.md` lists the modules t
 
 ```text
 discord-os setup --channel-id ID
-discord-os add realm|memory|repo|wiki|tool|github|list
+discord-os add realm|memory|repo|wiki|tool|github|pm-inbox|list
 discord-os map [QUERY]
 discord-os lineage [RUN_ID]
+discord-os db compact [--days N]
 discord-os check
 discord-os wiki query "…"
 ```

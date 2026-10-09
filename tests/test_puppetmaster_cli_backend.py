@@ -240,8 +240,11 @@ def test_provider_failure_spoken_adapter_lock_missing_cli_no_model():
     from agent_discord.puppetmaster.backend import provider_failure_spoken
 
     lock = provider_failure_spoken("platform lock: cursor-only host")
-    assert "OpenRouter" in lock
-    assert "connect" in lock.lower()
+    assert "platform lock" in lock.lower()
+    assert "agentic adapter disabled" in lock.lower()
+    # Audit 2026-10-02 F3: discord-os connect cannot re-enable an adapter.
+    assert "discord-os connect" not in lock.lower()
+    assert "puppetmaster platform enable agentic" in lock
     assert "locked to Cursor" not in lock
     assert "Unlock" not in lock
 
@@ -567,10 +570,6 @@ def test_cli_stream_yields_token_progress_from_popen(monkeypatch, tmp_path: Path
         fake_popen,
     )
     monkeypatch.setattr(
-        "agent_discord.puppetmaster.agentic.cli_supports_flag",
-        lambda *args, **kwargs: False,
-    )
-    monkeypatch.setattr(
         "agent_discord.puppetmaster.agentic.iter_cli_process_events",
         lambda proc, **kwargs: [
             DispatchEvent(
@@ -610,7 +609,9 @@ def test_cli_stream_yields_token_progress_from_popen(monkeypatch, tmp_path: Path
     assert "chain_of_thought" not in dumped
 
 
-def test_agentic_stream_passes_json_lines_and_parses_tokens(monkeypatch, tmp_path: Path):
+def test_agentic_stream_omits_json_lines_and_parses_tokens(monkeypatch, tmp_path: Path):
+    """Audit 2026-10-02 F5: no PM release has --json-lines; never probe for it."""
+
     captured: dict[str, Any] = {}
 
     def fake_popen(cmd, **kwargs):
@@ -627,12 +628,15 @@ def test_agentic_stream_passes_json_lines_and_parses_tokens(monkeypatch, tmp_pat
         fake_popen,
     )
     monkeypatch.setattr(
-        "agent_discord.puppetmaster.agentic.cli_supports_flag",
-        lambda *args, **kwargs: False,
-    )
-    monkeypatch.setattr(
         "agent_discord.puppetmaster.backend.subprocess.Popen",
         fake_popen,
+    )
+
+    def no_subprocess_run(cmd, **kwargs):
+        raise AssertionError(f"unexpected capability probe: {cmd}")
+
+    monkeypatch.setattr(
+        "agent_discord.puppetmaster.backend.subprocess.run", no_subprocess_run
     )
     backend = AgenticPuppetmasterBackend(
         cli="puppetmaster",

@@ -48,13 +48,13 @@ Use a supervisor OS when you want fleet orchestration as the core. Use Discord O
 ## Wave 4 (board + brain lakes — still no fleet)
 
 - **Board catch-up** — Catch-up + `digest:` / `board catch-up:` schedules surface ADR/PR lane conflicts.
-- **Brain lake** — `discord-os add brain --dri` (strategy docs + transcripts + journal) on one Mac SQLite.
+- **Brain lake** — `discord-os add brain` (strategy docs + transcripts + journal) on one Mac SQLite.
 - **Meat-proxy cut** — handoff/peer carries lake context; humans Pair/gate on ROE only.
 - Still **not** multi-host brain lakes / Durable Objects clones.
 
 ## Wave 2 shareability (still no fleet)
 
-- **Cross-host RO** — `discord-os host hosts` (+ dashboard/digest reach bits). Allowlist fail-closed; probes never cook; `kind=ssh` unreachable is spoken honestly (no silent local fallback).
+- **Cross-host RO** — `discord-os host hosts` (+ status digest reach bits). Allowlist fail-closed; probes never cook; `kind=ssh` unreachable is spoken honestly (no silent local fallback).
 - **Forum-tags lock** — tags-as-tickets only maps **existing** `available_tags`; `modify_channel` refuses creating guild tags. Soft-skip when status tags are missing.
 - **Mailbox** — external agent inbox stays **parked** (job threads + handoff only).
 
@@ -71,7 +71,7 @@ Use a supervisor OS when you want fleet orchestration as the core. Use Discord O
 |---|---|
 | **Goose recipes** | Discord OS ships markdown playbooks under `docs/recipes/` — not a Goose YAML runtime. |
 | **Cloud Agents (vendor VM)** | Cloud Agents run in a vendor VM; Discord OS cooks on **your Mac** JobPool + Discord HOST. |
-| **Spec Kit / Linear boards** | Catch-up + claim + lanes are Discord-native; Spec Kit lifecycle tags stay **manual** forum tags (never auto-create). |
+| **Spec Kit / Linear boards** | Catch-up + claim are Discord-native; the only forum tag map is JobPool status onto **existing** tags (never auto-create). |
 | **Ledger / SpendGuard** | HOST phone **spend meter** + Halt honesty — we meter, we don’t sell a firewall. Unknown ≠ $0. |
 
 **Shareability bar:** filmable HOST spend glance + Wave 6 board+brain phone demo (`docs/co-work/wave6-board-brain-demo.md`) — Discord-native only, no companion terminal/files strip.

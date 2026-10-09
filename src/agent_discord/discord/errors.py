@@ -21,7 +21,3 @@ class MessageDedupError(DiscordMCPError):
 
 class GatewayOwnershipError(DiscordMCPError):
     """Another owner already holds the Gateway for this bot token."""
-
-
-class ChunkingError(DiscordMCPError):
-    """Message content could not be chunked safely."""
