@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Cancel always wins over a bridged Allow
+- On an SSH bridge cook, the cancel check and the Allow writeback are now one locked step. Before, a Cancel that arrived during a writeback could let the Allow reach the remote worker after the Cancel.
+
 ## 0.6.0
 
 ### One switchboard for the opt-ins
