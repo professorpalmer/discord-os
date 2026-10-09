@@ -148,6 +148,12 @@ the host channel (or `DISCORD_OS_STATUS_THREAD_ID`) on **On**, `/status`, and
 listen on-change. Debounced. Never mutates power. See
 [status.md](status.md).
 
+## Worker sandbox
+
+On macOS each local worker runs under `sandbox-exec`: host secrets and the
+Discord OS workspace are hidden, and writes stay in the job's checkout, temp,
+and caches. `DISCORD_OS_SANDBOX=0` turns it off. See [sandbox.md](sandbox.md).
+
 ## Features (opt-ins)
 
 Every opt-in is off by default. Turn one on with `/features`, HOST
