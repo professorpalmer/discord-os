@@ -58,7 +58,7 @@ class CiFailure:
 def ci_watch_enabled(*, env: Optional[Mapping[str, str]] = None) -> bool:
     source = os.environ if env is None else env
     raw = str(source.get(CI_WATCH_ENV) or "").strip().lower()
-    return raw not in {"0", "off", "false", "no"}
+    return raw in {"1", "on", "true", "yes"}
 
 
 def fix_ci_prompt(failure: CiFailure) -> str:

@@ -44,7 +44,7 @@ returns `fix-ci-expired` and cooks nothing.
 
 | Knob | Default |
 |---|---|
-| `DISCORD_OS_CI_WATCH` | on; `0` / `off` / `false` / `no` disables |
+| `DISCORD_OS_CI_WATCH` | off; `1` / `on` / `true` / `yes` turns it on |
 | Where it runs | the listen tick, parent-channel pass only |
 | When it runs | armed channels with a bound realm and a gh-authed host |
 | When it posts | only with a failing head; silent otherwise |

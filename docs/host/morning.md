@@ -1,7 +1,7 @@
 # Morning summary
 
-One card on the HOST channel, once per local day, at a fixed time. Zero
-setup: nothing to schedule, no recipe to pick, no model run. The
+One card on the HOST channel, once per local day, at a fixed time. Off by
+default. When it is on, there is nothing to schedule, no recipe to pick, and no model run. The
 [overnight brief](../co-work/overnight-brief.md) is the opposite shape — a
 schedule you write that buys one cook. This is free and automatic.
 
@@ -53,7 +53,7 @@ and an expired token cooks nothing.
 
 | Knob | Default |
 |---|---|
-| `DISCORD_OS_MORNING` | on; `0` / `off` / `false` / `no` disables |
+| `DISCORD_OS_MORNING` | off; `1` / `on` / `true` / `yes` turns it on |
 | `DISCORD_OS_MORNING_AT` | `07:30` local; a malformed value falls back to it |
 | Where | the HOST channel only, from the listen tick |
 | When | first tick at or after the hour, on an armed host |

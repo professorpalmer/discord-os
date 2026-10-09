@@ -79,8 +79,12 @@ def _blob(discord: FakeDiscordMCPProvider) -> str:
     return "\n".join(parts)
 
 
-def test_env_switch_is_default_on():
-    assert ci_watch_enabled(env={})
+ON = {"DISCORD_OS_CI_WATCH": "1"}
+
+
+def test_env_switch_is_opt_in():
+    assert not ci_watch_enabled(env={})
+    assert ci_watch_enabled(env={"DISCORD_OS_CI_WATCH": "1"})
     assert not ci_watch_enabled(env={"DISCORD_OS_CI_WATCH": "0"})
     assert not ci_watch_enabled(env={"DISCORD_OS_CI_WATCH": "off"})
 
@@ -99,7 +103,7 @@ def test_wake_is_posted_once_per_head_sha(tmp_path: Path):
         channel_id=CHANNEL,
         workspace_id="ws",
         repos=(repo,),
-        env={},
+        env=ON,
         collector=collector,
         slug_reader=lambda path: (SLUG,),
     )
@@ -134,7 +138,7 @@ def test_watch_is_silent_without_a_bound_realm(tmp_path: Path):
         channel_id=CHANNEL,
         workspace_id="ws",
         repos=(_repo(tmp_path),),
-        env={},
+        env=ON,
         collector=lambda slug, *, path=None, env=None: (_failure(),),
         slug_reader=lambda path: (SLUG,),
     )
@@ -152,7 +156,7 @@ def test_watch_is_silent_without_a_github_remote(tmp_path: Path):
         channel_id=CHANNEL,
         workspace_id="ws",
         repos=(_repo(tmp_path),),
-        env={},
+        env=ON,
         collector=lambda slug, *, path=None, env=None: (_failure(),),
         slug_reader=lambda path: (),
     )
@@ -160,20 +164,22 @@ def test_watch_is_silent_without_a_github_remote(tmp_path: Path):
     store.close()
 
 
-def test_env_off_posts_nothing(tmp_path: Path):
+def test_env_off_or_unset_posts_nothing(tmp_path: Path):
     store = _store(tmp_path)
     discord = _discord(tmp_path)
-    posted = tick_ci_watch(
-        store,
-        discord,
-        channel_id=CHANNEL,
-        workspace_id="ws",
-        repos=(_repo(tmp_path),),
-        env={"DISCORD_OS_CI_WATCH": "0"},
-        collector=lambda slug, *, path=None, env=None: (_failure(),),
-        slug_reader=lambda path: (SLUG,),
-    )
-    assert posted == []
+    repo = _repo(tmp_path)
+    for env in ({"DISCORD_OS_CI_WATCH": "0"}, {}):
+        posted = tick_ci_watch(
+            store,
+            discord,
+            channel_id=CHANNEL,
+            workspace_id="ws",
+            repos=(repo,),
+            env=env,
+            collector=lambda slug, *, path=None, env=None: (_failure(),),
+            slug_reader=lambda path: (SLUG,),
+        )
+        assert posted == []
     store.close()
 
 
@@ -196,7 +202,7 @@ def test_fix_ci_button_is_operator_only_and_lands_in_jobpool(tmp_path: Path):
         channel_id=CHANNEL,
         workspace_id="ws",
         repos=(_repo(tmp_path),),
-        env={},
+        env=ON,
         collector=lambda slug, *, path=None, env=None: (_failure(),),
         slug_reader=lambda path: (SLUG,),
     )

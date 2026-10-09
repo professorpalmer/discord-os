@@ -1,6 +1,6 @@
 """One card on the HOST channel, once per local day, at a fixed time.
 
-Zero setup: no schedule to write, no recipe to pick. The lines are built
+Opt-in (``DISCORD_OS_MORNING=1``). No schedule to write, no recipe to pick. The lines are built
 deterministically from what the host already knows — overnight settles, open
 Needs, the overnight pack, and the bound realms' PR / CI state from
 ``host.repo_status``. No model runs to produce this card.
@@ -50,7 +50,7 @@ class MorningLine:
 def morning_enabled(*, env: Optional[Mapping[str, str]] = None) -> bool:
     source = os.environ if env is None else env
     raw = str(source.get(MORNING_ENV) or "").strip().lower()
-    return raw not in {"0", "off", "false", "no"}
+    return raw in {"1", "on", "true", "yes"}
 
 
 def morning_at(*, env: Optional[Mapping[str, str]] = None) -> tuple[int, int]:

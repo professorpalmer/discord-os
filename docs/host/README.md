@@ -160,7 +160,7 @@ capture. See [capture.md](capture.md).
 
 One HOST card per local day at 07:30 (`DISCORD_OS_MORNING_AT`), built from
 overnight settles, open Needs, and bound-repo PR/CI state. Silent when there
-is nothing to report. `DISCORD_OS_MORNING=0` disables. See
+is nothing to report. Off by default. `DISCORD_OS_MORNING=1` turns it on. See
 [morning.md](morning.md).
 
 

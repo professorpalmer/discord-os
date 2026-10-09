@@ -89,8 +89,12 @@ def _failed_job(store: SQLiteStore, task_id: str, status: TaskStatus) -> None:
     store.update_run(f"{task_id}-run", status=status, summary="done")
 
 
+ON = {"DISCORD_OS_MORNING": "1"}
+
+
 def test_env_knobs():
-    assert morning_enabled(env={})
+    assert not morning_enabled(env={})
+    assert morning_enabled(env={"DISCORD_OS_MORNING": "1"})
     assert not morning_enabled(env={"DISCORD_OS_MORNING": "0"})
     assert morning_at(env={}) == (7, 30)
     assert morning_at(env={"DISCORD_OS_MORNING_AT": "06:05"}) == (6, 5)
@@ -104,11 +108,11 @@ def test_not_due_before_the_hour(tmp_path: Path):
         store,
         channel_id=HOST,
         workspace_id="ws",
-        env={},
+        env=ON,
         now=datetime(2026, 10, 2, 6, 59),
     )
     assert morning_due(
-        store, channel_id=HOST, workspace_id="ws", env={}, now=MORNING
+        store, channel_id=HOST, workspace_id="ws", env=ON, now=MORNING
     )
     store.close()
 
@@ -121,7 +125,7 @@ def test_posts_once_per_local_day(tmp_path: Path):
         channel_id=HOST,
         workspace_id="ws",
         repos=(_repo(tmp_path),),
-        env={},
+        env=ON,
         repo_status=lambda path, name="": _red_status(),
     )
     first = tick_morning_summary(store, discord, now=MORNING, **kwargs)
@@ -147,7 +151,7 @@ def test_silent_when_there_is_nothing_to_report(tmp_path: Path):
         channel_id=HOST,
         workspace_id="ws",
         repos=(),
-        env={},
+        env=ON,
         now=MORNING,
         repo_status=None,
     )
@@ -155,7 +159,7 @@ def test_silent_when_there_is_nothing_to_report(tmp_path: Path):
     assert discord.sent == []
     # The quiet morning still burns the day's watermark.
     assert not morning_due(
-        store, channel_id=HOST, workspace_id="ws", env={}, now=LATER
+        store, channel_id=HOST, workspace_id="ws", env=ON, now=LATER
     )
     store.close()
 
@@ -212,7 +216,7 @@ def test_morning_cook_button_is_operator_only_and_lands_in_jobpool(tmp_path: Pat
         channel_id=HOST,
         workspace_id="ws",
         repos=(_repo(tmp_path),),
-        env={},
+        env=ON,
         now=MORNING,
         repo_status=lambda path, name="": _red_status(),
     )
@@ -296,7 +300,7 @@ def test_disarmed_host_posts_nothing(tmp_path: Path):
         discord,
         channel_id=HOST,
         workspace_id="ws",
-        env={},
+        env=ON,
         now=MORNING,
         repo_status=lambda path, name="": _red_status(),
     )
