@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### One switchboard for the opt-ins
+- `/features`, HOST **More > Features**, and `discord-os features [on|off] <name>` list and change every opt-in: CI watcher, morning summary, voice Done, capture first, and the Puppetmaster inbox. Operators only.
+- A change takes effect on the next listen tick, with no restart. Host toggles live in the store and win over `.env`.
+- The CI watcher and the morning summary are now off by default, like the other opt-ins.
+
 ### Operator checks on every state-changing Discord surface
 - Job-card buttons (Approve, Always, Deny, Cancel, Retry, Continue, Dismiss) and ask-gate options answer non-operators with an ephemeral Denied.
 - The HOST Ask modal follows the typed-ask rule and records the requester on the task.

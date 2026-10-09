@@ -1,5 +1,8 @@
 # Capture-first intake
 
+Turn it on or off with `/features`, HOST More > Features, or
+`discord-os features on capture`. See [features](features.md).
+
 A thought is not a job. Default intake treats every armed channel sentence as a
 task, which is right for a remote and wrong for a scratchpad: in one production
 window 10 of 43 jobs were dismissed, and much of what was dismissed read like

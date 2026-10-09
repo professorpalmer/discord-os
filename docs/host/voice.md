@@ -1,5 +1,8 @@
 # Voice join + TTS (beyond P2.13)
 
+Turn it on or off with `/features`, HOST More > Features, or
+`discord-os features on voice-done`. See [features](features.md).
+
 Thin surface. Local spoken Done on the listen Mac is opt-in. Discord
 **guild voice-channel join** was re-checked against the live bot API for the
 phone-remote model. Result: **fail closed** — no lasting join without DAVE.

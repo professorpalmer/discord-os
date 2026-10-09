@@ -145,6 +145,7 @@ def test_register_opt_in_commands_posts_connect_and_open():
         "off",
         "stop",
         "clear-needs",
+        "features",
         "Send to Discord OS",
     ]
     assert names == expected

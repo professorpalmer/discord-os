@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence
 from urllib.parse import urlparse
 
+from agent_discord.host.features import FEATURES
 from agent_discord.host.verbs import handle_open_message
 from agent_discord.keys.connect import handle_connect_message
 
@@ -198,6 +199,30 @@ CLEAR_NEEDS_COMMAND = {
     ],
 }
 
+FEATURES_COMMAND = {
+    "name": "features",
+    "description": "List opt-in features, or turn one on or off here",
+    "type": 1,
+    "options": [
+        {
+            "name": "feature",
+            "description": "Feature to change (omit to list them all)",
+            "type": 3,
+            "required": False,
+            "choices": [
+                {"name": feature.label, "value": feature.name} for feature in FEATURES
+            ],
+        },
+        {
+            "name": "state",
+            "description": "on or off",
+            "type": 3,
+            "required": False,
+            "choices": [{"name": "on", "value": "on"}, {"name": "off", "value": "off"}],
+        },
+    ],
+}
+
 OPT_IN_COMMANDS = (
     CONNECT_COMMAND,
     OPEN_COMMAND,
@@ -209,6 +234,7 @@ OPT_IN_COMMANDS = (
     OFF_COMMAND,
     STOP_COMMAND,
     CLEAR_NEEDS_COMMAND,
+    FEATURES_COMMAND,
     MESSAGE_ASK_COMMAND,
 )
 
@@ -571,7 +597,52 @@ def handle_interaction_payload(
         )
     if name == "clear-needs":
         return _handle_clear_needs_slash(payload, workspace=workspace)
+    if name == "features":
+        options = _option_map(data.get("options"))
+        return _handle_features_slash(
+            payload,
+            feature=str(options.get("feature") or "").strip(),
+            state=str(options.get("state") or "").strip().lower(),
+            workspace=workspace,
+        )
     return _ephemeral("unknown command")
+
+
+def _handle_features_slash(
+    payload: Mapping[str, Any],
+    *,
+    feature: str,
+    state: str,
+    workspace: Path,
+) -> dict[str, Any]:
+    from agent_discord.host.features import (
+        feature_states,
+        format_feature_list,
+        set_feature,
+    )
+
+    channel_id = _channel_id(payload)
+    store = None
+    try:
+        store = _open_store(workspace)
+        if not feature:
+            return _ephemeral(
+                format_feature_list(feature_states(store, channel_id=channel_id))
+            )
+        if state not in {"on", "off"}:
+            return _ephemeral(f"Pick state on or off for {feature}.")
+        result = set_feature(store, feature, state == "on", channel_id=channel_id)
+        return _ephemeral(result.line)
+    except ValueError as exc:
+        return _ephemeral(f"features: {exc}")
+    except Exception as exc:  # noqa: BLE001 — ephemeral fail-closed
+        return _ephemeral(f"features failed: {exc}")
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
 
 
 def route_gateway_interaction(
@@ -748,7 +819,18 @@ def _option_map(raw: Any) -> dict[str, str]:
 # Every slash command except read-only /status changes host state or shows
 # job content, so it needs an operator.
 _OPERATOR_COMMANDS = frozenset(
-    {"connect", "open", "on", "off", "stop", "bind", "ask", "job", "clear-needs"}
+    {
+        "connect",
+        "open",
+        "on",
+        "off",
+        "stop",
+        "bind",
+        "ask",
+        "job",
+        "clear-needs",
+        "features",
+    }
 )
 
 

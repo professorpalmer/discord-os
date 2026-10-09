@@ -1029,6 +1029,13 @@ def drain_inbound(
     _tick_gate_queue_best_effort(orchestrator, env)
     if thread_id is None:
         try:
+            from agent_discord.host.features import sync_feature_env
+
+            # /features toggles from Discord or the CLI land here, no restart.
+            sync_feature_env(store)
+        except Exception:
+            pass
+        try:
             from agent_discord.orchestration.github_rules import admit_github_rules
             from agent_discord.orchestration.github_wake import bot_allowlist, wake_github_jobs
 

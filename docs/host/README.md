@@ -148,6 +148,12 @@ the host channel (or `DISCORD_OS_STATUS_THREAD_ID`) on **On**, `/status`, and
 listen on-change. Debounced. Never mutates power. See
 [status.md](status.md).
 
+## Features (opt-ins)
+
+Every opt-in is off by default. Turn one on with `/features`, HOST
+**More > Features**, or `discord-os features on <name>`. See
+[features.md](features.md).
+
 ## Capture-first intake (opt-in)
 
 Short declarative messages become host memory instead of paid cooks. OFF by
@@ -160,7 +166,8 @@ capture. See [capture.md](capture.md).
 
 One HOST card per local day at 07:30 (`DISCORD_OS_MORNING_AT`), built from
 overnight settles, open Needs, and bound-repo PR/CI state. Silent when there
-is nothing to report. Off by default. `DISCORD_OS_MORNING=1` turns it on. See
+is nothing to report. Off by default. Turn it on with `/features` or
+`DISCORD_OS_MORNING=1`. See
 [morning.md](morning.md).
 
 

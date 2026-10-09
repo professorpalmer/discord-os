@@ -446,6 +446,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_compact.add_argument("--days", type=float, default=14.0, help="Keep this many days")
     p_compact.add_argument("--json", action="store_true")
 
+    p_features = sub.add_parser(
+        "features", help="List opt-in features, or turn one on or off"
+    )
+    p_features.add_argument("action", nargs="?", choices=("list", "on", "off"), default="list")
+    p_features.add_argument("name", nargs="?", default="", help="Feature name")
+    p_features.add_argument("--channel-id", default="", help="Channel for per-channel features")
+    p_features.add_argument("--workspace-id", default="default")
+    p_features.add_argument("--json", action="store_true")
+
     p_spend = sub.add_parser("spend", help="Show session spend, set a cap, or halt new jobs")
     p_spend.add_argument("--cap", type=float, default=None, help="USD halt threshold")
     p_spend.add_argument("--halt", action="store_true")
@@ -1373,6 +1382,61 @@ def cmd_db(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
             f"{before / 1e6:.1f} MB -> {after / 1e6:.1f} MB",
             file=out,
         )
+    return 0
+
+
+def cmd_features(args: argparse.Namespace, *, out: TextIO | None = None) -> int:
+    from agent_discord.host.features import (
+        FEATURE_NAMES,
+        feature_states,
+        format_feature_list,
+        set_feature,
+    )
+
+    out = out or sys.stdout
+    config = load_config()
+    store = SQLiteStore(config.database_path)
+    store.initialize()
+    try:
+        if args.action == "list":
+            states = feature_states(
+                store, channel_id=args.channel_id, workspace_id=args.workspace_id
+            )
+        else:
+            if not args.name:
+                print(f"features: name one of {', '.join(FEATURE_NAMES)}", file=sys.stderr)
+                return 2
+            try:
+                states = [
+                    set_feature(
+                        store,
+                        args.name,
+                        args.action == "on",
+                        channel_id=args.channel_id,
+                        workspace_id=args.workspace_id,
+                    )
+                ]
+            except ValueError as exc:
+                print(f"features: {exc}", file=sys.stderr)
+                return 2
+    finally:
+        store.close()
+    if args.json:
+        payload = [
+            {
+                "name": s.feature.name,
+                "scope": s.feature.scope,
+                "on": s.on,
+                "source": s.source,
+                "note": s.note,
+            }
+            for s in states
+        ]
+        print(json.dumps(payload, indent=2), file=out)
+    elif args.action == "list":
+        print(format_feature_list(states), file=out)
+    else:
+        print(states[0].line, file=out)
     return 0
 
 
@@ -3394,6 +3458,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return cmd_brain(args)
     if args.command == "schedule":
         return cmd_schedule(args)
+    if args.command == "features":
+        return cmd_features(args)
     if args.command == "db":
         return cmd_db(args)
     if args.command == "spend":

@@ -38,6 +38,7 @@ from agent_discord.host.panel import (
     ROLES_MODAL_ID,
     TERMINAL_ID,
     GITHUB_ID,
+    FEATURES_ID,
     ask_modal_payload,
     ask_text_from_interaction,
     handle_gateway_interaction,
@@ -96,7 +97,7 @@ def test_panel_buttons_and_interaction_parse():
     more = buttons[1]["components"][0]
     assert more["custom_id"] == MORE_ID
     more_values = [item["value"] for item in more["options"]]
-    assert more_values == [PAIR_ID, HALT_ID, CLEAR_NEEDS_ID, POLL_ID, GATE_ID, ROLES_ID, GITHUB_ID]
+    assert more_values == [PAIR_ID, HALT_ID, CLEAR_NEEDS_ID, POLL_ID, GATE_ID, ROLES_ID, GITHUB_ID, FEATURES_ID]
     assert more["options"][4]["label"] == "Gate writes"
     gated = host_panel_components(False, write_gate=True)
     assert gated[1]["components"][0]["options"][4]["label"] == "Auto writes"
@@ -111,6 +112,7 @@ def test_panel_buttons_and_interaction_parse():
         GATE_ID,
         ROLES_ID,
         GITHUB_ID,
+        FEATURES_ID,
         open_custom_id("files", DEST_REMOTE),
         open_custom_id("files", DEST_HOST),
         open_custom_id("terminal", DEST_HOST),

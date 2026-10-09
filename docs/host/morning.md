@@ -54,6 +54,7 @@ and an expired token cooks nothing.
 | Knob | Default |
 |---|---|
 | `DISCORD_OS_MORNING` | off; `1` / `on` / `true` / `yes` turns it on |
+| Toggle | `/features`, HOST More > Features, or `discord-os features on morning` ([features](features.md)) |
 | `DISCORD_OS_MORNING_AT` | `07:30` local; a malformed value falls back to it |
 | Where | the HOST channel only, from the listen tick |
 | When | first tick at or after the hour, on an armed host |

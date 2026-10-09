@@ -77,6 +77,7 @@ discord-os interactions --register
 | `/stop` | `/off` | Phone alias — same disarm |
 | `/open` | `/open` | Existing |
 | `/connect` | `/connect` | Existing; never accepts a secret option |
+| `/features` | HOST More > Features / `discord-os features` | Optional `feature` and `state` choices. No options lists the opt-ins. See [features.md](features.md) |
 
 **Not registered:** `/add`. Use `discord-os add …` or in-channel `bind`.
 

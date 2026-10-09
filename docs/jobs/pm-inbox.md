@@ -1,5 +1,8 @@
 # Puppetmaster job inbox
 
+Turn it on or off with `/features`, HOST More > Features, or
+`discord-os features on pm-inbox`. See [features](../host/features.md).
+
 Work the operator starts somewhere else on this Mac — Marionette, the Claude
 Code MCP server, a bare `puppetmaster` shell — gets one live Discord card so it
 finds the phone. See [jobs](README.md).

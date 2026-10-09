@@ -61,6 +61,8 @@ BROWSER_MODAL_ID = "discord-os:browser-modal"
 BROWSER_REMOTE_MODAL_ID = "discord-os:browser-modal:remote"
 BROWSER_TEXT_ID = "discord-os:browser-text"
 GITHUB_ID = "discord-os:github"
+FEATURES_ID = "discord-os:features"
+FEATURE_TOGGLE_PREFIX = "discord-os:feature:"
 CLEAR_NEEDS_ID = "discord-os:clear-needs"
 CLEAR_NEEDS_CONFIRM_ID = "discord-os:clear-needs-confirm"
 CLEAR_NEEDS_CANCEL_ID = "discord-os:clear-needs-cancel"
@@ -258,6 +260,13 @@ def _more_select_options(
             "label": "GitHub",
             "value": GITHUB_ID,
             "description": "Host gh sign-in",
+        }
+    )
+    options.append(
+        {
+            "label": "Features",
+            "value": FEATURES_ID,
+            "description": "Turn opt-in features on or off",
         }
     )
     if armed:
@@ -779,6 +788,8 @@ def panel_action_from_custom_id(custom_id: str) -> Optional[str]:
         return intent.surface
     if raw == GITHUB_ID:
         return "github"
+    if raw == FEATURES_ID:
+        return "features"
     return None
 
 
@@ -1044,9 +1055,19 @@ def handle_gateway_interaction(
             browser_open=browser_open,
         )
 
+    if custom_id.startswith(FEATURE_TOGGLE_PREFIX):
+        return _handle_feature_toggle(store, channel_id, payload, custom_id, opener=opener)
+
     action = panel_action_from_interaction(payload)
     if action is None:
         return None
+    if action == "features":
+        _ack_interaction(
+            payload,
+            {"type": CALLBACK_MESSAGE, "data": features_menu_data(store, channel_id)},
+            opener=opener,
+        )
+        return action
     if action == "ask":
         _ack_interaction(
             payload,
@@ -1470,6 +1491,60 @@ def _handle_cook_click(
         except Exception:
             pass
     return "cook"
+
+
+def features_menu_data(store: Any, channel_id: str) -> dict[str, Any]:
+    """Ephemeral list of opt-ins with one toggle button each."""
+
+    from agent_discord.discord.layout import STYLE_SECONDARY, STYLE_SUCCESS, button
+    from agent_discord.host.features import feature_states, format_feature_list
+
+    states = feature_states(store, channel_id=channel_id)
+    buttons = [
+        button(
+            f"{state.feature.label}: {'on' if state.on else 'off'}",
+            f"{FEATURE_TOGGLE_PREFIX}{state.feature.name}:{'off' if state.on else 'on'}",
+            style=STYLE_SUCCESS if state.on else STYLE_SECONDARY,
+        )
+        for state in states
+    ]
+    return {
+        "content": format_feature_list(states) + "\nTap a button to flip it.",
+        "flags": FLAG_EPHEMERAL,
+        "components": [action_row(buttons[i : i + 5]) for i in range(0, len(buttons), 5)],
+    }
+
+
+def _handle_feature_toggle(
+    store: Any,
+    channel_id: str,
+    payload: Mapping[str, Any],
+    custom_id: str,
+    *,
+    opener: Any,
+) -> str:
+    from agent_discord.host.features import set_feature
+
+    name, _, state = custom_id[len(FEATURE_TOGGLE_PREFIX) :].partition(":")
+    if state not in {"on", "off"}:
+        return "feature"
+    if not _operator_may_click(store, payload, "feature", opener=opener):
+        return "denied"
+    try:
+        set_feature(store, name, state == "on", channel_id=channel_id)
+    except ValueError as exc:
+        _ack_interaction(
+            payload,
+            {"type": CALLBACK_MESSAGE, "data": {"content": f"features: {exc}", "flags": FLAG_EPHEMERAL}},
+            opener=opener,
+        )
+        return "feature"
+    _ack_interaction(
+        payload,
+        {"type": CALLBACK_UPDATE_MESSAGE, "data": features_menu_data(store, channel_id)},
+        opener=opener,
+    )
+    return "feature"
 
 
 def _operator_may_click(
