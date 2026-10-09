@@ -15,6 +15,6 @@ Order inside the pack:
 2. **memory** — think-tank channel bind
 3. **wiki** / **github** (optional) — `.env` writes; **restart the host**
 
-Then dual ask/steer and gate park per [shared-desk-demo](shared-desk-demo.md).
+Then dual ask/steer and gate park per [shared-desk-demo](../recipes/shared-desk-demo.md).
 
 Not a second brain-lake. Not multi-host. CU/docker stay parked.

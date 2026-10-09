@@ -1,4 +1,4 @@
-# Wave 6 P1c — Overnight brief structured pack
+# Overnight brief structured pack
 
 Schedule prompts tagged `overnight brief:` (also `overnight brief`,
 `[overnight-brief]`) inject a structured pack before the **one** JobPool ask:

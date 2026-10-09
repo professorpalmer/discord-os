@@ -1,4 +1,4 @@
-# Wave 6 — board + brain lakes demo (<15 min, Discord-native phone)
+# Board + brain lakes demo (<15 min, Discord phone)
 
 Filmable loop on a shared desk. **Phone = Discord only** — no Tailscale / ttyd / filebrowser companion strip.
 
@@ -13,7 +13,7 @@ Filmable loop on a shared desk. **Phone = Discord only** — no Tailscale / ttyd
 
 ## Callouts
 
-- Brand: **board + brain lakes** (never Graham).
+- Brand: **board + brain lakes**.
 - Spend honesty: unknown ≠ $0; Halt visible in the same strip.
 - Single-host JobPool — not a vendor Cloud Agent VM fleet.
 

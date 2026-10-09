@@ -1,4 +1,4 @@
-# Wave 5 — plan gallery → brain journal
+# Plan gallery in the brain journal
 
 On plan **Allow**, Discord OS may store a `preferences` row with `kind=plan`
 (key `plan:<channel>:<hash>`). Later brain recall packs may inject a

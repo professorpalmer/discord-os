@@ -1,4 +1,4 @@
-# Board catch-up (Wave 4)
+# Board catch-up
 
 Cron / Catch-up honesty that **scans the message-board state** for ADR/PR
 coordination tax — not a second JobPool, not a Durable Objects board.
@@ -21,7 +21,6 @@ when two active jobs share an ADR/PR/checkout. Forum tags stay manual.
 
 - Heuristic text scan of intake/summary (+ task metadata).
 - Single-host SQLite. No multi-host brain-lake sync.
-
 
 ## Write-key / path conflicts (Wave 5 P1d)
 

@@ -64,7 +64,6 @@ Use a supervisor OS when you want fleet orchestration as the core. Use Discord O
 - Share strip names the product **board + brain lakes** (shared desk — not a fleet).
 - Still single-host SQLite; mailbox / CU / multi-host DO lakes parked.
 
-
 ## Wave 6 (spend meter + share strip)
 
 | Foil | Discord OS stance |
@@ -74,9 +73,7 @@ Use a supervisor OS when you want fleet orchestration as the core. Use Discord O
 | **Spec Kit / Linear boards** | Catch-up + claim are Discord-native; the only forum tag map is JobPool status onto **existing** tags (never auto-create). |
 | **Ledger / SpendGuard** | HOST phone **spend meter** + Halt honesty — we meter, we don’t sell a firewall. Unknown ≠ $0. |
 
-**Shareability bar:** filmable HOST spend glance + Wave 6 board+brain phone demo (`docs/co-work/wave6-board-brain-demo.md`) — Discord-native only, no companion terminal/files strip.
-
-
+**Shareability bar:** filmable HOST spend glance + Wave 6 board+brain phone demo (`docs/recipes/board-brain-demo.md`) — Discord-native only, no companion terminal/files strip.
 
 ## Wave 7 (TTFP + harness foils)
 
@@ -88,8 +85,7 @@ Use a supervisor OS when you want fleet orchestration as the core. Use Discord O
 | **Agent-Harness** | Local desk goldens + recipes — not a hosted eval platform. |
 | **Goose skills catalog** | Markdown recipes under `docs/recipes/` discoverable in Discord tip — not a Goose YAML runtime. |
 
-**Shareability bar:** cold-start **TTFP** film (`docs/co-work/wave7-ttfp-demo.md`) + board + brain lakes + Discord phone-native honesty (no companion strip).
-
+**Shareability bar:** cold-start **TTFP** film (`docs/recipes/ttfp-demo.md`) + board + brain lakes + Discord phone-native honesty (no companion strip).
 
 ## Shareability bar (Puppetmaster-tier)
 
@@ -102,4 +98,4 @@ Someone else can:
 5. Park gates instead of Always-allow footguns
 6. Optional: schedule an overnight brief with Catch-up honesty; handoff via JobPool-only peer
 
-See [co-work/shared-desk-demo](co-work/shared-desk-demo.md) for a &lt;15 minute filmable recipe (handoff + overnight brief). Playbooks index: [recipes](recipes/README.md).
+See [shared-desk-demo](recipes/shared-desk-demo.md) for a &lt;15 minute filmable recipe (handoff + overnight brief). Playbooks index: [recipes](recipes/README.md).

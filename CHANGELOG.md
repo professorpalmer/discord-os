@@ -5,6 +5,9 @@
 ### Workers can run jobs on Puppetmaster 1.22.19 and later
 - Puppetmaster refuses a pinned model that its registry does not list as enabled. The shared `~/.puppetmaster/models.json` usually does not list the Discord OS pin, so 0.6.0 workers failed before they started. Discord OS now writes its own one-entry registry for its pinned model into its Puppetmaster state folder and gives it to each worker. An operator `PUPPETMASTER_MODELS_PATH` still wins.
 
+### docs/co-work split
+- User docs from `docs/co-work` now live in `docs/recipes`, `docs/realms`, `docs/jobs`, `docs/host` and `docs/memory`, with plain titles. Internal planning notes (wave hauls and audits, spikes) moved to the maintainer's private notes.
+
 ### Workers run in an OS sandbox on macOS
 - Each local agentic worker starts under `sandbox-exec`. Host secrets and the Discord OS workspace are hidden, and writes stay in the job's checkout, temp, caches, its Puppetmaster state, and its gate folder. `.git/hooks` stays read-only.
 - On by default. `DISCORD_OS_SANDBOX=0` turns it off, and `DISCORD_OS_SANDBOX_DENY_READ` hides more paths. `host doctor` reports the state. See `docs/host/sandbox.md`.
@@ -437,7 +440,7 @@ multi-host brain lakes / Durable Objects clones; CU/docker/mailbox parked.
 - Worker prompt `[brain-lake]` inject; journal preference kind.
 - `handoff`/`peer` prepends lake context + ROE escalate hint (`meat_proxy_cut`).
 
-Docs: [board-catchup](docs/co-work/board-catchup.md), [brain-lake](docs/co-work/brain-lake.md).
+Docs: [board-catchup](docs/recipes/board-catchup.md), [brain-lake](docs/memory/brain-lake.md).
 Tests: `tests/test_wave4_board_brain.py`.
 
 ## 0.5.71

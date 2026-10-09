@@ -1,4 +1,4 @@
-# Wave 6 — OCL-shaped ROE escalate copy
+# Escalate line on Halt or Deny
 
 When **spend Halt** blocks intake or a **gate Denies** before env mutation,
 Discord OS speaks a Need-style **ROE escalate** line on the receipt.

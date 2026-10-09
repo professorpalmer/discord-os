@@ -8,9 +8,9 @@ Surface README is first run plus this map. Feature pages live in their own folde
 |---|---|
 | [setup](setup/README.md) | First run, `add`, why there is no wizard |
 | [COMPARISON](COMPARISON.md) | Vs Cowork / CLI bridges / supervisor OS |
-| [co-work/shared-desk-demo](co-work/shared-desk-demo.md) | Shared desk &lt;15min filmable recipe |
+| [shared-desk-demo](recipes/shared-desk-demo.md) | Shared desk &lt;15min filmable recipe |
 | [recipes](recipes/README.md) | Versioned playbooks / skills cadence |
-| [co-work/overnight-brief](co-work/overnight-brief.md) | Schedule + Catch-up overnight brief |
+| [overnight-brief](recipes/overnight-brief.md) | Schedule + Catch-up overnight brief |
 | [host](host/README.md) | On/Off/Ask, watchdogs, status digest, TTS, REQUIRE_OPERATORS, LaunchAgent |
 | [host/morning](host/morning.md) | One HOST card a day at 07:30, silent when empty |
 | [host/capture](host/capture.md) | Opt-in capture-first: a thought becomes memory, not a cook |
@@ -33,4 +33,4 @@ Surface README is first run plus this map. Feature pages live in their own folde
 | [aws](aws/README.md) | AWS names as Discord analogs |
 | [cli](cli/README.md) | Command map |
 
-History (not product surface): [NEXT_LEVEL_PLAN.md](NEXT_LEVEL_PLAN.md). Screenshots: [screenshots/](screenshots/).
+History (not product surface): [NEXT_LEVEL_PLAN.md](NEXT_LEVEL_PLAN.md). Screenshots: [screenshots/](screenshots).
