@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 
 ### One switchboard for the opt-ins
 - `/features`, HOST **More > Features**, and `discord-os features [on|off] <name>` list and change every opt-in: CI watcher, morning summary, voice Done, capture first, and the Puppetmaster inbox. Operators only.
