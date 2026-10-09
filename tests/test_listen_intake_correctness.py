@@ -404,7 +404,68 @@ def test_voice_transcription_does_not_block_the_drain(tmp_path: Path, monkeypatc
     assert [i.text for i in pool.submitted] == ["also do this"]
     release.set()
     listen_mod.join_voice_workers(timeout=10)
-    assert "run the tests" in [i.text for i in pool.submitted]
+    # The transcript is routed by the next drain, like typed text.
+    assert "run the tests" not in [i.text for i in pool.submitted]
+    drain_inbound(orch, facade, channel_id="ch", workspace_id="ws", since_ms=0, job_pool=pool)
+    assert [i.text for i in pool.submitted].count("run the tests") == 1
+    # Replayed once, never twice.
+    drain_inbound(orch, facade, channel_id="ch", workspace_id="ws", since_ms=0, job_pool=pool)
+    assert [i.text for i in pool.submitted].count("run the tests") == 1
+    store.close()
+
+
+def _voice_memo(now_ms: int):
+    from agent_discord.contracts import DiscordAttachment
+
+    return DiscordMessage(
+        channel_id="ch",
+        content="",
+        message_id=_snowflake_at(now_ms),
+        author_id="human-1",
+        attachments=(
+            DiscordAttachment(
+                attachment_id="att-1",
+                filename="voice-message.ogg",
+                size=10,
+                content_type="audio/ogg",
+            ),
+        ),
+    )
+
+
+def _drain_spoken(tmp_path: Path, monkeypatch, spoken: str, *, capture: bool = False):
+    from agent_discord.discord import voice as voice_mod
+    from agent_discord.orchestration import listen as listen_mod
+
+    monkeypatch.setattr(voice_mod, "materialize_voice_intake", lambda m, d=None: spoken)
+    provider = FakeDiscordMCPProvider()
+    provider.inbox.append(_voice_memo(1_750_000_000_000))
+    orch, store, facade, _backend = _orch(tmp_path, provider)
+    store.set_host_control("ch", armed=True)
+    if capture:
+        from agent_discord.host.features import set_feature
+
+        set_feature(store, "capture", True, channel_id="ch", workspace_id="ws")
+    pool = RecordingJobPool()
+    for _ in range(2):
+        drain_inbound(orch, facade, channel_id="ch", workspace_id="ws", since_ms=0, job_pool=pool)
+        listen_mod.join_voice_workers(timeout=10)
+    return store, pool
+
+
+def test_spoken_schedule_becomes_a_schedule_not_an_ask(tmp_path: Path, monkeypatch):
+    store, pool = _drain_spoken(tmp_path, monkeypatch, "schedule every 1h: run tests")
+    assert pool.submitted == []
+    schedules = store.list_schedules("ch")
+    assert [row["prompt"] for row in schedules] == ["run tests"]
+    store.close()
+
+
+def test_spoken_thought_in_a_capture_channel_is_captured(tmp_path: Path, monkeypatch):
+    store, pool = _drain_spoken(
+        tmp_path, monkeypatch, "PM routing should prefer the cheap lane", capture=True
+    )
+    assert pool.submitted == []
     store.close()
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import threading
 import time
@@ -234,6 +235,18 @@ def should_dispatch_inbound(message: DiscordMessage) -> bool:
 
 _VOICE_WORKERS: list[threading.Thread] = []
 _VOICE_WORKERS_LOCK = threading.Lock()
+# Transcribed memos wait here for the next drain of the same watermark key.
+# The drain routes them like typed text: schedule, claim, capture, ask.
+_VOICE_READY: list[tuple[str, DiscordMessage]] = []
+_VOICE_READY_LOCK = threading.Lock()
+_PRECLAIMED_KEY = "inbound_preclaimed"
+
+
+def _take_ready_voice(watermark_key: str) -> list[DiscordMessage]:
+    with _VOICE_READY_LOCK:
+        mine = [m for key, m in _VOICE_READY if key == watermark_key]
+        _VOICE_READY[:] = [(key, m) for key, m in _VOICE_READY if key != watermark_key]
+    return mine
 
 
 def join_voice_workers(timeout: float = 30.0) -> None:
@@ -254,23 +267,22 @@ def _spawn_voice_worker(work: Any) -> None:
 
 
 def _defer_voice_intake(
-    orchestrator: Any,
     discord: Any,
     store: Any,
-    job_pool: Any,
     *,
     message: DiscordMessage,
     channel_id: str,
     thread_id: Optional[str],
     workspace_id: str,
-    guild_id: Optional[str],
+    watermark_key: str,
 ) -> None:
-    """Transcribe a voice memo off the listen thread, then dispatch it.
+    """Transcribe a voice memo off the listen thread, then hand it back.
 
     Whisper is a subprocess with a 60s timeout, so running it inside the drain
     loop stalls every other channel. The gates that do not need the transcript
-    (armed, spend halt, operator) are checked here; the worker only transcribes
-    and submits.
+    (armed, spend halt, operator) are checked here. The worker only
+    transcribes. The next drain of ``watermark_key`` routes the transcript like
+    typed text, so a spoken schedule, claim, or capture is not cooked as an ask.
     """
 
     if not _channel_is_armed(store, channel_id) or is_spend_halted(store, workspace_id):
@@ -290,28 +302,13 @@ def _defer_voice_intake(
         if whisper_miss or not text:
             _post_voice_whisper_miss(discord, channel_id, thread_id)
             return
-        extra_meta = dict(meta)
-        extra_meta["inbound_claimed"] = True
-        extra_meta["voice_deferred"] = True
-        intake = TaskIntake(
-            text=text,
-            channel_id=channel_id,
-            workspace_id=workspace_id,
-            guild_id=guild_id,
-            thread_id=thread_id,
-            message_id=message.message_id or None,
-            requester_id=message.author_id,
-            metadata=extra_meta,
-        )
-        record_pending_intake(store, intake)
-        try:
-            job_pool.submit(
-                orchestrator.run_task,
-                intake,
-                write_key=resolved_write_key(intake, orchestrator),
-            )
-        except Exception:
-            pass
+        ready_meta = dict(meta)
+        ready_meta["voice_transcript"] = text
+        ready_meta["voice_deferred"] = True
+        ready_meta[_PRECLAIMED_KEY] = True
+        ready = dataclasses.replace(message, metadata=ready_meta)
+        with _VOICE_READY_LOCK:
+            _VOICE_READY.append((watermark_key, ready))
 
     _spawn_voice_worker(work)
 
@@ -527,6 +524,7 @@ def drain_inbound(
             continue
         pending.append(message)
     pending.sort(key=_inbound_sort_key)
+    pending = _take_ready_voice(watermark_key) + pending
     for message in pending:
         created_ms = snowflake_created_ms(message.message_id) if message.message_id else None
         if is_connect_command(message.content or ""):
@@ -632,15 +630,13 @@ def drain_inbound(
             # Whisper is a minute of subprocess. Never on the listen thread —
             # one memo would stall every channel's poll.
             _defer_voice_intake(
-                orchestrator,
                 discord,
                 store,
-                job_pool,
                 message=message,
                 channel_id=channel_id,
                 thread_id=message.thread_id or thread_id,
                 workspace_id=workspace_id,
-                guild_id=guild_id,
+                watermark_key=watermark_key,
             )
             watermark = _advance_listen_watermark(
                 store, watermark_key, created_ms, message.message_id, watermark
@@ -2102,6 +2098,10 @@ def _channel_is_armed(store: Any, channel_id: str) -> bool:
 
 
 def _claim_inbound(store: Any, discord: Any, message: DiscordMessage, channel_id: str) -> bool:
+    meta = message.metadata if isinstance(message.metadata, Mapping) else {}
+    if meta.get(_PRECLAIMED_KEY):
+        # A transcribed memo: claimed once before whisper ran.
+        return True
     claimed = True
     if store is not None and message.message_id:
         claim = getattr(store, "claim_inbound_message", None)
