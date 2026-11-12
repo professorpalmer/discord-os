@@ -2,7 +2,7 @@
 
 Goal: filmable dual-operator desk — Pair×2, desk-pack, dual ask/steer, **handoff**,
 **overnight brief schedule**, gate park — without CU/docker and without inventing
-screenshots. Real shots: [docs/screenshots](../screenshots/).
+screenshots. Real shots: [docs/screenshots](../screenshots).
 
 ## Preconditions
 
@@ -52,7 +52,7 @@ handoff <@PEER_USER_ID>: please finish the tests from this thread
 ```
 
 Both parties must be operators. Without JobPool → spoken Deny. Receipt shows
-operator/lane when known. See [handoff](handoff.md).
+operator/lane when known. See [handoff](../jobs/handoff.md).
 
 ## 6. Overnight brief schedule (2 min)
 
@@ -91,6 +91,6 @@ Full playbook: [overnight-brief](overnight-brief.md).
 
 ## See also
 
-- [recipes index](../recipes/README.md) — versioned playbooks
+- [recipes index](README.md) — versioned playbooks
 - [COMPARISON](../COMPARISON.md) — vs Cowork / bridges / supervisors
 - [host/policy](../host/policy.md) — HARD locks

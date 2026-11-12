@@ -31,7 +31,7 @@ Injected into the next worker as memories with `source=think-tank`.
 
 The same module formats the `[brain-lake]` recall pack injected into worker
 prompts and printed by `discord-os brain show`. See
-[co-work/brain-lake](../co-work/brain-lake.md).
+[brain-lake](brain-lake.md).
 
 ## Code
 

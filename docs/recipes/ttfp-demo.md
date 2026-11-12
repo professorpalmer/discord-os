@@ -1,4 +1,4 @@
-# Wave 7 — Cold-start TTFP demo (Discord phone only)
+# Cold-start time-to-first-Done demo (Discord phone only)
 
 Time-to-first-Done under a stopwatch. Brand: **board + brain lakes**. Phone = Discord — **no** Tailscale / ttyd / filebrowser companion strip.
 
@@ -26,6 +26,5 @@ Success metric: **first Done card**, not “bot is online.”
 
 - Single-host JobPool — not a vendor Cloud Agent VM.
 - Spend honesty: unknown ≠ $0.
-- HARD parks stay parked (CU/docker, companion terminal/files, mailbox, multi-host DO).
 
 Film under the stopwatch; cut when Done lands.

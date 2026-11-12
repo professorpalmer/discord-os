@@ -1,4 +1,4 @@
-# Wave 5 — blackboard `claim <job_code>`
+# Claim a job: `claim <job_code>`
 
 Volunteer take on an existing Need / live JobPool task:
 

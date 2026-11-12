@@ -111,6 +111,7 @@ def run_doctor(
     fails += _check_host_allowlist(lines)
     _warn_voice_join(lines)
     _report_voice_done(lines)
+    _report_worker_sandbox(lines)
     _check_slash_self_heal(cfg, ws, lines)
     _check_policy_locks_tip(lines)
     _check_forum_tags_honesty(cfg, ws, lines)
@@ -816,6 +817,26 @@ def _report_voice_done(lines: list[str]) -> None:
         f"WARN {ENV_VOICE_DONE}=1 but {missing} not on PATH — voice message "
         "fails soft; the Done card is unaffected"
     )
+
+
+def _report_worker_sandbox(lines: list[str]) -> None:
+    """Report whether local agentic workers run inside the OS sandbox."""
+
+    from agent_discord.puppetmaster.sandbox import (
+        SANDBOX_ENV,
+        sandbox_available,
+        sandbox_enabled,
+    )
+
+    if sandbox_enabled():
+        lines.append("OK worker sandbox on (sandbox-exec): secrets hidden, writes confined")
+    elif not sandbox_available():
+        lines.append(
+            "WARN worker sandbox unavailable on this OS — workers run as you; "
+            "the gate hook is the only limit"
+        )
+    else:
+        lines.append(f"WARN {SANDBOX_ENV}=0 — worker sandbox off; workers run as you")
 
 
 def filter_doctor_notify_lines(

@@ -737,17 +737,19 @@ def test_ssh_cancel_skips_allow_writeback_and_denies_pending(monkeypatch, tmp_pa
     while time.time() < deadline and "req-cancel" not in backend._bridge_pending:
         time.sleep(0.05)
     assert "req-cancel" in backend._bridge_pending
-    # Phone Allow would race Cancel — Cancel must Deny instead.
-    complete_request(
-        run_dir,
-        GateHoldResult(
-            request_id="req-cancel",
-            decision="allow",
-            reason="too late",
-            tool_class="write",
-        ),
-    )
-    assert backend.cancel("r-cancel-bridge") is True
+    # Phone Allow lands, then Cancel, before the stream flushes the Allow.
+    # Holding the bridge lock pins that order: the flush cannot run between.
+    with backend._bridge_lock:
+        complete_request(
+            run_dir,
+            GateHoldResult(
+                request_id="req-cancel",
+                decision="allow",
+                reason="too late",
+                tool_class="write",
+            ),
+        )
+        assert backend.cancel("r-cancel-bridge") is True
     assert done.wait(timeout=5)
     held = read_result(run_dir, "req-cancel")
     assert held is not None
@@ -757,3 +759,43 @@ def test_ssh_cancel_skips_allow_writeback_and_denies_pending(monkeypatch, tmp_pa
     assert any(
         e.kind == EventKind.CANCEL_REQUESTED for e in events
     ) or backend.status("r-cancel-bridge") == TaskStatus.CANCELLED
+
+
+def test_cancel_waits_for_an_allow_writeback_in_flight(monkeypatch, tmp_path):
+    """Cancel during a bridge flush: the Allow write never lands after Cancel."""
+
+    import threading
+    import time
+
+    from agent_discord.host.remote_cook import SshRemoteCookBackend
+    from agent_discord.host.runners import RemoteHost
+
+    monkeypatch.setenv("DISCORD_OS_SSH_GATES", "bridge")
+    host = RemoteHost(id="lab", kind="ssh", target="lab.example", label="lab")
+    backend = SshRemoteCookBackend(
+        host=host, probe_first=False, gate_root=tmp_path / "gates", timeout_seconds=5.0
+    )
+    backend._bridge_pending["req-1"] = "/tmp/discord-os-ssh-gate.Ab3dE9xQ"
+    entered = threading.Event()
+    cancelled_at_write: list[bool] = []
+
+    def slow_flush(*, run_id, pending_remote, **_kwargs):
+        entered.set()
+        time.sleep(0.3)
+        cancelled_at_write.append(run_id in backend._cancel_requested)
+        return set(pending_remote)
+
+    monkeypatch.setattr(
+        "agent_discord.orchestration.ssh_gate.flush_bridge_writebacks", slow_flush
+    )
+    flusher = threading.Thread(target=backend._flush_bridge_writebacks, args=("r-1",))
+    flusher.start()
+    assert entered.wait(timeout=5)
+    backend.cancel("r-1")  # no live child: only marks the run cancelled
+    flusher.join(timeout=5)
+    assert cancelled_at_write == [False]
+    assert "r-1" in backend._cancel_requested
+    # A later flush sees Cancel and writes nothing.
+    backend._bridge_pending["req-2"] = "/tmp/discord-os-ssh-gate.Ab3dE9xQ"
+    backend._flush_bridge_writebacks("r-1")
+    assert cancelled_at_write == [False]

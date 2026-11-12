@@ -1,8 +1,8 @@
-# Band D — jishaku (Cary tip debugging only)
+# jishaku (maintainer debugging only)
 
-**Ship:** Discord OS **0.5.85**. Not a product feature. Discord-native prioritized loop (Bands A–D) **closed**.
+**Ship:** Discord OS **0.5.85**. Not a product feature.
 
-Optional `jishaku` extra for Cary tip debugging on a private desk. Default **off**. Owner / allowlisted operator only. Shared `REQUIRE_OPERATORS` demos stay off unless both gates pass.
+Optional `jishaku` extra for maintainer debugging on a private desk. Default **off**. Owner / allowlisted operator only. Shared `REQUIRE_OPERATORS` demos stay off unless both gates pass.
 
 ## Install / enable
 
@@ -24,8 +24,3 @@ Host I/O is REST + a stdlib Gateway so On/Off buttons work. That is not `discord
 
 No gateway rewrite. Stay on the existing discord.py-era REST host. kagekit / presence / webhook left as-is.
 
-## Parks
-
-Board + brain lakes (never Graham). Wave 7 P1 not opened. HARD parks unchanged: CU/docker, mailbox, multi-host DO lakes, second JobPool, multi-gateway, auto forum tags, silent ssh cook, phone companion Tailscale/ttyd/filebrowser.
-
-Code: `src/agent_discord/host/jishaku.py`. Tests mock the load path — no live jishaku Discord session.

@@ -566,6 +566,9 @@ class SshRemoteCookBackend:
     _child_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _bridge_pending: dict[str, str] = field(default_factory=dict, repr=False)
     _bridge_written: set[str] = field(default_factory=set, repr=False)
+    # Orders a bridge writeback against Cancel: the cancel check and the SSH
+    # write are one step, so an Allow never reaches the remote after Cancel.
+    _bridge_lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
     def __post_init__(self) -> None:
         path = resolve_ssh_control_path(explicit=self.control_path)
@@ -835,7 +838,7 @@ class SshRemoteCookBackend:
         rid = (run_id or "").strip()
         if not rid:
             return False
-        with self._child_lock:
+        with self._bridge_lock, self._child_lock:
             self._cancel_requested.add(rid)
             proc = self._children.get(rid)
             remote_pid = int(self._remote_pids.get(rid) or 0)
@@ -860,7 +863,8 @@ class SshRemoteCookBackend:
         # Gate-bridge writeback race: never Allow after Cancel — Deny pending holds
         # so the remote worker unblocks fail-closed instead of hanging / double-write.
         try:
-            self._deny_pending_bridge_gates(rid)
+            with self._bridge_lock:
+                self._deny_pending_bridge_gates(rid)
         except Exception:
             pass
         if self.control_path:
@@ -987,6 +991,10 @@ class SshRemoteCookBackend:
         )
 
     def _flush_bridge_writebacks(self, run_id: str) -> None:
+        with self._bridge_lock:
+            self._flush_bridge_writebacks_locked(run_id)
+
+    def _flush_bridge_writebacks_locked(self, run_id: str) -> None:
         from agent_discord.orchestration.ssh_gate import flush_bridge_writebacks
 
         rid = (run_id or "").strip()

@@ -1,4 +1,4 @@
-# Wave 5 — typed handoff envelope
+# Typed handoff envelope
 
 Board + brain lakes handoff is a **schema on JobPool**, not free-text paste.
 

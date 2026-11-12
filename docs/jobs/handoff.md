@@ -15,4 +15,4 @@ handoff <@peer>: finish tests | constraints=no-push | expecting=ci-green | brain
 - Same `handoff_id` while live → `already_claimed` (no second cook)
 - Receipt cards show clipped envelope + operator/lane; preamble keeps `[meat-proxy-cut]` + brain block
 
-Wave 5 detail: [wave5-handoff-envelope](wave5-handoff-envelope.md).
+Wave 5 detail: [wave5-handoff-envelope](handoff-envelope.md).

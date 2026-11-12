@@ -25,7 +25,7 @@ for operators, **no YAML recipe runtime**.
 | `operators` | Pair×2 |
 | `realm` | `puppetmaster` |
 
-See [shared-desk-demo](../co-work/shared-desk-demo.md).
+See [shared-desk-demo](shared-desk-demo.md).
 
 ### Desk-pack
 
@@ -36,7 +36,7 @@ See [shared-desk-demo](../co-work/shared-desk-demo.md).
 | `wiki_url` / `wiki_token` | optional |
 | `github_token` | optional |
 
-See [desk-pack](../co-work/desk-pack.md).
+See [desk-pack](../realms/desk-pack.md).
 
 ### Overnight brief
 
@@ -46,7 +46,7 @@ See [desk-pack](../co-work/desk-pack.md).
 | `schedule_prompt` | `overnight brief: summarize Needs` |
 | `every_s` | e.g. `28800` |
 
-See [overnight-brief](../co-work/overnight-brief.md) + [wave6-overnight-pack](../co-work/wave6-overnight-pack.md).
+See [overnight-brief](overnight-brief.md) + [wave6-overnight-pack](overnight-pack.md).
 
 ### Forum lane
 
@@ -55,7 +55,7 @@ See [overnight-brief](../co-work/overnight-brief.md) + [wave6-overnight-pack](..
 | `forum_id` | guild forum channel |
 | tags | manual `queued/running/done/…` |
 
-See [forum-lane](../co-work/forum-lane.md).
+See [forum-lane](../realms/forum-lane.md).
 
 ### Wave 6 board + brain demo
 
@@ -65,7 +65,7 @@ See [forum-lane](../co-work/forum-lane.md).
 | `dri` | brain owner |
 | phone | Discord-native only — **no** Tailscale/ttyd/filebrowser |
 
-See [wave6-board-brain-demo](../co-work/wave6-board-brain-demo.md).
+See [wave6-board-brain-demo](board-brain-demo.md).
 
 ## What this is not
 

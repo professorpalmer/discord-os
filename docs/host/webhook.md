@@ -1,4 +1,4 @@
-# Band C — ops webhook side-channel (discord-webhook)
+# Ops webhook side-channel (discord-webhook)
 
 **Ship:** Discord OS **0.5.84**. HTTP-only alerts. Not JobPool / HOST cards.
 
@@ -30,18 +30,13 @@ Fail soft if the extra is missing, HTTP errors, or the URL is wrong. Never crash
 | `halt` | Halt turns on (HOST Halt or spend cap). Once until Resume |
 | `rate_limit` | Existing 429 retry signal. Debounced (one alert per ~60s burst) |
 
-Username on the webhook is **Discord OS**. Board + brain lakes — never Graham.
+Username on the webhook is **Discord OS**.
 
 ## Wire-in
 
 `host run` / `listen` fires `host_start` once after JobPool is built. Job fail and rate-limit hook from the orchestrator. Halt from `set_spend_halted`. Sync `DiscordWebhook.execute`; call sites are best-effort try/except.
 
 Code: `src/agent_discord/host/webhook.py`. Tests mock HTTP — no live Discord webhook.
-
-## Parks
-
-Board + brain lakes (never Graham). Band D jishaku shipped in 0.5.85 (loop closed). Presence left alone. HARD parks unchanged: CU/docker, mailbox, multi-host DO lakes, second JobPool, multi-gateway, auto forum tags, silent ssh cook, phone companion Tailscale/ttyd/filebrowser.
-
 
 ## Hotfix 0.5.86
 

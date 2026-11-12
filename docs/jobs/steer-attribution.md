@@ -1,4 +1,4 @@
-# Wave 6 P1a — Dual-operator steer attribution
+# Steer attribution on shared desks
 
 Live job cards show the last steer as a quiet footer bit:
 

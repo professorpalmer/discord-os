@@ -1,4 +1,4 @@
-# Wave 6 — HOST phone spend meter + Halt honesty
+# HOST spend meter and Halt
 
 Glanceable session spend on the Discord HOST panel and `/status` digest. **Honesty meter** — not a fleet hard-cap / SpendGuard product.
 

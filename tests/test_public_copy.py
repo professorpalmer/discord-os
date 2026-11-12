@@ -7,18 +7,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 WAVE5_SHARE = [
-    ROOT / "docs" / "co-work" / "wave5-board-brain-demo.md",
-    ROOT / "docs" / "co-work" / "wave5-handoff-envelope.md",
-    ROOT / "docs" / "co-work" / "handoff.md",
+    ROOT / "docs" / "recipes" / "board-brain-demo.md",
+    ROOT / "docs" / "jobs" / "handoff-envelope.md",
+    ROOT / "docs" / "jobs" / "handoff.md",
 ]
 
 WAVE6_SHARE = [
-    ROOT / "docs" / "co-work" / "wave6-board-brain-demo.md",
-    ROOT / "docs" / "co-work" / "wave6-spend-meter.md",
+    ROOT / "docs" / "recipes" / "board-brain-demo.md",
+    ROOT / "docs" / "host" / "spend-meter.md",
 ]
 
 WAVE7_SHARE = [
-    ROOT / "docs" / "co-work" / "wave7-ttfp-demo.md",
+    ROOT / "docs" / "recipes" / "ttfp-demo.md",
 ]
 
 FORBIDDEN_OVERCLAIM = (
@@ -35,7 +35,7 @@ def test_wave5_share_brand():
         assert path.is_file(), path
         text = path.read_text().lower()
         assert "graham" not in text
-    demo = (ROOT / "docs" / "co-work" / "wave5-board-brain-demo.md").read_text().lower()
+    demo = (ROOT / "docs" / "recipes" / "board-brain-demo.md").read_text().lower()
     assert "board + brain lakes" in demo
     assert "handoff" in demo
     readme = (ROOT / "README.md").read_text().lower()
@@ -55,7 +55,7 @@ def test_wave6_share_brand_and_no_overclaim():
         assert "companion-strip" not in text.replace(" ", "")
         if "tailscale" in text or "ttyd" in text or "filebrowser" in text:
             assert "no " in text or "park" in text or "not " in text
-    demo = (ROOT / "docs" / "co-work" / "wave6-board-brain-demo.md").read_text().lower()
+    demo = (ROOT / "docs" / "recipes" / "board-brain-demo.md").read_text().lower()
     assert "board + brain lakes" in demo or "board + brain" in demo
     assert "spend meter" in demo
     comparison = (ROOT / "docs" / "COMPARISON.md").read_text().lower()
@@ -73,7 +73,7 @@ def test_wave7_ttfp_brand_and_parks():
             assert "never graham" in text or "not graham" in text
         if "tailscale" in text or "ttyd" in text or "filebrowser" in text:
             assert "no " in text or "park" in text or "not " in text
-    demo = (ROOT / "docs" / "co-work" / "wave7-ttfp-demo.md").read_text().lower()
+    demo = (ROOT / "docs" / "recipes" / "ttfp-demo.md").read_text().lower()
     assert "pair" in demo and "ask" in demo and "done" in demo
     assert "board + brain lakes" in demo
     comparison = (ROOT / "docs" / "COMPARISON.md").read_text().lower()

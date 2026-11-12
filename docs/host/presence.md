@@ -1,4 +1,4 @@
-# Band B — Mac Discord Rich Presence (pypresence)
+# Mac Discord Rich Presence (pypresence)
 
 **Ship:** Discord OS **0.5.82**. Independent of the bot gateway presence payloads.
 
@@ -32,11 +32,6 @@ Gateway `presence_status` / `presence_name` on the bot stay as they are.
 `host run` / `listen` ticks presence on the same poll as liveness / status digest. HOST panel On / Off / Halt also ticks immediately. Session closes when listen exits.
 
 Code: `src/agent_discord/host/presence.py`. Tests mock IPC — no Discord desktop.
-
-## Parks
-
-Board + brain lakes (never Graham). Band C webhook shipped in 0.5.84. Band D jishaku shipped in 0.5.85 (loop closed). HARD parks unchanged: CU/docker, mailbox, multi-host DO lakes, second JobPool, multi-gateway, auto forum tags, silent ssh cook, phone companion Tailscale/ttyd/filebrowser.
-
 
 ## Hotfix 0.5.83
 
